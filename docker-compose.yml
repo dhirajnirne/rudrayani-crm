@@ -1,0 +1,27 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: rudrayani_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: rudrayani
+      POSTGRES_PASSWORD: rudrayani_dev_pass
+      POSTGRES_DB: rudrayani_crm
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  adminer:
+    image: adminer
+    container_name: rudrayani_adminer
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+
+volumes:
+  pgdata:

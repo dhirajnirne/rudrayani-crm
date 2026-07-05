@@ -1,0 +1,31 @@
+# Node
+node_modules/
+dist/
+*.log
+npm-debug.log*
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Uploads (payment proofs, signatures — local dev storage)
+backend/uploads/
+
+# Frontend build
+frontend/dist/
+
+# Flutter / mobile
+mobile/build/
+mobile/.dart_tool/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/ios/Pods/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

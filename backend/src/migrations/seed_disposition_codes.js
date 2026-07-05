@@ -1,0 +1,83 @@
+/**
+ * Seeds the disposition_codes table directly from Trail_Codes.xlsx
+ * so you never have to hand-retype your 69-row master list.
+ *
+ * Usage:
+ *   1. npm install xlsx   (in backend/)
+ *   2. Place Trail_Codes.xlsx in backend/src/migrations/
+ *   3. node src/migrations/seed_disposition_codes.js <agency_id>
+ */
+require("dotenv").config();
+const path = require("path");
+const XLSX = require("xlsx");
+const { pool } = require("../config/db");
+
+const FILE_PATH = path.join(__dirname, "Trail_Codes.xlsx");
+
+// Best-effort keyword tagging of which structured fields a template needs.
+// Review/adjust this mapping after the first run -- it's a starting point,
+// not a substitute for an admin UI to edit these later (see build brief Section 7).
+function detectNeeds(template = "") {
+  const t = template.toLowerCase();
+  return {
+    needs_amount: t.includes("<amount>") || t.includes("<mention amount>"),
+    needs_date: t.includes("<date>"),
+    needs_time: t.includes("<time>"),
+    needs_mode: t.includes("mode>"),
+    needs_reason: t.includes("<reason>") || t.includes("mention reason"),
+    needs_name_relation: t.includes("name & relation") || t.includes("name &amp; relation"),
+  };
+}
+
+async function run() {
+  const agencyId = process.argv[2];
+  if (!agencyId) {
+    console.error("Usage: node seed_disposition_codes.js <agency_id>");
+    process.exit(1);
+  }
+
+  const workbook = XLSX.readFile(FILE_PATH);
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+  // Row 0 is the header: Sr, Action Code, Majorly used result code, Result code, Description, Remarks
+  const dataRows = rows.slice(1).filter((r) => r.some((cell) => cell !== undefined && cell !== null));
+
+  let inserted = 0;
+  for (const row of dataRows) {
+    const [, actionCode, category, resultCode, description, remarkTemplate] = row;
+    if (!actionCode && !description) continue; // skip fully blank rows
+
+    const needs = detectNeeds(remarkTemplate || "");
+
+    await pool.query(
+      `INSERT INTO disposition_codes
+        (agency_id, action_code, category, result_code, description, remark_template,
+         needs_amount, needs_date, needs_time, needs_mode, needs_reason, needs_name_relation)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [
+        agencyId,
+        actionCode || null,
+        category || null,
+        resultCode ? String(resultCode) : null,
+        description || null,
+        remarkTemplate || null,
+        needs.needs_amount,
+        needs.needs_date,
+        needs.needs_time,
+        needs.needs_mode,
+        needs.needs_reason,
+        needs.needs_name_relation,
+      ]
+    );
+    inserted += 1;
+  }
+
+  console.log(`Seeded ${inserted} disposition codes for agency ${agencyId}`);
+  await pool.end();
+}
+
+run().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
