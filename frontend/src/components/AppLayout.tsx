@@ -4,6 +4,7 @@ import {
   AuditOutlined,
   BankOutlined,
   DashboardOutlined,
+  FileSearchOutlined,
   LogoutOutlined,
   ShopOutlined,
   TeamOutlined,
@@ -54,6 +55,11 @@ export default function AppLayout() {
       key: "/customers",
       icon: <UnorderedListOutlined />,
       label: <Link to="/customers">Customers</Link>,
+    },
+    hasPermission("customers.allocate") && {
+      key: "/allocation",
+      icon: <FileSearchOutlined />,
+      label: <Link to="/allocation">Allocation</Link>,
     },
     hasPermission("dispositions.manage") && {
       key: "/dispositions",

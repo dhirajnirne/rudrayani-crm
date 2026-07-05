@@ -88,10 +88,22 @@ export interface Customer {
   bucket: string | null;
   due_amount: string | null;
   emi: string | null;
+  status: "active" | "closed";
+  assigned_agent_id: string | null;
+  assigned_agent_name: string | null;
   custom_fields: Record<string, unknown>;
   created_at: string;
   company_name: string;
   company_id: string;
+}
+
+export interface AllocationLog {
+  id: string;
+  reason: string | null;
+  created_at: string;
+  from_agent_name: string | null;
+  to_agent_name: string;
+  allocated_by_name: string;
 }
 
 export const CAPABILITY_LABELS: Record<Capability, string> = {

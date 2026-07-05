@@ -1,0 +1,136 @@
+import { Router } from "express";
+import { z } from "zod";
+import { pool } from "../config/db";
+import { asyncHandler } from "../middleware/async-handler";
+import { authenticate, requirePermission } from "../middleware/authenticate";
+import { HttpError } from "../middleware/error-handler";
+import {
+  composeRemark,
+  createsPtp,
+  missingRequiredFields,
+  type DispositionCodeRow,
+} from "../services/disposition-service";
+
+const router = Router();
+router.use(authenticate, requirePermission("calls.log"));
+
+const fieldsSchema = z.object({
+  amount: z.coerce.number().positive().optional(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD").optional(),
+  time: z.string().trim().min(1).max(20).optional(),
+  mode: z.string().trim().min(1).max(60).optional(),
+  reason: z.string().trim().min(1).max(300).optional(),
+  name_relation: z.string().trim().min(1).max(120).optional(),
+});
+
+const logBody = z.object({
+  customer_id: z.string().uuid(),
+  disposition_code_id: z.string().uuid(),
+  fields: fieldsSchema.default({}),
+  call_duration_seconds: z.coerce.number().int().min(0).max(24 * 3600).optional(),
+  extra_remark: z.string().trim().max(500).optional(), // free text appended after the composed remark
+});
+
+/**
+ * Log a call/visit disposition (build brief Sections 7-8): server validates the
+ * structured fields demanded by the code's needs_* flags, composes the final
+ * remark from the template, and opens a PTP record for promise-type codes.
+ */
+router.post(
+  "/",
+  asyncHandler(async (req, res) => {
+    const body = logBody.parse(req.body);
+    const agencyId = req.user!.agency_id;
+
+    const custRes = await pool.query(
+      `SELECT c.id, c.assigned_agent_id FROM customers c
+         JOIN companies co ON co.id = c.company_id
+        WHERE c.id = $1 AND co.agency_id = $2 AND c.status = 'active'`,
+      [body.customer_id, agencyId],
+    );
+    if (!custRes.rows[0]) throw new HttpError(404, "Customer not found or already closed");
+
+    const codeRes = await pool.query<DispositionCodeRow>(
+      `SELECT * FROM disposition_codes
+        WHERE id = $1 AND agency_id = $2 AND is_active = true`,
+      [body.disposition_code_id, agencyId],
+    );
+    const code = codeRes.rows[0];
+    if (!code) throw new HttpError(404, "Disposition code not found or retired");
+
+    const missing = missingRequiredFields(code, body.fields);
+    if (missing.length > 0) {
+      throw new HttpError(400, `This disposition requires: ${missing.join(", ")}`);
+    }
+
+    const composed = composeRemark(code, body.fields);
+    const remark = body.extra_remark ? `${composed} — ${body.extra_remark}` : composed;
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const callLog = await client.query(
+        `INSERT INTO call_logs (customer_id, agent_id, disposition_code_id, remark, call_duration_seconds, details)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        [
+          body.customer_id,
+          req.user!.id,
+          code.id,
+          remark,
+          body.call_duration_seconds ?? null,
+          JSON.stringify(body.fields),
+        ],
+      );
+
+      let ptp = null;
+      if (createsPtp(code)) {
+        const ptpRes = await client.query(
+          `INSERT INTO ptps (customer_id, call_log_id, agent_id, amount, promised_date, mode)
+           VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+          [
+            body.customer_id,
+            callLog.rows[0].id,
+            req.user!.id,
+            body.fields.amount,
+            body.fields.date,
+            body.fields.mode ?? null,
+          ],
+        );
+        ptp = ptpRes.rows[0];
+      }
+
+      await client.query("COMMIT");
+      res.status(201).json({ call_log: callLog.rows[0], ptp });
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  }),
+);
+
+/** Call history for a customer (newest first). */
+router.get(
+  "/",
+  asyncHandler(async (req, res) => {
+    const customerId = z.string().uuid().parse(req.query.customer_id);
+    const { rows } = await pool.query(
+      `SELECT cl.id, cl.remark, cl.call_duration_seconds, cl.details, cl.created_at,
+              u.full_name AS agent_name,
+              d.action_code, d.result_code, d.description AS disposition_description
+         FROM call_logs cl
+         JOIN customers c ON c.id = cl.customer_id
+         JOIN companies co ON co.id = c.company_id
+         JOIN users u ON u.id = cl.agent_id
+         LEFT JOIN disposition_codes d ON d.id = cl.disposition_code_id
+        WHERE cl.customer_id = $1 AND co.agency_id = $2
+        ORDER BY cl.created_at DESC
+        LIMIT 200`,
+      [customerId, req.user!.agency_id],
+    );
+    res.json({ call_logs: rows });
+  }),
+);
+
+export default router;

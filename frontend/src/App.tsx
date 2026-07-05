@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { Spin } from "antd";
 import { useAuth } from "./auth/AuthContext";
+import AllocationPage from "./pages/AllocationPage";
 import AppLayout from "./components/AppLayout";
 import BranchesPage from "./pages/BranchesPage";
 import CompaniesPage from "./pages/CompaniesPage";
@@ -46,6 +47,7 @@ export default function App() {
         <Route path="companies" element={<CompaniesPage />} />
         <Route path="import" element={<ImportPage />} />
         <Route path="customers" element={<CustomersPage />} />
+        <Route path="allocation" element={<AllocationPage />} />
         <Route path="dispositions" element={<DispositionsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
