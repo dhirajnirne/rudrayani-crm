@@ -4,9 +4,12 @@ import { useAuth } from "./auth/AuthContext";
 import AppLayout from "./components/AppLayout";
 import BranchesPage from "./pages/BranchesPage";
 import CompaniesPage from "./pages/CompaniesPage";
+import CustomersPage from "./pages/CustomersPage";
 import DashboardPage from "./pages/DashboardPage";
+import DispositionsPage from "./pages/DispositionsPage";
 import EmployeesPage from "./pages/EmployeesPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
+import ImportPage from "./pages/ImportPage";
 import LoginPage from "./pages/LoginPage";
 import TeamsPage from "./pages/TeamsPage";
 
@@ -41,6 +44,9 @@ export default function App() {
         <Route path="branches" element={<BranchesPage />} />
         <Route path="teams" element={<TeamsPage />} />
         <Route path="companies" element={<CompaniesPage />} />
+        <Route path="import" element={<ImportPage />} />
+        <Route path="customers" element={<CustomersPage />} />
+        <Route path="dispositions" element={<DispositionsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

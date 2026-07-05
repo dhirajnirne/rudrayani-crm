@@ -8,6 +8,8 @@ import authRoutes from "./routes/auth";
 import branchRoutes from "./routes/branches";
 import catalogRoutes from "./routes/catalog";
 import companyRoutes from "./routes/companies";
+import customerRoutes from "./routes/customers";
+import dispositionRoutes from "./routes/dispositions";
 import employeeRoutes from "./routes/employees";
 import healthRoutes from "./routes/health";
 import importTemplateRoutes from "./routes/import-templates";
@@ -35,9 +37,10 @@ export function createApp() {
   app.use("/api/employees", employeeRoutes);
   app.use("/api/imports", importRoutes);
   app.use("/api/import-templates", importTemplateRoutes);
+  app.use("/api/dispositions", dispositionRoutes);
+  app.use("/api/customers", customerRoutes);
   app.use("/api", catalogRoutes);
-  // TODO (Phase 2): import-template + excel-import routes
-  // TODO (Phase 3): allocation, calling, disposition, payment routes
+  // TODO (Phase 3): allocation, calling, payment routes
   // TODO (Phase 4): location-ping ingestion route (Section 9 of the build brief)
 
   app.use(notFoundHandler);

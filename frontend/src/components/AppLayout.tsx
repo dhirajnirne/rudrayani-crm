@@ -1,11 +1,14 @@
 import { Layout, Menu, Typography, Space, Tag, Button } from "antd";
 import {
   ApartmentOutlined,
+  AuditOutlined,
   BankOutlined,
   DashboardOutlined,
   LogoutOutlined,
   ShopOutlined,
   TeamOutlined,
+  UnorderedListOutlined,
+  UploadOutlined,
   UserOutlined,
 } from "@ant-design/icons";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
@@ -41,6 +44,21 @@ export default function AppLayout() {
       key: "/companies",
       icon: <ShopOutlined />,
       label: <Link to="/companies">Companies</Link>,
+    },
+    hasPermission("imports.manage") && {
+      key: "/import",
+      icon: <UploadOutlined />,
+      label: <Link to="/import">Import</Link>,
+    },
+    hasPermission("customers.view") && {
+      key: "/customers",
+      icon: <UnorderedListOutlined />,
+      label: <Link to="/customers">Customers</Link>,
+    },
+    hasPermission("dispositions.manage") && {
+      key: "/dispositions",
+      icon: <AuditOutlined />,
+      label: <Link to="/dispositions">Dispositions</Link>,
     },
   ].filter(Boolean) as { key: string }[];
 
