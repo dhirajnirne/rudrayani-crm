@@ -144,3 +144,45 @@ the capability rules enforced.
 - With an admin token: `POST /api/branches {"name":"Sangli"}`,
   `POST /api/employees {...capabilities:{is_operations_manager:true}}`, then log
   in as that Ops Manager and try the same → 403.
+
+---
+
+## 2026-07-05 — Task 1.4: Web portal scaffold + Phase-1 screens
+
+**Goal:** the admin/Ops-Manager web portal (React + Vite + TS + Ant Design) with
+login and the org/employee screens.
+
+### Changes
+- **`frontend/` is now a real app:** Vite + React 18 + TypeScript (strict) +
+  Ant Design 5. `npm run dev` → http://localhost:5173, `npm run build` compiles
+  clean.
+- **API client** (`src/api/client.ts`): axios with the access token attached
+  automatically; on a 401 it silently redeems the refresh token once (rotation
+  handled) and retries; a dead session lands back on /login.
+- **Auth context** (`src/auth/AuthContext.tsx`): user + permission list from
+  `/auth/me`; `hasPermission()` drives what the UI shows.
+- **Screens:**
+  - **Login** and **Forgot password** (2-step OTP; shows the dev OTP inline
+    when the backend returns it).
+  - **Layout** with capability-driven menu (brief §3: UI assembled from active
+    capabilities) and the user's capability tags in the header.
+  - **Dashboard** — entity counts placeholder until Phase 3–5 dashboards.
+  - **Branches / Teams / Companies** — list + create/rename (teams pick a branch).
+  - **Employees** — search, list with capability tags + status, create/edit with
+    branch/team pickers (team list follows the chosen branch), capability
+    checkboxes with the **Operations Manager checkbox disabled** unless the
+    caller holds `ops_managers.create` (server enforces it regardless),
+    deactivate switch, reset-password action.
+- Seeded the brief's real org data via the live API as verification: branches
+  Sangli, Pune, Kolhapur, Latur, Solapur; companies Hero FinCorp, Bajaj Finance,
+  TVS Credit, HDB Financial, Tata Capital (all 201s).
+
+### How to view
+1. `docker compose up -d` (if not running), `cd backend && npm run dev`
+2. `cd frontend && npm run dev` → open **http://localhost:5173**
+3. Log in with the dev admin (phone `9999999999`). You should see the dashboard
+   with 5 branches / 5 companies, and all menu items (admin has every permission).
+4. Add an employee with the Operations Manager capability, log out, log in as
+   them: the menu is identical *except* their Employees screen shows the
+   Ops-Manager checkbox disabled — and the API refuses it server-side too.
+5. Try the "Forgot password" flow: the OTP appears in an info box (dev mode).
