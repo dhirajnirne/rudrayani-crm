@@ -1,18 +1,17 @@
 /**
  * Seeds the disposition_codes table directly from Trail_Codes.xlsx
- * so you never have to hand-retype your 69-row master list.
+ * so you never have to hand-retype the 70-row master list.
  *
  * Usage:
- *   1. npm install xlsx   (in backend/)
- *   2. Place Trail_Codes.xlsx in backend/src/migrations/
- *   3. node src/migrations/seed_disposition_codes.js <agency_id>
+ *   npm run seed:dispositions -- <agency_id>
  */
-require("dotenv").config();
-const path = require("path");
-const XLSX = require("xlsx");
-const { pool } = require("../config/db");
+import path from "node:path";
+import * as XLSX from "xlsx";
+import { pool } from "../config/db";
 
 const FILE_PATH = path.join(__dirname, "Trail_Codes.xlsx");
+
+type SheetRow = (string | number | undefined | null)[];
 
 // Best-effort keyword tagging of which structured fields a template needs.
 // Review/adjust this mapping after the first run -- it's a starting point,
@@ -29,27 +28,39 @@ function detectNeeds(template = "") {
   };
 }
 
-async function run() {
+async function run(): Promise<void> {
   const agencyId = process.argv[2];
   if (!agencyId) {
-    console.error("Usage: node seed_disposition_codes.js <agency_id>");
+    console.error("Usage: npm run seed:dispositions -- <agency_id>");
     process.exit(1);
   }
 
   const workbook = XLSX.readFile(FILE_PATH);
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+  const rows = XLSX.utils.sheet_to_json<SheetRow>(sheet, { header: 1 });
 
   // Row 0 is the header: Sr, Action Code, Majorly used result code, Result code, Description, Remarks
-  const dataRows = rows.slice(1).filter((r) => r.some((cell) => cell !== undefined && cell !== null));
+  const dataRows = rows
+    .slice(1)
+    .filter((r) => r.some((cell) => cell !== undefined && cell !== null));
 
   let inserted = 0;
   // Some rows carry only a remark: they are extra remark-template variants of the
   // disposition code above them (e.g. rows 3-10 are all "CB" call-back variants).
   // Forward-fill the parent's codes so every variant is preserved as its own row.
-  let last = { actionCode: null, category: null, resultCode: null, description: null };
+  let last: {
+    actionCode: string | number | undefined | null;
+    category: string | number | undefined | null;
+    resultCode: string | number | undefined | null;
+    description: string | number | undefined | null;
+  } = { actionCode: null, category: null, resultCode: null, description: null };
+
   for (const row of dataRows) {
-    let [, actionCode, category, resultCode, description, remarkTemplate] = row;
+    const [, actionCodeRaw, categoryRaw, resultCodeRaw, descriptionRaw, remarkTemplate] = row;
+    let actionCode = actionCodeRaw;
+    let category = categoryRaw;
+    let resultCode = resultCodeRaw;
+    let description = descriptionRaw;
     if (!actionCode && !description) {
       if (!remarkTemplate) continue; // skip fully blank rows
       ({ actionCode, category, resultCode, description } = last);
@@ -57,7 +68,7 @@ async function run() {
       last = { actionCode, category, resultCode, description };
     }
 
-    const needs = detectNeeds(remarkTemplate || "");
+    const needs = detectNeeds(String(remarkTemplate ?? ""));
 
     await pool.query(
       `INSERT INTO disposition_codes
@@ -77,7 +88,7 @@ async function run() {
         needs.needs_mode,
         needs.needs_reason,
         needs.needs_name_relation,
-      ]
+      ],
     );
     inserted += 1;
   }

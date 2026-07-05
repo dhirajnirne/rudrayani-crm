@@ -2,11 +2,22 @@
   "name": "rudrayani-crm-backend",
   "version": "0.1.0",
   "description": "Backend API for Rudrayani Fintech Collection Agency CRM",
-  "main": "src/server.js",
+  "main": "dist/server.js",
   "type": "commonjs",
   "scripts": {
-    "dev": "nodemon src/server.js",
-    "start": "node src/server.js"
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src test",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+    "test": "vitest run",
+    "migrate": "node-pg-migrate -m migrations",
+    "migrate:up": "node-pg-migrate -m migrations up",
+    "migrate:down": "node-pg-migrate -m migrations down",
+    "migrate:create": "node-pg-migrate -m migrations create --migration-file-language sql",
+    "seed:dispositions": "tsx src/migrations/seed_disposition_codes.ts",
+    "purge:pings": "tsx src/jobs/purge_old_location_pings.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -15,9 +26,27 @@
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.11.5",
-    "xlsx": "^0.18.5"
+    "pino": "^9.0.0",
+    "pino-http": "^10.0.0",
+    "xlsx": "^0.18.5",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
-    "nodemon": "^3.1.0"
+    "@eslint/js": "^9.0.0",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.11.6",
+    "@types/supertest": "^6.0.2",
+    "eslint": "^9.0.0",
+    "node-pg-migrate": "^7.6.1",
+    "pino-pretty": "^11.0.0",
+    "prettier": "^3.3.0",
+    "supertest": "^7.0.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^3.0.5"
   }
 }
