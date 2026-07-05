@@ -44,9 +44,18 @@ async function run() {
   const dataRows = rows.slice(1).filter((r) => r.some((cell) => cell !== undefined && cell !== null));
 
   let inserted = 0;
+  // Some rows carry only a remark: they are extra remark-template variants of the
+  // disposition code above them (e.g. rows 3-10 are all "CB" call-back variants).
+  // Forward-fill the parent's codes so every variant is preserved as its own row.
+  let last = { actionCode: null, category: null, resultCode: null, description: null };
   for (const row of dataRows) {
-    const [, actionCode, category, resultCode, description, remarkTemplate] = row;
-    if (!actionCode && !description) continue; // skip fully blank rows
+    let [, actionCode, category, resultCode, description, remarkTemplate] = row;
+    if (!actionCode && !description) {
+      if (!remarkTemplate) continue; // skip fully blank rows
+      ({ actionCode, category, resultCode, description } = last);
+    } else {
+      last = { actionCode, category, resultCode, description };
+    }
 
     const needs = detectNeeds(remarkTemplate || "");
 
