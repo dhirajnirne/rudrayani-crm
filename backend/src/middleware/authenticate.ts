@@ -4,6 +4,7 @@ import { pool } from "../config/db";
 import { env } from "../config/env";
 import { HttpError } from "./error-handler";
 import { capabilitiesOf, type UserRow } from "../types/user";
+import { capabilitiesHavePermission } from "../services/permission-service";
 import { asyncHandler } from "./async-handler";
 
 /**
@@ -40,16 +41,8 @@ export function requirePermission(permissionKey: string) {
     const user = req.user;
     if (!user) throw new HttpError(401, "Not authenticated");
 
-    const capabilities = capabilitiesOf(user);
-    if (capabilities.length === 0) throw new HttpError(403, "No capabilities assigned");
-
-    const { rows } = await pool.query(
-      `SELECT 1 FROM capability_permissions
-        WHERE capability = ANY($1) AND permission_key = $2
-        LIMIT 1`,
-      [capabilities, permissionKey],
-    );
-    if (rows.length === 0) {
+    const allowed = await capabilitiesHavePermission(capabilitiesOf(user), permissionKey);
+    if (!allowed) {
       throw new HttpError(403, `Missing permission: ${permissionKey}`);
     }
     next();

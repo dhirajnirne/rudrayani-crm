@@ -32,6 +32,11 @@ export function errorHandler(
     res.status(err.status).json({ error: err.message, details: err.details });
     return;
   }
+  // Postgres unique-constraint violation -> conflict, not a 500.
+  if (typeof err === "object" && err !== null && (err as { code?: string }).code === "23505") {
+    res.status(409).json({ error: "A record with that value already exists" });
+    return;
+  }
   logger.error({ err, method: req.method, path: req.path }, "Unhandled error");
   res.status(500).json({ error: "Internal server error" });
 }

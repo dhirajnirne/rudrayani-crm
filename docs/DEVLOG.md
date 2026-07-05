@@ -109,3 +109,38 @@ Phases and task numbers refer to the approved implementation plan (which follows
 - `POST /api/auth/otp/request` with the same phone → response includes `devOtp`
   (dev only) and the "SMS" appears in the server log.
 - Permission matrix: Adminer → `permissions`, `capability_permissions`.
+
+---
+
+## 2026-07-05 — Task 1.3: Org & employee management API
+
+**Goal:** brief §2/§3 — branches, teams, companies, and employee management with
+the capability rules enforced.
+
+### Changes
+- **`/api/branches`, `/api/teams`, `/api/companies`** — list (any authenticated
+  agency user, needed for pickers) + create/rename behind `*.manage` permissions.
+  Teams validate their branch belongs to the caller's agency; everything is
+  agency-scoped in every query.
+- **`/api/employees`** — list (filter by branch / search by name or phone),
+  create, view, update, and `POST /:id/reset-password`. Enforced rules:
+  - `is_agency_admin` is **not accepted by the API at all** — exactly one per
+    agency, bootstrap script only (brief §3).
+  - Granting/revoking **Operations Manager requires `ops_managers.create`**,
+    which only the Agency Admin capability holds — checked on create *and* edit.
+  - Team Leader / Telecaller / Field Agent are freely toggleable designations.
+  - Team must belong to the selected branch; branch/team must be in the agency.
+  - **Deactivation** (needs `employees.deactivate`) revokes all refresh tokens —
+    the employee's next API call fails immediately, not at token expiry.
+  - Duplicate phone → clean 409 (new unique-violation handling in the error
+    middleware).
+- `GET /api/auth/me` now also returns the caller's **permission list** (drives
+  the web portal menu).
+
+### How to view
+- `cd backend && npm test` — 20/20 green; `test/org.test.ts` covers the
+  Ops-Manager-cannot-create-Ops-Manager rule, designation toggling, immediate
+  deactivation, and agency scoping.
+- With an admin token: `POST /api/branches {"name":"Sangli"}`,
+  `POST /api/employees {...capabilities:{is_operations_manager:true}}`, then log
+  in as that Ops Manager and try the same → 403.

@@ -3,7 +3,8 @@ import { z } from "zod";
 import { asyncHandler } from "../middleware/async-handler";
 import { authenticate } from "../middleware/authenticate";
 import * as authService from "../services/auth-service";
-import { publicUser } from "../types/user";
+import { permissionsFor } from "../services/permission-service";
+import { capabilitiesOf, publicUser } from "../types/user";
 
 const router = Router();
 
@@ -70,8 +71,14 @@ router.post(
   }),
 );
 
-router.get("/me", authenticate, (req, res) => {
-  res.json({ user: publicUser(req.user!) });
-});
+router.get(
+  "/me",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const user = req.user!;
+    const permissions = await permissionsFor(capabilitiesOf(user));
+    res.json({ user: publicUser(user), permissions });
+  }),
+);
 
 export default router;
