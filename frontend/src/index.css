@@ -1,0 +1,16 @@
+/* Design brief: Inter everywhere; tabular numerals are MANDATORY for all
+   financial values — applied globally so no numeric column can drift. */
+body {
+  margin: 0;
+  font-family: Inter, sans-serif;
+  font-variant-numeric: tabular-nums;
+  color: #181c20;
+  background: #f7f9ff;
+}
+
+/* Explicit helper for financial figures (large balances, ledger cells). */
+.money {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+  white-space: nowrap;
+}

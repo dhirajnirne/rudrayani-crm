@@ -4,10 +4,12 @@ import { BrowserRouter } from "react-router-dom";
 import { ConfigProvider } from "antd";
 import App from "./App";
 import { AuthProvider } from "./auth/AuthContext";
+import { theme } from "./theme";
+import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <ConfigProvider theme={{ token: { colorPrimary: "#1d39c4" } }}>
+    <ConfigProvider theme={theme}>
       <BrowserRouter>
         <AuthProvider>
           <App />
