@@ -4,6 +4,7 @@ import helmet from "helmet";
 import pinoHttp from "pino-http";
 import { logger } from "./config/logger";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler";
+import authRoutes from "./routes/auth";
 import healthRoutes from "./routes/health";
 
 export function createApp() {
@@ -20,8 +21,9 @@ export function createApp() {
   );
 
   app.use("/api", healthRoutes);
+  app.use("/api/auth", authRoutes);
 
-  // TODO (Phase 1): auth routes, agency/company/branch/team routes
+  // TODO (Phase 1): agency/company/branch/team routes
   // TODO (Phase 2): import-template + excel-import routes
   // TODO (Phase 3): allocation, calling, disposition, payment routes
   // TODO (Phase 4): location-ping ingestion route (Section 9 of the build brief)

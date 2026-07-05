@@ -11,6 +11,11 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(1, "JWT_SECRET is required"),
   JWT_EXPIRES_IN: z.string().default("8h"),
   SMS_PROVIDER_API_KEY: z.string().default(""),
+  REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(30),
+  LOCKOUT_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+  LOCKOUT_DURATION_MINUTES: z.coerce.number().int().positive().default(15),
+  OTP_EXPIRY_MINUTES: z.coerce.number().int().positive().default(10),
+  OTP_MAX_VERIFY_ATTEMPTS: z.coerce.number().int().positive().default(5),
 });
 
 export const env = envSchema.parse(process.env);
