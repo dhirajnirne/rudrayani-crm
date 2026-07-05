@@ -16,6 +16,7 @@ const envSchema = z.object({
   LOCKOUT_DURATION_MINUTES: z.coerce.number().int().positive().default(15),
   OTP_EXPIRY_MINUTES: z.coerce.number().int().positive().default(10),
   OTP_MAX_VERIFY_ATTEMPTS: z.coerce.number().int().positive().default(5),
+  UPLOAD_DIR: z.string().default("uploads"),
 });
 
 export const env = envSchema.parse(process.env);

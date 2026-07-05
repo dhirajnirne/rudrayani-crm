@@ -186,3 +186,55 @@ login and the org/employee screens.
    them: the menu is identical *except* their Employees screen shows the
    Ops-Manager checkbox disabled — and the API refuses it server-side too.
 5. Try the "Forgot password" flow: the OTP appears in an info box (dev mode).
+
+---
+
+## 2026-07-05 — Design brief adopted; portal re-themed
+
+- `docs/design-brief.md` added (source of truth; may be updated later).
+- Web portal now uses the design tokens via `frontend/src/theme.ts`: Deep Trust
+  Teal `#00535b` primary, Field Recovery Green success, amber/crimson statuses,
+  Inter font, **global tabular-nums** for financial values, 4/8/12px radius
+  scale, 48px large controls, `#1A2332` sidebar.
+
+---
+
+## 2026-07-05 — Tasks 2.1 + 2.2: Excel import engine; products & buckets
+
+**Goal:** brief §4 — per-company import templates, validated ingestion with zero
+data loss, and products/buckets derived from the data itself.
+
+### Changes (backend)
+- **Migration `1783400000000_import-engine.sql`:** template versioning columns,
+  `import_runs` audit table, `products` table, and a **unique index on
+  `(company_id, loan_number)`** backing duplicate rejection.
+- **Storage abstraction** (`src/services/storage/storage-provider.ts`):
+  `LocalDiskStorage` under `UPLOAD_DIR` (default `backend/uploads/`), S3-ready
+  interface (confirmed decision). Used for uploaded import files now, payment
+  proofs later.
+- **Import pipeline** (`exceljs` — not the vulnerable `xlsx` package — + multer):
+  1. `POST /api/imports/upload` (.xlsx, ≤15 MB) → detected columns + row count +
+     an `upload_key`.
+  2. `POST /api/import-templates` — save mapping {Excel column → system field}.
+     **Re-saving a name creates version N+1 and deactivates the old version.**
+  3. `POST /api/imports/preview` — dry run: required-field misses, non-numeric
+     amounts, in-file duplicate loan numbers, already-in-DB duplicates, unmapped
+     columns, sample rows. Writes nothing.
+  4. `POST /api/imports/commit` — transactional insert; unmapped columns go to
+     `customers.custom_fields` JSONB (no data loss); Indian-format amounts like
+     "1,25,000" parsed; products derived; `import_runs` audit row written.
+  5. `GET /api/imports/runs?company_id=` — import history.
+- **Products & buckets** (`src/routes/catalog.ts`):
+  - `GET /api/products?company_id=` — raw label + canonical label + customer count.
+  - `POST /api/products/normalize` — e.g. HL + Home Loan → "Home Loan", no re-import.
+  - `GET /api/buckets?company_id=` — distinct values straight from the data.
+- All endpoints behind the `imports.manage` permission (admin + ops manager).
+- **12 new integration tests** (31 total, all green) driving the whole pipeline
+  with a synthetic messy ledger: 2 product spellings, a missing loan number, an
+  in-file duplicate, a malformed amount, an unmapped "Vehicle No" column, and a
+  full re-import (all rows flagged as DB duplicates, zero inserted).
+
+### How to view
+- `cd backend && npm test`
+- The UI for this arrives next (Tasks 2.3 + 2.4: disposition master admin +
+  import wizard screens). Until then the flow is exercisable via curl/tests.

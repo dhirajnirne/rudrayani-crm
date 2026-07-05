@@ -6,9 +6,12 @@ import { logger } from "./config/logger";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler";
 import authRoutes from "./routes/auth";
 import branchRoutes from "./routes/branches";
+import catalogRoutes from "./routes/catalog";
 import companyRoutes from "./routes/companies";
 import employeeRoutes from "./routes/employees";
 import healthRoutes from "./routes/health";
+import importTemplateRoutes from "./routes/import-templates";
+import importRoutes from "./routes/imports";
 import teamRoutes from "./routes/teams";
 
 export function createApp() {
@@ -30,6 +33,9 @@ export function createApp() {
   app.use("/api/teams", teamRoutes);
   app.use("/api/companies", companyRoutes);
   app.use("/api/employees", employeeRoutes);
+  app.use("/api/imports", importRoutes);
+  app.use("/api/import-templates", importTemplateRoutes);
+  app.use("/api", catalogRoutes);
   // TODO (Phase 2): import-template + excel-import routes
   // TODO (Phase 3): allocation, calling, disposition, payment routes
   // TODO (Phase 4): location-ping ingestion route (Section 9 of the build brief)
