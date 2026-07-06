@@ -882,3 +882,117 @@ performance, reallocation approvals).
    (verify on the web Allocation page's history timeline).
 
 ---
+
+## 2026-07-06 — Phase 5 (Tasks 5.1–5.8): Performance Dashboard, Targets, Monthly Allocations
+
+**Goal:** the full dashboard blueprint from `web dashboard view/*.png` —
+Resolution / Rollback / Normalization / Recovery gauges vs targets, daily run
+rate, Deposited + Trail cards, monthly overview chart — with maximally
+granular filters, filtered Excel export, role-scoped visibility, and a mobile
+"My Performance" view. Plus the mobile-login fix and signature removal.
+
+### 5.1 Buckets master
+`buckets` table per company (label, sort_order, category normal|npa,
+is_current) — metric math needs bucket ORDER and flags, and labels differ per
+company. Labels auto-register on every import; BucketsPage (under
+companies.manage) reorders and flags them. One is_current bucket per company
+enforced.
+
+### 5.2 Monthly allocation imports + snapshots
+`customer_month_snapshots` = the month's allocated book (bucket, POS, EMI,
+agent at import). Import wizard gained a **Monthly allocation** mode + month
+picker: existing loans are UPDATED (file authoritative; blanks keep old
+values), new loans insert, a snapshot row is upserted per (customer, month) —
+re-uploading a corrected file replaces the month. New `agent_phone` mapping
+column assigns/reassigns loans (allocation_logs audit; unknown phones are
+warnings). Preview shows updates + "N active loans missing from this file".
+
+### 5.3 Targets
+`targets`: month × metric (collection/resolution/rollback/normalization/
+recovery) × scope (agency/branch/team/agent) with optional company/product/
+bucket slices; unique per dimension combo. `targets.manage` (admin/ops).
+TargetsPage: month + scope-level grid, Amount/Count toggle, Excel import
+(branch/team by name, agent by phone). Resolution rule: most specific row at
+the effective scope wins; a missing level falls back to the SUM of
+child-scope rows (never mixes levels).
+
+### 5.4 Deposits
+`payments.deposited_at/deposited_by_user_id` + `payments.deposit` permission.
+DepositsPage: pending/deposited filter, bulk "Mark deposited" (idempotent,
+agency-scoped). Feeds the dashboard's Deposited Metrics card.
+
+### 5.5 Report engine (backend/src/services/report-service.ts)
+- Metric classification per account, **two bases** (response says which):
+  transition (once month M+1's file exists): resolution = didn't flow
+  forward (closed = resolved; dropped-from-file = excluded), rollback =
+  strictly back but not current, normalization = landed in is_current.
+  payments proxy (live MTD): resolution = paid ≥ 1 EMI, rollback = ≥ 1 EMI
+  but < arrears, normalization = paid full arrears.
+  Recovery is always ₹ collected on NPA-bucket accounts vs the NPA POS base.
+- Trail = accounts with ≥1 call log or field visit in month. IST windows.
+- Attribution: book = snapshot's agent; money = collected_by_user_id.
+- Scope clamps: admin/ops agency; TL own team; everyone else self —
+  new `reports.view_self` permission for all capabilities (mobile).
+- `GET /api/reports/dashboard | /overview?months=3|all | /agents | /export`
+  (two-sheet exceljs workbook honoring the active filters).
+- `npm run seed:payments -- file.xlsx` loads sample payment Excel files.
+
+### 5.6 Web dashboard (frontend/src/components/dashboard/)
+DashboardPage rebuilt to the blueprint: product tabs, month picker, bucket/
+company/branch/team/agent filters (auto-hidden when the server clamps),
+Amount/Count toggle, Days-Left chip, collection strip, dark MetricTabsCard
+with a custom SVG gauge ("Your MTD (x%)", dashed target arc, away-note),
+MetricPanel cards (Allocated/Target/Target %/MTD/MTD % + run rate with NA),
+Deposited + Trail cards, @ant-design/plots Column overview with View All,
+Export button (blob download). Dashboard route lazy-loads so the chart
+runtime stays out of the login bundle.
+
+### 5.7 Mobile
+- **Login fix:** api_client default was `10.0.2.2:3000` but the backend runs
+  on **4000** — every emulator login failed with a generic error. Now 4000.
+- PerformanceScreen (self-scoped /reports/dashboard): collection vs target
+  progress + required-per-day, my-book and trail cards, per-metric rows.
+- HomeShell: agents = My Worklist / My Performance; TL = + My Team.
+
+### 5.8 Cleanups
+- Customer **signature removed entirely** from field visits (photo is the
+  required evidence); `signature` package dropped; offline queue tolerates
+  old queued items that still carry a signature_path. Backend column stays
+  dormant.
+- `npm run seed:demo`: idempotent Demo Branch/Team + telecaller 8888888801,
+  field agent 8888888802, team leader 8888888803, ops manager 8888888804
+  (password Admin@1234). TEST_CREDENTIALS.md (gitignored) corrected.
+
+### Verification
+- Backend `npm test` — **140/140** (buckets 7, allocation-import 9,
+  targets 7, deposits 4, reports 11 incl. IST month-edge payments,
+  transition vs proxy classification, target fallback summing, TL/self
+  clamps, xlsx export).
+- Frontend `tsc --noEmit` + `vite build` green (dashboard chunk split).
+- Mobile `dart analyze` clean; debug APK builds.
+
+### Data contract (sample files the user will provide, 3 months)
+1. **Allocation `allocation_YYYY_MM.xlsx`** — Loan Number*, Customer Name*,
+   Mobile Number, Product, Bucket*, POS Amount*, EMI*, Agent Phone. Keep
+   product/bucket spellings identical across months; move 15–25% of loans
+   between buckets month-to-month; some NPA loans; ~5% drop out / ~5% new.
+2. **Payments `payments_YYYY_MM.xlsx`** (loaded via seed:payments) — Loan
+   Number*, Amount*, Paid At* (IST), Mode, Collected By Phone*, Deposited
+   (Y/N). Mix: < EMI, = EMI, ≥ full POS, some against NPA loans.
+3. **Targets** (optional, Excel import or UI) — Month (YYYY-MM), Metric,
+   Scope Type, Scope Name/Phone, Company?, Product?, Bucket?, Target
+   Amount, Target Count.
+
+### How to view
+1. `npm run seed:demo` → log in as admin → **Buckets**: order + flag NPA/
+   Current for the company → **Import**: Monthly allocation mode, pick month,
+   map columns (incl. Agent Phone) → commit for 3 consecutive months.
+2. `npm run seed:payments -- payments_2026_04.xlsx` (etc.) for each month.
+3. **Targets**: set agent/branch/agency targets for those months.
+4. **Dashboard**: past months show transition-based metrics, the current
+   month shows the payments basis (info tooltip says which); flip Amount/
+   Count, drill every filter, **Export** and check the xlsx mirrors the view.
+5. Mobile: log in as Rahul (8888888802) → **My Performance** shows his own
+   collection vs target.
+
+---

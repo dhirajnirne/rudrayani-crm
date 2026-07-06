@@ -19,7 +19,6 @@ class QueuedAction {
   final String type; // 'call_log' | 'payment' | 'field_visit'
   final Map<String, dynamic> payload;
   final String? photoPath; // durable copy for queued payments/visits
-  final String? signaturePath; // durable signature PNG for queued visits
   final DateTime createdAt;
 
   QueuedAction({
@@ -27,7 +26,6 @@ class QueuedAction {
     required this.type,
     required this.payload,
     this.photoPath,
-    this.signaturePath,
     required this.createdAt,
   });
 
@@ -36,16 +34,16 @@ class QueuedAction {
         'type': type,
         'payload': payload,
         'photo_path': photoPath,
-        'signature_path': signaturePath,
         'created_at': createdAt.toIso8601String(),
       };
 
+  // Items queued before 2026-07-06 may still carry a 'signature_path' key
+  // (signature capture removed) — it is simply ignored here.
   factory QueuedAction.fromJson(Map<String, dynamic> j) => QueuedAction(
         clientKey: j['client_key'] as String,
         type: j['type'] as String,
         payload: Map<String, dynamic>.from(j['payload'] as Map),
         photoPath: j['photo_path'] as String?,
-        signaturePath: j['signature_path'] as String?,
         createdAt: DateTime.parse(j['created_at'] as String),
       );
 }
@@ -97,14 +95,6 @@ class OfflineQueueNotifier extends StateNotifier<OfflineQueueState> {
     return dest;
   }
 
-  /// Writes in-memory bytes (e.g. a signature PNG) to a durable file.
-  static Future<String> persistBytes(List<int> bytes, String ext) async {
-    final dir = await getApplicationDocumentsDirectory();
-    final dest = '${dir.path}/queued_${_uuid.v4()}.$ext';
-    await File(dest).writeAsBytes(bytes);
-    return dest;
-  }
-
   Future<void> enqueue(QueuedAction action) async {
     await _box?.put(action.clientKey, jsonEncode(action.toJson()));
     state = state.copyWith(pending: _box?.length ?? 0);
@@ -142,9 +132,6 @@ class OfflineQueueNotifier extends StateNotifier<OfflineQueueState> {
               ...item.payload,
               if (item.photoPath != null && File(item.photoPath!).existsSync())
                 'photo': await MultipartFile.fromFile(item.photoPath!, filename: 'visit.jpg'),
-              if (item.signaturePath != null && File(item.signaturePath!).existsSync())
-                'signature':
-                    await MultipartFile.fromFile(item.signaturePath!, filename: 'signature.png'),
             });
             await api.postForm('/field-visits', form);
           }
@@ -170,10 +157,9 @@ class OfflineQueueNotifier extends StateNotifier<OfflineQueueState> {
 
   Future<void> _remove(QueuedAction item) async {
     await _box?.delete(item.clientKey);
-    for (final path in [item.photoPath, item.signaturePath]) {
-      if (path == null) continue;
+    if (item.photoPath != null) {
       try {
-        await File(path).delete();
+        await File(item.photoPath!).delete();
       } catch (_) {
         // already gone — nothing to clean up
       }

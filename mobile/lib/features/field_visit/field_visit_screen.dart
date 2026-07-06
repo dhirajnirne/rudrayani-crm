@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -7,14 +6,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:signature/signature.dart';
 
 import '../../core/api/api_client.dart';
 import '../../core/models/customer.dart';
 import '../../core/offline/offline_queue.dart';
 
-/// Field-visit evidence (brief §8): a photo of the visit, the customer's
-/// signature drawn on screen, an optional remark, and the GPS point.
+/// Field-visit evidence (brief §8): a photo of the visit, an optional remark,
+/// and the GPS point. (Customer signature was dropped per product decision
+/// 2026-07-06 — the photo is the required evidence.)
 class FieldVisitScreen extends ConsumerStatefulWidget {
   final Customer customer;
   const FieldVisitScreen({super.key, required this.customer});
@@ -25,11 +24,6 @@ class FieldVisitScreen extends ConsumerStatefulWidget {
 
 class _FieldVisitScreenState extends ConsumerState<FieldVisitScreen> {
   final _remarkCtrl = TextEditingController();
-  final _signatureCtrl = SignatureController(
-    penStrokeWidth: 3,
-    penColor: Colors.black,
-    exportBackgroundColor: Colors.white,
-  );
   File? _photo;
   bool _loading = false;
   String? _error;
@@ -37,7 +31,6 @@ class _FieldVisitScreenState extends ConsumerState<FieldVisitScreen> {
   @override
   void dispose() {
     _remarkCtrl.dispose();
-    _signatureCtrl.dispose();
     super.dispose();
   }
 
@@ -61,16 +54,13 @@ class _FieldVisitScreenState extends ConsumerState<FieldVisitScreen> {
   }
 
   Future<void> _submit() async {
-    final hasSignature = _signatureCtrl.isNotEmpty;
-    if (_photo == null && !hasSignature) {
-      setState(() => _error = 'Add a photo or take the customer\'s signature');
+    if (_photo == null) {
+      setState(() => _error = 'Add a photo of the visit');
       return;
     }
 
     setState(() { _loading = true; _error = null; });
     try {
-      final Uint8List? signaturePng =
-          hasSignature ? await _signatureCtrl.toPngBytes() : null;
       final pos = await _tryGps();
 
       // One key for both paths (direct send / offline queue).
@@ -86,27 +76,18 @@ class _FieldVisitScreenState extends ConsumerState<FieldVisitScreen> {
       try {
         final form = FormData.fromMap({
           ...payload,
-          if (_photo != null)
-            'photo': await MultipartFile.fromFile(_photo!.path,
-                filename: 'visit.jpg', contentType: DioMediaType('image', 'jpeg')),
-          if (signaturePng != null)
-            'signature': MultipartFile.fromBytes(signaturePng,
-                filename: 'signature.png', contentType: DioMediaType('image', 'png')),
+          'photo': await MultipartFile.fromFile(_photo!.path,
+              filename: 'visit.jpg', contentType: DioMediaType('image', 'jpeg')),
         });
         await api.postForm('/field-visits', form);
       } catch (e) {
         if (!isOfflineError(e)) rethrow;
-        final photoPath =
-            _photo != null ? await OfflineQueueNotifier.persistPhoto(_photo!.path) : null;
-        final signaturePath = signaturePng != null
-            ? await OfflineQueueNotifier.persistBytes(signaturePng, 'png')
-            : null;
+        final photoPath = await OfflineQueueNotifier.persistPhoto(_photo!.path);
         await ref.read(offlineQueueProvider.notifier).enqueue(QueuedAction(
               clientKey: payload['client_key'] as String,
               type: 'field_visit',
               payload: payload,
               photoPath: photoPath,
-              signaturePath: signaturePath,
               createdAt: DateTime.now(),
             ));
         if (mounted) {
@@ -147,7 +128,8 @@ class _FieldVisitScreenState extends ConsumerState<FieldVisitScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text('Visit Photo', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            const Text('Visit Photo *',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
             const SizedBox(height: 8),
             if (_photo != null) ...[
               ClipRRect(
@@ -182,30 +164,6 @@ class _FieldVisitScreenState extends ConsumerState<FieldVisitScreen> {
                   ),
                 ],
               ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('Customer Signature',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                TextButton(
-                  onPressed: () => _signatureCtrl.clear(),
-                  child: const Text('Clear', style: TextStyle(fontSize: 12)),
-                ),
-              ],
-            ),
-            Container(
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey.shade400),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: Signature(
-                controller: _signatureCtrl,
-                height: 160,
-                backgroundColor: Colors.white,
-              ),
-            ),
             const SizedBox(height: 16),
             TextField(
               controller: _remarkCtrl,
