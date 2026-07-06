@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { Spin } from "antd";
+import { Suspense, lazy } from "react";
 import { useAuth } from "./auth/AuthContext";
 import AllocationPage from "./pages/AllocationPage";
 import AppLayout from "./components/AppLayout";
@@ -7,8 +8,10 @@ import BranchesPage from "./pages/BranchesPage";
 import BucketsPage from "./pages/BucketsPage";
 import CompaniesPage from "./pages/CompaniesPage";
 import CustomersPage from "./pages/CustomersPage";
-import DashboardPage from "./pages/DashboardPage";
 import DepositsPage from "./pages/DepositsPage";
+
+// Lazy: the dashboard pulls in the charting runtime — keep it out of the login bundle.
+const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 import DispositionsPage from "./pages/DispositionsPage";
 import EmployeesPage from "./pages/EmployeesPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
@@ -44,7 +47,20 @@ export default function App() {
           </RequireAuth>
         }
       >
-        <Route index element={<DashboardPage />} />
+        <Route
+          index
+          element={
+            <Suspense
+              fallback={
+                <div style={{ display: "grid", placeItems: "center", height: 320 }}>
+                  <Spin size="large" />
+                </div>
+              }
+            >
+              <DashboardPage />
+            </Suspense>
+          }
+        />
         <Route path="employees" element={<EmployeesPage />} />
         <Route path="branches" element={<BranchesPage />} />
         <Route path="teams" element={<TeamsPage />} />
