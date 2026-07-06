@@ -250,4 +250,79 @@ router.get(
   }),
 );
 
+/**
+ * Team day view for the TL mobile screen (brief §8: attendance + team
+ * performance): every user in scope with that day's shifts, worked minutes,
+ * and activity counts (calls, payments, PTPs). Same IST day boundaries and
+ * visibility scope as the rest of tracking.
+ */
+router.get(
+  "/team-day",
+  asyncHandler(async (req, res) => {
+    const me = req.user!;
+    const q = z
+      .object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() })
+      .parse(req.query);
+    const date = q.date ?? new Date().toISOString().slice(0, 10);
+
+    const scope = scopeFilter(me);
+    const params: unknown[] = [me.agency_id, date];
+    let scopeClause = "";
+    if (scope.param !== null) {
+      params.push(scope.param);
+      scopeClause = scope.clause.replace("$SCOPE", `$${params.length}`);
+    }
+
+    const dayStart = `($2::date::timestamp AT TIME ZONE '${IST}')`;
+    const dayEnd = `(($2::date + 1)::timestamp AT TIME ZONE '${IST}')`;
+
+    const { rows } = await pool.query(
+      `SELECT u.id AS user_id, u.full_name, u.is_field_agent, u.is_telecaller,
+              t.name AS team_name,
+              att.first_in, att.last_out, att.on_duty, att.minutes_worked,
+              COALESCE(acts.calls, 0) AS calls,
+              COALESCE(acts.ptps, 0) AS ptps,
+              COALESCE(pays.n, 0) AS payments_count,
+              COALESCE(pays.total, 0) AS payments_total
+         FROM users u
+         LEFT JOIN teams t ON t.id = u.team_id
+         LEFT JOIN LATERAL (
+              SELECT min(punch_in_at) AS first_in,
+                     max(punch_out_at) AS last_out,
+                     bool_or(punch_out_at IS NULL) AS on_duty,
+                     COALESCE(sum(EXTRACT(EPOCH FROM (COALESCE(punch_out_at, now()) - punch_in_at)) / 60), 0)::int AS minutes_worked
+                FROM attendance
+               WHERE user_id = u.id
+                 AND punch_in_at >= ${dayStart} AND punch_in_at < ${dayEnd}
+         ) att ON true
+         LEFT JOIN LATERAL (
+              SELECT count(*)::int AS calls,
+                     count(*) FILTER (WHERE EXISTS (SELECT 1 FROM ptps p WHERE p.call_log_id = cl.id))::int AS ptps
+                FROM call_logs cl
+               WHERE cl.agent_id = u.id
+                 AND cl.created_at >= ${dayStart} AND cl.created_at < ${dayEnd}
+         ) acts ON true
+         LEFT JOIN LATERAL (
+              SELECT count(*)::int AS n, COALESCE(sum(amount), 0) AS total
+                FROM payments
+               WHERE collected_by_user_id = u.id
+                 AND created_at >= ${dayStart} AND created_at < ${dayEnd}
+         ) pays ON true
+        WHERE u.agency_id = $1 AND u.is_active = true
+          ${scopeClause}
+        ORDER BY u.full_name`,
+      params,
+    );
+
+    res.json({
+      date,
+      members: rows.map((r) => ({
+        ...r,
+        payments_total: Number(r.payments_total),
+        on_duty: r.on_duty === true,
+      })),
+    });
+  }),
+);
+
 export default router;

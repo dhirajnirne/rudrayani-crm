@@ -821,3 +821,64 @@ without ever double-recording a call log or (worse) a payment.
   to sync" → reconnect → banner clears, exactly one row each server-side.
 
 ---
+
+## 2026-07-06 — Task 4.4: Field extras + Team Leader mobile view
+
+**Goal:** brief §8 — field-visit evidence (photo + customer signature),
+navigate-to-address, and the TL toggle view (team live status, attendance,
+performance, reallocation approvals).
+
+### Changes (backend)
+- **Migration `1783900000000_field-visits-reallocation.sql`** —
+  `field_visits` (photo/signature keys, optional GPS point, `client_key`
+  for offline idempotency) and `reallocation_requests` (reason, status,
+  decider, decision note; **one pending request per customer** enforced by a
+  partial unique index).
+- **`/api/field-visits`** (permission `calls.log`) — POST multipart
+  photo + signature through the StorageProvider (at least one required),
+  offline-idempotent via `client_key`; GET history per customer; streaming
+  endpoints for photo and signature (agency-scoped, never raw paths).
+- **`/api/reallocation-requests`** — POST (agents, own-assigned customers
+  only; duplicate pending → 409); GET pending/history (needs
+  `customers.allocate`); POST `/:id/decide` — approve reassigns (writing
+  `allocation_logs` like any reallocation) or returns the customer to the
+  unallocated pool when no new agent is chosen; reject just closes it.
+  Deciding twice → 409.
+- **`GET /api/tracking/team-day`** — per team member for a date (IST):
+  shifts, minutes worked, on-duty flag, calls, PTPs, payments count + total.
+  Same scope rules as tracking (TL → own team).
+- **15 new tests** (`test/field-workflow.test.ts`) — suite **102/102 green**.
+
+### Changes (mobile)
+- **Customer detail** — new Field Visit + **Navigate** buttons (finds the
+  first address-like column among the imported custom fields and opens the
+  maps app via `geo:`), and a Request Reallocation menu action (reason
+  dialog; friendly 409 message when one is already pending).
+- **`field_visit_screen.dart`** — visit photo (camera/gallery), customer
+  **signature pad** (`signature` package → PNG), optional remark, best-effort
+  GPS point; submits multipart, and **works offline** — photo and signature
+  are persisted to app documents and queued with the same client_key.
+- **TL toggle view** (brief §3/§10 role-aware landing): Team Leaders land on
+  a two-tab shell — **My Worklist / My Team**. The Team tab shows pending
+  reallocation approvals (approve → bottom sheet: return-to-pool or pick a
+  team member; reject) and each member's day: duty chip (On duty /
+  Stationary N min / No signal / Off duty), hours worked, calls, PTPs,
+  payments with ₹ total, last ping time. Agents see no change.
+- Manifest: `geo:` intent query for the maps handoff.
+
+### Verification
+- Backend `npm test` — 102/102 (visit uploads + streaming, own-customer
+  guard, duplicate-pending 409, approve-reassign writes allocation log,
+  approve-to-pool unassigns, double-decide 409, team-day scope + numbers).
+- Mobile: `dart analyze lib/` — no issues; `flutter build apk --debug` green.
+
+### How to view
+1. Backend + emulator; log in as the field agent (8888888802) → open a
+   customer → **Field Visit** → photo + sign + save; **Navigate** opens maps
+   if the customer has an imported address column; ⋮ → Request Reallocation.
+2. Log in as a TL (create one via Employees, or grant the demo user
+   `is_team_leader`) → bottom tabs appear → **My Team** shows the pending
+   request → Approve → pick an agent or return to pool → the customer moves
+   (verify on the web Allocation page's history timeline).
+
+---

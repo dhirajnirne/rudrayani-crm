@@ -1,12 +1,15 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../core/api/api_client.dart';
 import '../../core/models/customer.dart';
 
 final _rupee = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 
-class CustomerDetailScreen extends StatelessWidget {
+class CustomerDetailScreen extends ConsumerWidget {
   final Customer customer;
 
   const CustomerDetailScreen({super.key, required this.customer});
@@ -24,13 +27,113 @@ class CustomerDetailScreen extends StatelessWidget {
     }
   }
 
+  /// The address arrives through the import's custom fields — find the
+  /// first address-looking column and hand it to the maps app.
+  String? get _address {
+    for (final e in customer.customFields.entries) {
+      final k = e.key.toLowerCase();
+      if ((k.contains('address') || k.contains('addr')) &&
+          (e.value?.toString().trim().isNotEmpty ?? false)) {
+        return e.value.toString().trim();
+      }
+    }
+    return null;
+  }
+
+  Future<void> _navigate(BuildContext context) async {
+    final address = _address;
+    if (address == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No address on file for this customer')),
+      );
+      return;
+    }
+    final uri = Uri.parse('geo:0,0?q=${Uri.encodeComponent(address)}');
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No maps app available')),
+        );
+      }
+    }
+  }
+
+  Future<void> _requestReallocation(BuildContext context, WidgetRef ref) async {
+    final reasonCtrl = TextEditingController();
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Request Reallocation'),
+        content: TextField(
+          controller: reasonCtrl,
+          maxLines: 3,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Why should this customer be moved? *',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, reasonCtrl.text.trim()),
+            child: const Text('Submit'),
+          ),
+        ],
+      ),
+    );
+    if (reason == null || reason.length < 3) return;
+
+    try {
+      await ref.read(apiClientProvider).post('/reallocation-requests', data: {
+        'customer_id': customer.id,
+        'reason': reason,
+      });
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Request sent — your team leader will review it'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } on DioException catch (e) {
+      if (context.mounted) {
+        final msg = e.response?.statusCode == 409
+            ? 'A request is already pending for this customer'
+            : 'Could not send the request — check your connection';
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
+      }
+    }
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: const Color(0xFF00535B),
         foregroundColor: Colors.white,
         title: Text(customer.customerName),
+        actions: [
+          PopupMenuButton<String>(
+            onSelected: (v) {
+              if (v == 'realloc') _requestReallocation(context, ref);
+            },
+            itemBuilder: (ctx) => const [
+              PopupMenuItem(
+                value: 'realloc',
+                child: ListTile(
+                  leading: Icon(Icons.swap_horiz),
+                  title: Text('Request Reallocation'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
@@ -87,6 +190,28 @@ class CustomerDetailScreen extends StatelessWidget {
                     style: OutlinedButton.styleFrom(
                       minimumSize: const Size(0, 48),
                     ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.assignment_turned_in),
+                    label: const Text('Field Visit'),
+                    onPressed: () => context.push('/field-visit', extra: customer),
+                    style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.directions),
+                    label: const Text('Navigate'),
+                    onPressed: () => _navigate(context),
+                    style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
                   ),
                 ),
               ],
