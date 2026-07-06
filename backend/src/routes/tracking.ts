@@ -79,7 +79,7 @@ router.get(
     }
 
     const { rows } = await pool.query(
-      `SELECT u.id AS user_id, u.full_name, u.phone,
+      `SELECT u.id AS user_id, u.full_name, u.phone, u.is_field_agent,
               u.team_id, t.name AS team_name, b.name AS branch_name,
               a.punch_in_at,
               lp.recorded_at AS last_ping_at,
@@ -128,9 +128,12 @@ router.get(
       } else if (now - new Date(r.last_ping_at).getTime() > NO_SIGNAL_MINUTES * 60_000) {
         status = "no_signal";
       } else {
-        const dwellMin = r.stationary_since
-          ? (now - new Date(r.stationary_since).getTime()) / 60_000
-          : 0;
+        // "Not moving" only means something for field agents — a telecaller
+        // works a desk all day and would alert permanently.
+        const dwellMin =
+          r.is_field_agent && r.stationary_since
+            ? (now - new Date(r.stationary_since).getTime()) / 60_000
+            : 0;
         if (dwellMin >= minutes) {
           status = "stationary";
           stationaryMinutes = Math.floor(dwellMin);

@@ -758,6 +758,18 @@ Tracking page, and multiple alerting agents must read as one list.
 
 ---
 
+## 2026-07-06 — Fix: stationary alert applies to field agents only
+
+A telecaller works a desk all day — "at one location for 20+ minutes" is
+their job, not a problem. `/api/tracking/live` now computes the stationary
+dwell only for users with the `field_agent` capability; telecallers (and
+other desk roles) on duty stay "moving". **No-signal alerts still apply to
+everyone punched in** — a tracker that stopped reporting matters regardless
+of role. New regression test: a telecaller parked 28 minutes never alerts
+(17/17 tracking tests green).
+
+---
+
 ## 2026-07-06 — Task 4.3: Offline mode (durable queue + idempotent sync)
 
 **Goal:** brief §8 — "queue actions locally, sync when connectivity returns",

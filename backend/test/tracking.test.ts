@@ -16,9 +16,10 @@ const PHONES = {
   admin: "7900000040",
   ops: "7900000041",
   tl: "7900000042",
-  agentA: "7900000043", // in TL's team
-  agentB: "7900000044", // other team
+  agentA: "7900000043", // field agent in TL's team
+  agentB: "7900000044", // field agent, other team
   outsider: "7900000045", // other agency
+  tele: "7900000046", // telecaller — desk job, stationary alert must not apply
 };
 
 let agencyId: string;
@@ -102,6 +103,7 @@ beforeAll(async () => {
   await mk("agentA", agencyId, "is_field_agent", teamAId);
   await mk("agentB", agencyId, "is_field_agent", teamBId);
   await mk("outsider", otherAgencyId, "is_field_agent", null);
+  await mk("tele", agencyId, "is_telecaller", teamBId);
 });
 
 afterAll(async () => {
@@ -160,6 +162,9 @@ describe("live view scoping", () => {
     // outsider: on duty in the other agency
     await punchIn(userIds.outsider, 30);
     await ping(userIds.outsider, 1, 0);
+    // telecaller: parked at their desk for 28 minutes — must NOT alert
+    await punchIn(userIds.tele, 30);
+    for (let m = 28; m >= 0; m -= 4) await ping(userIds.tele, m, 5000 + (m % 3));
   });
 
   it("rejects agents (no tracking.view)", async () => {
@@ -175,7 +180,7 @@ describe("live view scoping", () => {
       .set("Authorization", `Bearer ${tokens.admin}`);
     expect(res.status).toBe(200);
     const ids = res.body.agents.map((a: { user_id: string }) => a.user_id).sort();
-    expect(ids).toEqual([userIds.agentA, userIds.agentB].sort());
+    expect(ids).toEqual([userIds.agentA, userIds.agentB, userIds.tele].sort());
   });
 
   it("ops manager sees the same agency-wide view", async () => {
@@ -183,7 +188,7 @@ describe("live view scoping", () => {
       .get("/api/tracking/live")
       .set("Authorization", `Bearer ${tokens.ops}`);
     const ids = res.body.agents.map((a: { user_id: string }) => a.user_id).sort();
-    expect(ids).toEqual([userIds.agentA, userIds.agentB].sort());
+    expect(ids).toEqual([userIds.agentA, userIds.agentB, userIds.tele].sort());
   });
 
   it("team leader sees only their own team", async () => {
@@ -203,6 +208,17 @@ describe("live view scoping", () => {
     expect(a.stationary_minutes).toBeGreaterThanOrEqual(20);
     expect(a.stationary_since).toBeDefined();
     expect(res.body.alerts.map((x: { user_id: string }) => x.user_id)).toContain(userIds.agentA);
+  });
+
+  it("a telecaller parked at their desk never alerts as stationary", async () => {
+    const res = await request(app)
+      .get("/api/tracking/live")
+      .set("Authorization", `Bearer ${tokens.admin}`);
+    const t = res.body.agents.find((x: { user_id: string }) => x.user_id === userIds.tele);
+    expect(t.status).toBe("moving");
+    expect(res.body.alerts.map((x: { user_id: string }) => x.user_id)).not.toContain(
+      userIds.tele,
+    );
   });
 
   it("an agent covering ground stays 'moving' and out of alerts", async () => {
