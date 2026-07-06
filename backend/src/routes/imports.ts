@@ -8,6 +8,7 @@ import { HttpError } from "../middleware/error-handler";
 import {
   SYSTEM_FIELDS,
   commitImport,
+  countMissingFromFile,
   parseWorkbook,
   validateRows,
   type ColumnMapping,
@@ -81,12 +82,22 @@ router.post(
   }),
 );
 
-const previewSchema = z.object({
-  upload_key: uploadKeySchema,
-  company_id: z.string().uuid(),
-  template_id: z.string().uuid().optional(),
-  column_mapping: mappingSchema.optional(),
-});
+const previewSchema = z
+  .object({
+    upload_key: uploadKeySchema,
+    company_id: z.string().uuid(),
+    template_id: z.string().uuid().optional(),
+    column_mapping: mappingSchema.optional(),
+    mode: z.enum(["new", "allocation"]).default("new"),
+    allocation_month: z
+      .string()
+      .regex(/^\d{4}-\d{2}-01$/, "allocation_month must be the 1st of a month (YYYY-MM-01)")
+      .optional(),
+  })
+  .refine((b) => b.mode !== "allocation" || !!b.allocation_month, {
+    message: "allocation_month is required for a monthly allocation import",
+    path: ["allocation_month"],
+  });
 
 /** Step 2 — dry run: full validation report, nothing written. */
 router.post(
@@ -102,20 +113,44 @@ router.post(
     );
     const sheet = await parseWorkbook(await getStorage().read(body.upload_key));
     const result = await validateRows(body.company_id, sheet, mapping);
+    // In allocation mode, loans already in the DB are updates — the expected case.
+    const missingFromFile =
+      body.mode === "allocation"
+        ? await countMissingFromFile(body.company_id, result.validRows)
+        : 0;
     res.json({
+      mode: body.mode,
       total_rows: sheet.rows.length,
       valid_rows: result.validRows.length - result.duplicatesInDb.length,
       error_rows: result.errors.length,
-      duplicates_in_db: result.duplicatesInDb.length,
+      duplicates_in_db: body.mode === "allocation" ? 0 : result.duplicatesInDb.length,
+      updates_in_db: body.mode === "allocation" ? result.duplicatesInDb.length : 0,
+      missing_from_file: missingFromFile,
       unmapped_columns: result.unmappedColumns,
       errors: result.errors.slice(0, 50),
-      duplicate_loan_numbers: result.duplicatesInDb.slice(0, 50),
+      duplicate_loan_numbers: body.mode === "allocation" ? [] : result.duplicatesInDb.slice(0, 50),
       sample_rows: result.validRows.slice(0, 5),
     });
   }),
 );
 
-const commitSchema = previewSchema.extend({ file_name: z.string().max(300).optional() });
+const commitSchema = z
+  .object({
+    upload_key: uploadKeySchema,
+    company_id: z.string().uuid(),
+    template_id: z.string().uuid().optional(),
+    column_mapping: mappingSchema.optional(),
+    mode: z.enum(["new", "allocation"]).default("new"),
+    allocation_month: z
+      .string()
+      .regex(/^\d{4}-\d{2}-01$/, "allocation_month must be the 1st of a month (YYYY-MM-01)")
+      .optional(),
+    file_name: z.string().max(300).optional(),
+  })
+  .refine((b) => b.mode !== "allocation" || !!b.allocation_month, {
+    message: "allocation_month is required for a monthly allocation import",
+    path: ["allocation_month"],
+  });
 
 /** Step 3 — transactional commit into customers (+ product derivation + audit). */
 router.post(
@@ -137,6 +172,8 @@ router.post(
       fileName: body.file_name ?? null,
       sheet,
       mapping,
+      mode: body.mode,
+      allocationMonth: body.allocation_month ?? null,
     });
     res.status(201).json(result);
   }),

@@ -3,9 +3,11 @@ import {
   Button,
   Card,
   Col,
+  DatePicker,
   Descriptions,
   Form,
   Input,
+  Radio,
   Row,
   Select,
   Space,
@@ -26,6 +28,7 @@ import {
   InboxOutlined,
 } from "@ant-design/icons";
 import type { RcFile } from "antd/es/upload";
+import type { Dayjs } from "dayjs";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, errorMessage } from "../api/client";
@@ -37,15 +40,19 @@ const SYSTEM_FIELDS = [
   { value: "mobile_number", label: "Mobile Number" },
   { value: "product", label: "Product" },
   { value: "bucket", label: "Bucket" },
-  { value: "due_amount", label: "Due Amount" },
+  { value: "due_amount", label: "Due Amount / POS" },
   { value: "emi", label: "EMI Amount" },
+  { value: "agent_phone", label: "Agent Phone (assigns the loan)" },
 ];
 
 interface PreviewResult {
+  mode: "new" | "allocation";
   total_rows: number;
   valid_rows: number;
   error_rows: number;
   duplicates_in_db: number;
+  updates_in_db: number;
+  missing_from_file: number;
   unmapped_columns: string[];
   errors: { row: number; problems: string[] }[];
   duplicate_loan_numbers: string[];
@@ -53,8 +60,10 @@ interface PreviewResult {
 
 interface CommitResult {
   inserted_rows: number;
+  updated_rows: number;
   duplicate_rows: number;
   error_rows: number;
+  unknown_agent_phones: string[];
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -70,6 +79,8 @@ function ImportWizard() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [file, setFile] = useState<RcFile | null>(null);
+  const [mode, setMode] = useState<"new" | "allocation">("new");
+  const [allocationMonth, setAllocationMonth] = useState<Dayjs | null>(null);
 
   // Step 1
   const [uploadKey, setUploadKey] = useState("");
@@ -105,8 +116,16 @@ function ImportWizard() {
 
   // ── Step 0: upload file ──────────────────────────────────────────────────
 
+  const monthParam = () =>
+    mode === "allocation" && allocationMonth
+      ? { mode, allocation_month: allocationMonth.format("YYYY-MM-01") }
+      : { mode };
+
   const handleUpload = async () => {
     if (!companyId) return message.error("Select a company first");
+    if (mode === "allocation" && !allocationMonth) {
+      return message.error("Pick the allocation month first");
+    }
     if (!file) return message.error("Attach an Excel file (.xlsx)");
     setLoading(true);
     try {
@@ -166,7 +185,11 @@ function ImportWizard() {
         message.success(`Template "${templateName.trim()}" saved (v${saveRes.data.template.version})`);
       }
 
-      const body: Record<string, unknown> = { upload_key: uploadKey, company_id: companyId };
+      const body: Record<string, unknown> = {
+        upload_key: uploadKey,
+        company_id: companyId,
+        ...monthParam(),
+      };
       if (resolvedTemplateId) {
         body.template_id = resolvedTemplateId;
       } else {
@@ -192,6 +215,7 @@ function ImportWizard() {
         upload_key: uploadKey,
         company_id: companyId,
         file_name: fileName,
+        ...monthParam(),
       };
       if (savedTemplateId) {
         body.template_id = savedTemplateId;
@@ -234,6 +258,32 @@ function ImportWizard() {
           options={companies.map((c) => ({ value: c.id, label: c.name }))}
         />
       </Form.Item>
+
+      <Form.Item label="Import type" required style={{ marginBottom: 0 }}>
+        <Radio.Group
+          value={mode}
+          onChange={(e) => setMode(e.target.value)}
+          options={[
+            { value: "new", label: "New customers" },
+            { value: "allocation", label: "Monthly allocation" },
+          ]}
+          optionType="button"
+        />
+      </Form.Item>
+      {mode === "allocation" && (
+        <Form.Item
+          label="Allocation month"
+          required
+          extra="Existing loans are updated with the file's bucket/amounts; every loan gets a snapshot for this month (feeds the performance dashboard)."
+        >
+          <DatePicker
+            picker="month"
+            value={allocationMonth}
+            onChange={setAllocationMonth}
+            style={{ width: 200 }}
+          />
+        </Form.Item>
+      )}
 
       <Upload.Dragger
         accept=".xlsx"
@@ -362,7 +412,8 @@ function ImportWizard() {
 
   const renderStep2 = () => {
     if (!preview) return null;
-    const canCommit = preview.valid_rows > 0;
+    const isAllocation = preview.mode === "allocation";
+    const canCommit = preview.valid_rows > 0 || (isAllocation && preview.updates_in_db > 0);
     return (
       <Space direction="vertical" style={{ width: "100%" }} size="large">
         <Row gutter={16}>
@@ -374,7 +425,7 @@ function ImportWizard() {
           <Col xs={12} sm={6}>
             <Card size="small">
               <Statistic
-                title="Valid (will insert)"
+                title={isAllocation ? "New loans (will insert)" : "Valid (will insert)"}
                 value={preview.valid_rows}
                 valueStyle={{ color: "#2c694e" }}
               />
@@ -392,13 +443,27 @@ function ImportWizard() {
           <Col xs={12} sm={6}>
             <Card size="small">
               <Statistic
-                title="Already in DB"
-                value={preview.duplicates_in_db}
-                valueStyle={preview.duplicates_in_db > 0 ? { color: "#d77a00" } : {}}
+                title={isAllocation ? "Existing loans (will update)" : "Already in DB"}
+                value={isAllocation ? preview.updates_in_db : preview.duplicates_in_db}
+                valueStyle={
+                  isAllocation
+                    ? { color: "#2c694e" }
+                    : preview.duplicates_in_db > 0
+                      ? { color: "#d77a00" }
+                      : {}
+                }
               />
             </Card>
           </Col>
         </Row>
+
+        {isAllocation && preview.missing_from_file > 0 && (
+          <Alert
+            type="warning"
+            showIcon
+            message={`${preview.missing_from_file} active loan(s) are not in this month's file — they will have no allocation for this month.`}
+          />
+        )}
 
         {preview.unmapped_columns.length > 0 && (
           <Alert
@@ -447,7 +512,8 @@ function ImportWizard() {
             loading={loading}
             style={canCommit ? { height: 48, paddingInline: 32 } : { height: 48 }}
           >
-            Commit Import ({preview.valid_rows} rows)
+            Commit Import (
+            {isAllocation ? preview.valid_rows + preview.updates_in_db : preview.valid_rows} rows)
           </Button>
         </Space>
       </Space>
@@ -468,6 +534,13 @@ function ImportWizard() {
               {result.inserted_rows}
             </span>
           </Descriptions.Item>
+          {result.updated_rows > 0 && (
+            <Descriptions.Item label="Updated" span={3}>
+              <span className="money" style={{ color: "#2c694e" }}>
+                {result.updated_rows}
+              </span>
+            </Descriptions.Item>
+          )}
           <Descriptions.Item label="Skipped (duplicate)" span={3}>
             <span className="money">{result.duplicate_rows}</span>
           </Descriptions.Item>
@@ -475,6 +548,13 @@ function ImportWizard() {
             <span className="money">{result.error_rows}</span>
           </Descriptions.Item>
         </Descriptions>
+        {result.unknown_agent_phones?.length > 0 && (
+          <Alert
+            type="warning"
+            showIcon
+            message={`Unknown agent phone(s), loans left with their previous assignee: ${result.unknown_agent_phones.join(", ")}`}
+          />
+        )}
         <Space>
           <Button onClick={() => navigate("/customers")}>View Customers</Button>
           <Button type="primary" onClick={restart}>

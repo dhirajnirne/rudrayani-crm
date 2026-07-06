@@ -12,6 +12,7 @@ export const SYSTEM_FIELDS = [
   "bucket",
   "due_amount",
   "emi",
+  "agent_phone", // assigns the loan to the agent with this phone (optional)
 ] as const;
 export type SystemField = (typeof SYSTEM_FIELDS)[number];
 const REQUIRED_FIELDS: SystemField[] = ["loan_number", "customer_name"];
@@ -39,8 +40,11 @@ export interface MappedRow {
   bucket: string | null;
   due_amount: number | null;
   emi: number | null;
+  agent_phone: string | null;
   custom_fields: Record<string, string>;
 }
+
+export type ImportMode = "new" | "allocation";
 
 function cellToString(value: ExcelJS.CellValue): string {
   if (value === null || value === undefined) return "";
@@ -242,8 +246,29 @@ export interface CommitResult {
   import_run_id: string;
   total_rows: number;
   inserted_rows: number;
+  updated_rows: number;
   duplicate_rows: number;
   error_rows: number;
+  unknown_agent_phones: string[];
+}
+
+/** phone -> {id, team_id} for the agency's active users named in the file. */
+async function resolveAgents(
+  client: PoolClient,
+  companyId: string,
+  rows: MappedRow[],
+): Promise<Map<string, { id: string; team_id: string | null }>> {
+  const phones = [...new Set(rows.map((r) => r.agent_phone).filter((p): p is string => !!p))];
+  const resolved = new Map<string, { id: string; team_id: string | null }>();
+  if (phones.length === 0) return resolved;
+  const { rows: users } = await client.query(
+    `SELECT u.id, u.team_id, u.phone FROM users u
+       JOIN companies co ON co.agency_id = u.agency_id
+      WHERE co.id = $1 AND u.phone = ANY($2) AND u.is_active = true`,
+    [companyId, phones],
+  );
+  for (const u of users) resolved.set(u.phone as string, { id: u.id, team_id: u.team_id });
+  return resolved;
 }
 
 export async function commitImport(params: {
@@ -253,21 +278,56 @@ export async function commitImport(params: {
   fileName: string | null;
   sheet: ParsedSheet;
   mapping: ColumnMapping;
+  mode?: ImportMode;
+  allocationMonth?: string | null; // 'YYYY-MM-01', required in allocation mode
 }): Promise<CommitResult> {
+  const mode: ImportMode = params.mode ?? "new";
+  if (mode === "allocation" && !params.allocationMonth) {
+    throw new HttpError(400, "allocation_month is required for a monthly allocation import");
+  }
   const validation = await validateRows(params.companyId, params.sheet, params.mapping);
   const dbDupes = new Set(validation.duplicatesInDb);
   const toInsert = validation.validRows.filter((r) => !dbDupes.has(r.loan_number));
+  // In allocation mode existing loans are the point of the file: update them.
+  const toUpdate = mode === "allocation" ? validation.validRows.filter((r) => dbDupes.has(r.loan_number)) : [];
 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+
+    // Run row first so snapshots can reference it; counts patched at the end.
+    const run = await client.query(
+      `INSERT INTO import_runs
+         (company_id, template_id, uploaded_by, file_name, total_rows,
+          inserted_rows, duplicate_rows, error_rows, errors, mode, allocation_month)
+       VALUES ($1,$2,$3,$4,$5,0,0,0,'[]',$6,$7)
+       RETURNING id`,
+      [
+        params.companyId,
+        params.templateId,
+        params.uploadedBy,
+        params.fileName,
+        params.sheet.rows.length,
+        mode,
+        params.allocationMonth ?? null,
+      ],
+    );
+    const runId = run.rows[0].id as string;
+
+    const agents = await resolveAgents(client, params.companyId, [...toInsert, ...toUpdate]);
+    const unknownPhones = new Set<string>();
+    const snapshotIds: string[] = [];
+
     for (const row of toInsert) {
-      await client.query(
+      const agent = row.agent_phone ? agents.get(row.agent_phone) : undefined;
+      if (row.agent_phone && !agent) unknownPhones.add(row.agent_phone);
+      const inserted = await client.query(
         `INSERT INTO customers
            (company_id, loan_number, customer_name, mobile_number, product, bucket,
-            due_amount, emi, custom_fields)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-         ON CONFLICT (company_id, loan_number) DO NOTHING`,
+            due_amount, emi, custom_fields, assigned_agent_id, assigned_team_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         ON CONFLICT (company_id, loan_number) DO NOTHING
+         RETURNING id`,
         [
           params.companyId,
           row.loan_number,
@@ -278,36 +338,119 @@ export async function commitImport(params: {
           row.due_amount,
           row.emi,
           JSON.stringify(row.custom_fields),
+          agent?.id ?? null,
+          agent?.team_id ?? null,
         ],
       );
+      if (inserted.rows[0]) {
+        snapshotIds.push(inserted.rows[0].id as string);
+        if (agent) {
+          await client.query(
+            `INSERT INTO allocation_logs (customer_id, from_agent_id, to_agent_id, allocated_by, reason)
+             VALUES ($1, NULL, $2, $3, 'Assigned by import')`,
+            [inserted.rows[0].id, agent.id, params.uploadedBy],
+          );
+        }
+      }
     }
-    await deriveProducts(client, params.companyId, toInsert);
-    await deriveBuckets(client, params.companyId, toInsert);
-    const run = await client.query(
-      `INSERT INTO import_runs
-         (company_id, template_id, uploaded_by, file_name, total_rows,
-          inserted_rows, duplicate_rows, error_rows, errors)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-       RETURNING id`,
+
+    for (const row of toUpdate) {
+      const agent = row.agent_phone ? agents.get(row.agent_phone) : undefined;
+      if (row.agent_phone && !agent) unknownPhones.add(row.agent_phone);
+      const existing = await client.query(
+        `SELECT id, assigned_agent_id FROM customers
+          WHERE company_id = $1 AND loan_number = $2 FOR UPDATE`,
+        [params.companyId, row.loan_number],
+      );
+      const cust = existing.rows[0];
+      if (!cust) continue; // deleted between validate and commit — skip quietly
+      // The month's file is authoritative for bucket/amounts; blanks keep old values.
+      await client.query(
+        `UPDATE customers
+            SET customer_name   = COALESCE($2, customer_name),
+                mobile_number   = COALESCE($3, mobile_number),
+                product         = COALESCE($4, product),
+                bucket          = COALESCE($5, bucket),
+                due_amount      = COALESCE($6, due_amount),
+                emi             = COALESCE($7, emi),
+                custom_fields   = custom_fields || $8::jsonb,
+                assigned_agent_id = COALESCE($9, assigned_agent_id),
+                assigned_team_id  = COALESCE($10, assigned_team_id)
+          WHERE id = $1`,
+        [
+          cust.id,
+          row.customer_name,
+          row.mobile_number,
+          row.product,
+          row.bucket,
+          row.due_amount,
+          row.emi,
+          JSON.stringify(row.custom_fields),
+          agent?.id ?? null,
+          agent?.team_id ?? null,
+        ],
+      );
+      snapshotIds.push(cust.id as string);
+      if (agent && cust.assigned_agent_id !== agent.id) {
+        await client.query(
+          `INSERT INTO allocation_logs (customer_id, from_agent_id, to_agent_id, allocated_by, reason)
+           VALUES ($1, $2, $3, $4, 'Monthly allocation import')`,
+          [cust.id, cust.assigned_agent_id, agent.id, params.uploadedBy],
+        );
+      }
+    }
+
+    // Snapshot every loan in the file — this is the month's allocated book.
+    if (mode === "allocation") {
+      for (const customerId of snapshotIds) {
+        await client.query(
+          `INSERT INTO customer_month_snapshots
+             (customer_id, company_id, month, bucket, due_amount, emi, product,
+              assigned_team_id, assigned_agent_id, import_run_id)
+           SELECT c.id, c.company_id, $2, c.bucket, c.due_amount, c.emi, c.product,
+                  c.assigned_team_id, c.assigned_agent_id, $3
+             FROM customers c WHERE c.id = $1
+           ON CONFLICT (customer_id, month) DO UPDATE
+             SET bucket = EXCLUDED.bucket,
+                 due_amount = EXCLUDED.due_amount,
+                 emi = EXCLUDED.emi,
+                 product = EXCLUDED.product,
+                 assigned_team_id = EXCLUDED.assigned_team_id,
+                 assigned_agent_id = EXCLUDED.assigned_agent_id,
+                 import_run_id = EXCLUDED.import_run_id`,
+          [customerId, params.allocationMonth, runId],
+        );
+      }
+    }
+
+    const affected = [...toInsert, ...toUpdate];
+    await deriveProducts(client, params.companyId, affected);
+    await deriveBuckets(client, params.companyId, affected);
+
+    const duplicateRows = mode === "new" ? validation.duplicatesInDb.length : 0;
+    await client.query(
+      `UPDATE import_runs
+          SET inserted_rows = $2, updated_rows = $3, duplicate_rows = $4,
+              error_rows = $5, errors = $6
+        WHERE id = $1`,
       [
-        params.companyId,
-        params.templateId,
-        params.uploadedBy,
-        params.fileName,
-        params.sheet.rows.length,
+        runId,
         toInsert.length,
-        validation.duplicatesInDb.length,
+        toUpdate.length,
+        duplicateRows,
         validation.errors.length,
         JSON.stringify(validation.errors.slice(0, 100)),
       ],
     );
     await client.query("COMMIT");
     return {
-      import_run_id: run.rows[0].id,
+      import_run_id: runId,
       total_rows: params.sheet.rows.length,
       inserted_rows: toInsert.length,
-      duplicate_rows: validation.duplicatesInDb.length,
+      updated_rows: toUpdate.length,
+      duplicate_rows: duplicateRows,
       error_rows: validation.errors.length,
+      unknown_agent_phones: [...unknownPhones],
     };
   } catch (err) {
     await client.query("ROLLBACK");
@@ -315,4 +458,19 @@ export async function commitImport(params: {
   } finally {
     client.release();
   }
+}
+
+/** Active loans of the company that a given file does not mention (allocation preview stat). */
+export async function countMissingFromFile(
+  companyId: string,
+  rows: MappedRow[],
+): Promise<number> {
+  const loanNumbers = rows.map((r) => r.loan_number);
+  const { rows: result } = await pool.query(
+    `SELECT COUNT(*)::int AS missing FROM customers
+      WHERE company_id = $1 AND status = 'active'
+        AND NOT (loan_number = ANY($2))`,
+    [companyId, loanNumbers],
+  );
+  return result[0].missing as number;
 }
