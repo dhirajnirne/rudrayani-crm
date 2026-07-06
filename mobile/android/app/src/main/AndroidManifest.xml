@@ -6,6 +6,12 @@
     <!-- Camera / gallery for payment photo proof -->
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
+    <!-- Duty-hours location tracking (brief Section 9). The service is started
+         while the app is in the foreground, so while-in-use permission plus a
+         location-type foreground service covers background pings. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
 
     <application
         android:label="rudrayani_mobile"
@@ -38,6 +44,12 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- flutter_foreground_task service (do not rename) — hosts the
+             punch-in-to-punch-out ping loop with a persistent notification. -->
+        <service
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:foregroundServiceType="location"
+            android:exported="false" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

@@ -552,3 +552,114 @@ place; `npm test` 53/53 green).
    on, the customer drops off the worklist. PTPs screen shows the promise.
 
 ---
+
+## 2026-07-06 — Task 4.1: Attendance & location-ping ingestion (backend)
+
+**Goal:** brief §9 + §10 — punch-in/out attendance with GPS points, batch
+location-ping ingestion (offline-catch-up friendly), tunable ping interval,
+and the 60-day retention purge running in-process.
+
+### Changes (backend)
+- **Migration `1783600000000_location-tracking.sql`**
+  - `agencies.settings JSONB` — per-agency config blob; the ping interval
+    lives here (`ping_interval_seconds`) so it's data, not code (§9: "easy to
+    tune later via a config value"). Phase 6 adds the admin screen.
+  - `attendance.punch_in_at` now NOT NULL with default `now()` (rows are only
+    ever created by a punch-in).
+  - **One open shift per user** enforced by a partial unique index
+    (`WHERE punch_out_at IS NULL`) — the API's 409 is race-proof.
+  - **`(user_id, recorded_at)` unique on `location_pings`** — a re-sent
+    offline batch inserts with `ON CONFLICT DO NOTHING`, so catch-up
+    re-sends are idempotent (groundwork for Task 4.3 offline mode).
+  - New permission `attendance.punch` granted to all five capabilities
+    (every employee is tracked punch-in to punch-out, §9).
+- **`POST /api/attendance/punch-in`** — body `{lat, lng}`; writes the GPS
+  point as PostGIS `GEOGRAPHY(POINT)`; 409 if a shift is already open.
+- **`POST /api/attendance/punch-out`** — closes the open shift with its GPS
+  point; 409 if none open.
+- **`GET /api/attendance/status`** — `{punched_in, attendance}` so a
+  restarted phone can resume (or stop) tracking to match the server.
+- **`POST /api/location/pings`** — batch of 1–500 pings
+  (`recorded_at`/`lat`/`lng`/`accuracy_meters`), single multi-row INSERT,
+  duplicates skipped; responds `{received, inserted}`.
+- **`GET /api/location/config`** — `{ping_interval_seconds, retention_days}`;
+  reads the agency override, defaults to 120s (§9: every 2 minutes).
+- **Purge job wired in-process**: `src/jobs/purge-pings.ts` (shared 60-day
+  delete) + `src/jobs/scheduler.ts` (node-cron, daily 03:00, started from
+  `server.ts` only — never in tests). `npm run purge:pings` still works
+  standalone for external cron.
+- **13 integration tests** (`test/attendance.test.ts`): punch lifecycle,
+  double-punch 409s, GPS round-trip through PostGIS, batch ingest, duplicate
+  re-send idempotency, coordinate validation, config default + per-agency
+  override. **Suite 66/66 green.**
+
+### How to view
+1. `cd backend && npm run migrate:up && npm test` — 66/66.
+2. Punch in via API:
+   `POST /api/attendance/punch-in` `{"lat":18.52,"lng":73.85}` (agent token) →
+   201; repeat → 409. `GET /api/location/config` → `{"ping_interval_seconds":120,"retention_days":60}`.
+
+---
+
+## 2026-07-06 — Task 4.2: Flutter background location tracking
+
+**Goal:** brief §9 — punch-in starts a foreground-service GPS loop that pings
+every 2 minutes until punch-out, with the tracking state explicit in the UI
+(§10). Flagged in the brief as the riskiest feature (battery/permissions), so
+the design keeps the permission story minimal.
+
+### Design choice
+- `geolocator` + `flutter_foreground_task` (both free) instead of the paid
+  `flutter_background_geolocation`. The service is started **while the app is
+  in the foreground** with `foregroundServiceType="location"`, so plain
+  while-in-use location permission keeps GPS access in the background — no
+  "Allow all the time" settings round-trip for agents.
+
+### Changes (mobile/)
+- **`core/tracking/tracking_task.dart`** — the foreground-service isolate:
+  every tick (interval from `/api/location/config`) it takes a GPS fix and
+  POSTs the batch. Failed sends (offline) stay queued in memory (capped at
+  300 ≈ 10 duty hours) and ride along with the next batch — safe because the
+  server skips duplicate `(user_id, recorded_at)` rows. Notification text
+  shows last-ping time, or queued count when offline.
+- **`core/tracking/tracking_service.dart`** — UI-side control: permission
+  flow (notification + location, with clear error strings for denied/GPS-off),
+  service init (persistent low-priority notification "On duty — location
+  tracking active"), start/stop.
+- **`core/tracking/attendance_provider.dart`** — punch state
+  (StateNotifier): `punchIn()` = permissions → GPS fix → `POST punch-in` →
+  fetch interval → start service; `punchOut()` = GPS fix → `POST punch-out` →
+  stop service. `init()` reconciles with `GET /attendance/status` on startup
+  (open shift + dead service → resume tracking; closed shift + live service →
+  stop). 409s adopt the server's view instead of erroring.
+- **Worklist duty banner** — green "On duty — location tracking active" with
+  punch-in time + red Punch Out button, or grey "Off duty" + teal Punch In
+  button (brief §10: explicit, not implicit). Logout stops the service so it
+  never outlives the session's tokens.
+- **`api_client.dart`** — `buildDio()` exported; the tracking isolate can't
+  reach Riverpod, but tokens live in secure storage so the same interceptor
+  stack (Bearer + one-shot refresh) works there.
+- **AndroidManifest** — `ACCESS_FINE/COARSE_LOCATION`,
+  `FOREGROUND_SERVICE_LOCATION`, and the `flutter_foreground_task` service
+  declared with `foregroundServiceType="location"`.
+
+### Verification
+- `dart analyze lib/` — No issues found.
+- `flutter build apk --debug` — builds clean with the new plugins.
+- **Real-device testing still pending** (the brief explicitly calls for early
+  battery/permission testing on hardware — emulators fake GPS and don't
+  exercise OEM battery killers).
+
+### How to view
+1. Backend + emulator up, `cd mobile && flutter run`.
+2. Log in as the field agent (8888888802 / Admin@1234) → worklist shows the
+   grey "Off duty" banner → Punch In → grant notification + location →
+   banner turns green, a persistent notification appears.
+3. Emulator: Extended controls → Location → set a point/route. Every 2 min a
+   ping lands in `location_pings` (watch in Adminer, or
+   `SELECT count(*) FROM location_pings`).
+4. Airplane-mode the emulator for a few ticks → notification shows "N ping(s)
+   queued" → reconnect → next tick flushes the queue, no duplicate rows.
+5. Punch Out → banner grey, notification gone, `attendance` row closed.
+
+---

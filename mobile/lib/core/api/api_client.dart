@@ -27,7 +27,9 @@ class ApiClient {
       _dio.post<T>(path, data: data);
 }
 
-Dio _buildDio() {
+/// Also used by the background tracking isolate (tracking_task.dart), which
+/// can't reach Riverpod providers — tokens come from secure storage either way.
+Dio buildDio() {
   final dio = Dio(BaseOptions(
     baseUrl: '$_baseUrl/api',
     connectTimeout: const Duration(seconds: 10),
@@ -72,7 +74,7 @@ Dio _buildDio() {
   return dio;
 }
 
-final apiClientProvider = Provider<ApiClient>((ref) => ApiClient(_buildDio()));
+final apiClientProvider = Provider<ApiClient>((ref) => ApiClient(buildDio()));
 
 Future<void> saveTokens(String access, String refresh) async {
   await Future.wait([

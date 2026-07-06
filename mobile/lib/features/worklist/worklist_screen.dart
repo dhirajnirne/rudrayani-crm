@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../../core/auth/auth_provider.dart';
 import '../../core/models/customer.dart';
+import '../../core/tracking/attendance_provider.dart';
+import '../../core/tracking/tracking_service.dart';
 import 'worklist_provider.dart';
 
 final _rupee = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
@@ -17,6 +19,13 @@ class WorklistScreen extends ConsumerStatefulWidget {
 
 class _WorklistScreenState extends ConsumerState<WorklistScreen> {
   String _search = '';
+
+  @override
+  void initState() {
+    super.initState();
+    // Resume/stop tracking to match the server's view of the shift.
+    Future.microtask(() => ref.read(attendanceProvider.notifier).init());
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -49,6 +58,7 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
       ),
       body: Column(
         children: [
+          const _DutyBanner(),
           Padding(
             padding: const EdgeInsets.all(12),
             child: TextField(
@@ -119,10 +129,95 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
       ),
     );
     if (ok == true && mounted) {
+      // Shift stays open server-side, but the service must not outlive the
+      // session's tokens — punch out properly to close the shift.
+      await TrackingService.stop();
       await ref.read(authProvider.notifier).logout();
       // ignore: use_build_context_synchronously
       if (mounted) context.go('/login');
     }
+  }
+}
+
+/// Explicit duty/tracking state (brief §10: "punch-in starts the
+/// location-tracking session; punch-out ends it. Make this explicit in the
+/// UI, not implicit").
+class _DutyBanner extends ConsumerWidget {
+  const _DutyBanner();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final att = ref.watch(attendanceProvider);
+    final notifier = ref.read(attendanceProvider.notifier);
+    final onDuty = att.punchedIn;
+
+    return Container(
+      width: double.infinity,
+      color: onDuty ? const Color(0xFFE6F4EA) : const Color(0xFFF1F3F4),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                onDuty ? Icons.gps_fixed : Icons.gps_off,
+                size: 18,
+                color: onDuty ? Colors.green.shade800 : Colors.grey.shade700,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      onDuty ? 'On duty — location tracking active' : 'Off duty',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: onDuty ? Colors.green.shade800 : Colors.grey.shade800,
+                      ),
+                    ),
+                    if (onDuty && att.punchInAt != null)
+                      Text(
+                        'Punched in at ${DateFormat('HH:mm').format(att.punchInAt!.toLocal())}',
+                        style: TextStyle(fontSize: 11, color: Colors.green.shade700),
+                      ),
+                  ],
+                ),
+              ),
+              SizedBox(
+                height: 36,
+                child: att.busy
+                    ? const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 16),
+                        child: SizedBox(
+                          width: 18, height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      )
+                    : ElevatedButton(
+                        onPressed: onDuty ? notifier.punchOut : notifier.punchIn,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor:
+                              onDuty ? Colors.red.shade700 : const Color(0xFF00535B),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                        ),
+                        child: Text(onDuty ? 'Punch Out' : 'Punch In'),
+                      ),
+              ),
+            ],
+          ),
+          if (att.error != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(att.error!,
+                  style: const TextStyle(fontSize: 12, color: Colors.red)),
+            ),
+        ],
+      ),
+    );
   }
 }
 

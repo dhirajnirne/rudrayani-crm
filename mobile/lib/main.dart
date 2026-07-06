@@ -2,9 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/auth/auth_provider.dart';
 import 'core/router.dart';
+import 'core/tracking/tracking_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Port for UI <-> tracking-service isolate communication (must be set up
+  // before runApp per flutter_foreground_task docs).
+  TrackingService.initCommunicationPort();
   runApp(const ProviderScope(child: RudrayaniApp()));
 }
 
