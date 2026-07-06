@@ -732,3 +732,28 @@ model along the way.
    the Tracking menu item is absent and the API returns 403.
 
 ---
+
+## 2026-07-06 — Tracking alerts made app-wide (bell + toasts + consolidated list)
+
+**Goal:** alerts must follow the manager to every screen, not just the
+Tracking page, and multiple alerting agents must read as one list.
+
+### Changes (frontend)
+- **`components/AlertsBell.tsx`** — header bell (every portal screen, users
+  with `tracking.view` only): polls `/tracking/live` every 30 s, badge shows
+  the alert count, clicking opens a list of alerting agents by name
+  (Stationary N min / No signal since HH:mm, team name) — any row jumps to
+  the live map. Newly appearing alerts also pop a toast with an "Open live
+  map" button; an agent who resumes moving and stalls again re-alerts.
+- **Live Map tab** — the per-agent banners became one consolidated alert
+  panel: "N tracking alerts — stationary threshold 20 min" with a bulleted
+  agent list.
+
+### Verification (Playwright, live servers)
+- Seeded a second stationary agent (Priya). On the **Dashboard** (not the
+  tracking screen): badge = 2, toasts for both agents, bell popover lists
+  "Priya Sharma — Stationary 29 min" and "Rahul Verma — No signal, last ping
+  12:16". Clicking through lands on Tracking with the consolidated 2-alert
+  list and both markers on the map.
+
+---

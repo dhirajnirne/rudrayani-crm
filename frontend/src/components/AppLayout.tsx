@@ -16,6 +16,7 @@ import {
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { CAPABILITY_LABELS } from "../types";
+import AlertsBell from "./AlertsBell";
 
 const { Sider, Header, Content } = Layout;
 
@@ -99,6 +100,7 @@ export default function AppLayout() {
         >
           <Typography.Text strong>{user?.full_name}</Typography.Text>
           <Space>
+            <AlertsBell />
             {user?.capabilities.map((c) => (
               <Tag color="blue" key={c}>
                 {CAPABILITY_LABELS[c]}

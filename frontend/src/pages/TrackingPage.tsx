@@ -30,6 +30,7 @@ import {
 import "leaflet/dist/leaflet.css";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { alertText } from "../components/AlertsBell";
 
 // Default map center (Pune) used only before any data arrives.
 const FALLBACK_CENTER: [number, number] = [18.5204, 73.8567];
@@ -117,7 +118,10 @@ function LiveMap() {
   const located = agents.filter((a): a is LiveAgent & { lat: number; lng: number } =>
     a.lat !== null && a.lng !== null,
   );
-  const alerts = agents.filter((a) => a.status === "stationary" || a.status === "no_signal");
+  const alerts = agents.filter(
+    (a): a is LiveAgent & { status: "stationary" | "no_signal" } =>
+      a.status === "stationary" || a.status === "no_signal",
+  );
   const positions = useMemo(
     () => located.map((a) => [a.lat, a.lng] as [number, number]),
     [located],
@@ -152,21 +156,26 @@ function LiveMap() {
 
   return (
     <Space direction="vertical" style={{ width: "100%" }} size={16}>
-      {alerts.map((a) => (
+      {alerts.length > 0 && (
         <Alert
-          key={a.user_id}
-          type={a.status === "stationary" ? "error" : "warning"}
+          type={alerts.some((a) => a.status === "stationary") ? "error" : "warning"}
           showIcon
-          message={
-            a.status === "stationary"
-              ? `${a.full_name} has been at one location for ${a.stationary_minutes} minutes ` +
-                `(since ${dayjs(a.stationary_since).format("HH:mm")}) — threshold ${thresholds.stationary_minutes} min`
-              : `${a.full_name} stopped reporting — last ping ${
-                  a.last_ping_at ? dayjs(a.last_ping_at).format("HH:mm") : "never"
-                } (app killed, GPS off, or no network)`
+          message={`${alerts.length} tracking alert${alerts.length > 1 ? "s" : ""} — stationary threshold ${thresholds.stationary_minutes} min`}
+          description={
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
+              {alerts.map((a) => (
+                <li key={a.user_id}>
+                  <b>{a.full_name}</b>
+                  {a.team_name ? ` (${a.team_name})` : ""} — {alertText(a)}
+                  {a.status === "stationary" &&
+                    a.stationary_since &&
+                    ` (since ${dayjs(a.stationary_since).format("HH:mm")})`}
+                </li>
+              ))}
+            </ul>
           }
         />
-      ))}
+      )}
       <Space>
         <Button icon={<ReloadOutlined />} onClick={load}>
           Refresh
