@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
 import '../../core/models/customer.dart';
 import '../../core/models/disposition_code.dart';
+import '../../core/offline/offline_queue.dart';
 import '../worklist/worklist_provider.dart';
 
 class CallLogScreen extends ConsumerStatefulWidget {
@@ -112,12 +113,37 @@ class _CallLogScreenState extends ConsumerState<CallLogScreen> {
         fields['name_relation'] = _nameRelCtrl.text;
       }
 
-      await api.post('/call-logs', data: {
+      // One key for both paths: if the request reached the server but the
+      // response was lost, the queued re-send must reuse the same key.
+      final payload = {
         'customer_id': widget.customer.id,
         'disposition_code_id': code.id,
         'fields': fields,
         if (_extraCtrl.text.isNotEmpty) 'extra_remark': _extraCtrl.text,
-      });
+        'client_key': OfflineQueueNotifier.newClientKey(),
+      };
+      try {
+        await api.post('/call-logs', data: payload);
+      } catch (e) {
+        if (!isOfflineError(e)) rethrow;
+        // No network — queue it; the client_key makes the later sync safe.
+        await ref.read(offlineQueueProvider.notifier).enqueue(QueuedAction(
+              clientKey: payload['client_key'] as String,
+              type: 'call_log',
+              payload: payload,
+              createdAt: DateTime.now(),
+            ));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No network — call log saved offline, will sync automatically'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+          context.pop();
+        }
+        return;
+      }
 
       if (mounted) {
         ref.invalidate(worklistProvider);

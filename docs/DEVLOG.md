@@ -757,3 +757,55 @@ Tracking page, and multiple alerting agents must read as one list.
   list and both markers on the map.
 
 ---
+
+## 2026-07-06 — Task 4.3: Offline mode (durable queue + idempotent sync)
+
+**Goal:** brief §8 — "queue actions locally, sync when connectivity returns",
+without ever double-recording a call log or (worse) a payment.
+
+### Changes (backend) — idempotency keys
+- **Migration `1783800000000_offline-idempotency.sql`** — `client_key UUID`
+  on `call_logs` and `payments`, unique per author
+  (`(agent_id, client_key)` / `(collected_by_user_id, client_key)`).
+- `POST /api/call-logs` and `POST /api/payments` accept an optional
+  `client_key`. A re-send with a known key returns the **existing** row
+  (200 + `duplicate: true`) instead of creating another; a race between two
+  retries is caught via the unique index (23505 → re-select). For payments
+  the duplicate check runs **before** the photo is stored, so re-sends don't
+  orphan photo copies. Requests without a key behave exactly as before.
+- **6 idempotency tests** (`test/offline-idempotency.test.ts`) — suite
+  **88/88 green**.
+
+### Changes (mobile)
+- New packages: `hive`/`hive_flutter` (durable queue), `connectivity_plus`
+  (reconnect trigger), `uuid` (client keys), `path_provider` (photo copies).
+- **`core/offline/offline_queue.dart`** — Hive-backed FIFO of queued call
+  logs and payments. Flush runs on app start, on every connectivity-restored
+  event, and on demand. Network failure mid-flush stops (still offline);
+  a permanent server rejection (validation, closed customer) **drops that
+  item and surfaces the reason** so one bad record can't block the queue.
+- **Submit flows** — the client key is generated **once per submit** and
+  used for both the direct POST and the queued copy, so a request whose
+  response was lost can't double-record. On a connectivity error the action
+  is queued and the agent sees an orange "saved offline, will sync
+  automatically" confirmation instead of an error.
+- **Payment photos** — copied out of the image_picker cache (which Android
+  may clear) into the app documents dir while queued; deleted after sync.
+- **Worklist sync banner** — "N action(s) waiting to sync" with a Sync-now
+  button while pending; rejection messages show in red with Dismiss.
+- **Ping queue made durable** — the tracking isolate now persists unsent
+  pings in its own Hive box (`pending_pings`, never touched by the UI
+  isolate); they survive punch-out, app kills, and reboots, and go out with
+  the first ping of the next shift. Server-side dedupe on
+  `(user_id, recorded_at)` was already in place from Task 4.1.
+
+### Verification
+- Backend: `npm test` — 88/88 (re-send with same key → 200 duplicate, single
+  row for both call logs and payments; PTP not duplicated; keyless requests
+  unaffected).
+- Mobile: `dart analyze lib/` — no issues; `flutter build apk --debug` green.
+- Manual airplane-mode walk-through on a device/emulator still recommended:
+  log a disposition + payment offline → orange banners + "2 actions waiting
+  to sync" → reconnect → banner clears, exactly one row each server-side.
+
+---

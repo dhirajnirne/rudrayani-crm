@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../../core/auth/auth_provider.dart';
 import '../../core/models/customer.dart';
+import '../../core/offline/offline_queue.dart';
 import '../../core/tracking/attendance_provider.dart';
 import '../../core/tracking/tracking_service.dart';
 import 'worklist_provider.dart';
@@ -59,6 +60,7 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
       body: Column(
         children: [
           const _DutyBanner(),
+          const _SyncBanner(),
           Padding(
             padding: const EdgeInsets.all(12),
             child: TextField(
@@ -136,6 +138,56 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
       // ignore: use_build_context_synchronously
       if (mounted) context.go('/login');
     }
+  }
+}
+
+/// Offline-queue state: how many actions are waiting to sync, and the last
+/// permanent rejection if the server refused one (brief §8 offline mode).
+class _SyncBanner extends ConsumerWidget {
+  const _SyncBanner();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final q = ref.watch(offlineQueueProvider);
+    if (q.pending == 0 && q.lastError == null) return const SizedBox.shrink();
+
+    return Container(
+      width: double.infinity,
+      color: q.lastError != null ? const Color(0xFFFDECEA) : const Color(0xFFFFF7E6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      child: Row(
+        children: [
+          Icon(
+            q.lastError != null ? Icons.error_outline : Icons.cloud_upload_outlined,
+            size: 16,
+            color: q.lastError != null ? Colors.red.shade700 : Colors.orange.shade800,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              q.lastError ??
+                  (q.syncing
+                      ? 'Syncing ${q.pending} offline action(s)…'
+                      : '${q.pending} action(s) waiting to sync'),
+              style: TextStyle(
+                fontSize: 12,
+                color: q.lastError != null ? Colors.red.shade700 : Colors.orange.shade900,
+              ),
+            ),
+          ),
+          if (q.lastError != null)
+            TextButton(
+              onPressed: () => ref.read(offlineQueueProvider.notifier).clearError(),
+              child: const Text('Dismiss', style: TextStyle(fontSize: 12)),
+            )
+          else if (!q.syncing)
+            TextButton(
+              onPressed: () => ref.read(offlineQueueProvider.notifier).flush(),
+              child: const Text('Sync now', style: TextStyle(fontSize: 12)),
+            ),
+        ],
+      ),
+    );
   }
 }
 

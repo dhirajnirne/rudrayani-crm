@@ -35,7 +35,17 @@ const paymentBody = z.object({
   close_customer: z
     .union([z.boolean(), z.enum(["true", "false"]).transform((v) => v === "true")])
     .default(false),
+  client_key: z.string().uuid().optional(), // offline-sync idempotency key
 });
+
+/** Look up a payment previously created with this idempotency key. */
+async function findByClientKey(userId: string, clientKey: string) {
+  const { rows } = await pool.query(
+    "SELECT * FROM payments WHERE collected_by_user_id = $1 AND client_key = $2",
+    [userId, clientKey],
+  );
+  return rows[0] ?? null;
+}
 
 router.post(
   "/",
@@ -43,6 +53,15 @@ router.post(
   asyncHandler(async (req, res) => {
     const body = paymentBody.parse(req.body);
     const agencyId = req.user!.agency_id;
+
+    // Checked before the photo is stored so a re-send doesn't orphan a copy.
+    if (body.client_key) {
+      const dup = await findByClientKey(req.user!.id, body.client_key);
+      if (dup) {
+        res.status(200).json({ payment: dup, customer_closed: false, duplicate: true });
+        return;
+      }
+    }
 
     const custRes = await pool.query(
       `SELECT c.id, c.status FROM customers c
@@ -64,8 +83,8 @@ router.post(
     try {
       await client.query("BEGIN");
       const payRes = await client.query(
-        `INSERT INTO payments (customer_id, collected_by_user_id, amount, mode, photo_proof_url, paid_at)
-         VALUES ($1, $2, $3, $4, $5, COALESCE($6::date, now()))
+        `INSERT INTO payments (customer_id, collected_by_user_id, amount, mode, photo_proof_url, paid_at, client_key)
+         VALUES ($1, $2, $3, $4, $5, COALESCE($6::date, now()), $7)
          RETURNING *`,
         [
           body.customer_id,
@@ -74,6 +93,7 @@ router.post(
           body.mode ?? null,
           photoKey,
           body.paid_at ?? null,
+          body.client_key ?? null,
         ],
       );
 
@@ -91,6 +111,19 @@ router.post(
       });
     } catch (err) {
       await client.query("ROLLBACK");
+      // Two retries raced: the other one won, answer with its row.
+      if (
+        body.client_key &&
+        err instanceof Error &&
+        "code" in err &&
+        (err as { code?: string }).code === "23505"
+      ) {
+        const dup = await findByClientKey(req.user!.id, body.client_key);
+        if (dup) {
+          res.status(200).json({ payment: dup, customer_closed: false, duplicate: true });
+          return;
+        }
+      }
       throw err;
     } finally {
       client.release();

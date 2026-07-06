@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
 import '../../core/models/customer.dart';
+import '../../core/offline/offline_queue.dart';
 import '../worklist/worklist_provider.dart';
 
 class PaymentScreen extends ConsumerStatefulWidget {
@@ -58,18 +59,48 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
     setState(() { _loading = true; _error = null; });
     try {
       final api = ref.read(apiClientProvider);
-      final form = FormData.fromMap({
+      // One key for both paths: a lost response must not double-record money.
+      final payload = <String, dynamic>{
         'customer_id': widget.customer.id,
         'amount': amount,
         if (_mode != null) 'mode': _mode,
         if (_dateCtrl.text.isNotEmpty) 'paid_at': _dateCtrl.text,
         'close_customer': _closeCustomer.toString(),
+        'client_key': OfflineQueueNotifier.newClientKey(),
+      };
+      final form = FormData.fromMap({
+        ...payload,
         if (_photo != null)
           'photo': await MultipartFile.fromFile(_photo!.path,
               filename: 'proof.jpg', contentType: DioMediaType('image', 'jpeg')),
       });
 
-      await api.postForm('/payments', form);
+      try {
+        await api.postForm('/payments', form);
+      } catch (e) {
+        if (!isOfflineError(e)) rethrow;
+        // No network — persist the photo outside the picker cache and queue.
+        final photoPath =
+            _photo != null ? await OfflineQueueNotifier.persistPhoto(_photo!.path) : null;
+        await ref.read(offlineQueueProvider.notifier).enqueue(QueuedAction(
+              clientKey: payload['client_key'] as String,
+              type: 'payment',
+              payload: payload,
+              photoPath: photoPath,
+              createdAt: DateTime.now(),
+            ));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No network — payment saved offline, will sync automatically'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+          context.pop();
+          if (_closeCustomer) context.pop();
+        }
+        return;
+      }
 
       if (mounted) {
         ref.invalidate(worklistProvider);

@@ -29,7 +29,19 @@ const logBody = z.object({
   fields: fieldsSchema.default({}),
   call_duration_seconds: z.coerce.number().int().min(0).max(24 * 3600).optional(),
   extra_remark: z.string().trim().max(500).optional(), // free text appended after the composed remark
+  client_key: z.string().uuid().optional(), // offline-sync idempotency key
 });
+
+/** Look up a call log previously created with this idempotency key. */
+async function findByClientKey(agentId: string, clientKey: string) {
+  const existing = await pool.query(
+    "SELECT * FROM call_logs WHERE agent_id = $1 AND client_key = $2",
+    [agentId, clientKey],
+  );
+  if (!existing.rows[0]) return null;
+  const ptp = await pool.query("SELECT * FROM ptps WHERE call_log_id = $1", [existing.rows[0].id]);
+  return { call_log: existing.rows[0], ptp: ptp.rows[0] ?? null, duplicate: true };
+}
 
 /**
  * Log a call/visit disposition (build brief Sections 7-8): server validates the
@@ -41,6 +53,14 @@ router.post(
   asyncHandler(async (req, res) => {
     const body = logBody.parse(req.body);
     const agencyId = req.user!.agency_id;
+
+    if (body.client_key) {
+      const dup = await findByClientKey(req.user!.id, body.client_key);
+      if (dup) {
+        res.status(200).json(dup);
+        return;
+      }
+    }
 
     const custRes = await pool.query(
       `SELECT c.id, c.assigned_agent_id FROM customers c
@@ -70,8 +90,8 @@ router.post(
     try {
       await client.query("BEGIN");
       const callLog = await client.query(
-        `INSERT INTO call_logs (customer_id, agent_id, disposition_code_id, remark, call_duration_seconds, details)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        `INSERT INTO call_logs (customer_id, agent_id, disposition_code_id, remark, call_duration_seconds, details, client_key)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
         [
           body.customer_id,
           req.user!.id,
@@ -79,6 +99,7 @@ router.post(
           remark,
           body.call_duration_seconds ?? null,
           JSON.stringify(body.fields),
+          body.client_key ?? null,
         ],
       );
 
@@ -103,6 +124,19 @@ router.post(
       res.status(201).json({ call_log: callLog.rows[0], ptp });
     } catch (err) {
       await client.query("ROLLBACK");
+      // Two retries raced: the other one won, answer with its row.
+      if (
+        body.client_key &&
+        err instanceof Error &&
+        "code" in err &&
+        (err as { code?: string }).code === "23505"
+      ) {
+        const dup = await findByClientKey(req.user!.id, body.client_key);
+        if (dup) {
+          res.status(200).json(dup);
+          return;
+        }
+      }
       throw err;
     } finally {
       client.release();
