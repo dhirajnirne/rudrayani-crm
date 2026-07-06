@@ -216,6 +216,28 @@ async function deriveProducts(
   }
 }
 
+/**
+ * Bucket labels auto-register in the buckets master (Phase 5): new labels
+ * append at the end of the order with default category; the admin fixes
+ * ordering/flags on the Buckets page. Imports never block on bucket config.
+ */
+async function deriveBuckets(
+  client: PoolClient,
+  companyId: string,
+  rows: MappedRow[],
+): Promise<void> {
+  const labels = [...new Set(rows.map((r) => r.bucket).filter((b): b is string => !!b))];
+  for (const label of labels) {
+    await client.query(
+      `INSERT INTO buckets (company_id, label, sort_order)
+       VALUES ($1, $2,
+               COALESCE((SELECT MAX(sort_order) + 1 FROM buckets WHERE company_id = $1), 0))
+       ON CONFLICT (company_id, label) DO NOTHING`,
+      [companyId, label],
+    );
+  }
+}
+
 export interface CommitResult {
   import_run_id: string;
   total_rows: number;
@@ -260,6 +282,7 @@ export async function commitImport(params: {
       );
     }
     await deriveProducts(client, params.companyId, toInsert);
+    await deriveBuckets(client, params.companyId, toInsert);
     const run = await client.query(
       `INSERT INTO import_runs
          (company_id, template_id, uploaded_by, file_name, total_rows,

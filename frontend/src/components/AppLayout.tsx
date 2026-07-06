@@ -5,6 +5,7 @@ import {
   BankOutlined,
   DashboardOutlined,
   EnvironmentOutlined,
+  FilterOutlined,
   FileSearchOutlined,
   LogoutOutlined,
   ShopOutlined,
@@ -47,6 +48,11 @@ export default function AppLayout() {
       key: "/companies",
       icon: <ShopOutlined />,
       label: <Link to="/companies">Companies</Link>,
+    },
+    hasPermission("companies.manage") && {
+      key: "/buckets",
+      icon: <FilterOutlined />,
+      label: <Link to="/buckets">Buckets</Link>,
     },
     hasPermission("imports.manage") && {
       key: "/import",

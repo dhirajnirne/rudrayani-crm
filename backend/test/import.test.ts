@@ -232,11 +232,17 @@ describe("Products & buckets derivation (brief §4)", () => {
     expect(canonicals).toEqual(new Set(["Home Loan", "PL"]));
   });
 
-  it("buckets come straight from the imported data", async () => {
+  it("imported bucket labels auto-register in the buckets master", async () => {
     const res = await request(app)
       .get(`/api/buckets?company_id=${companyId}`)
       .set("Authorization", `Bearer ${token}`);
-    expect(res.body.buckets).toEqual(["B1", "B2", "B3"]);
+    const labels = res.body.buckets.map((b: { label: string }) => b.label);
+    expect(new Set(labels)).toEqual(new Set(["B1", "B2", "B3"]));
+    // Fresh labels come in with safe defaults the admin can then adjust.
+    for (const b of res.body.buckets) {
+      expect(b.category).toBe("normal");
+      expect(b.is_current).toBe(false);
+    }
   });
 
   it("an agent (customers.view only) cannot run imports", async () => {

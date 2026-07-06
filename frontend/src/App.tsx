@@ -4,6 +4,7 @@ import { useAuth } from "./auth/AuthContext";
 import AllocationPage from "./pages/AllocationPage";
 import AppLayout from "./components/AppLayout";
 import BranchesPage from "./pages/BranchesPage";
+import BucketsPage from "./pages/BucketsPage";
 import CompaniesPage from "./pages/CompaniesPage";
 import CustomersPage from "./pages/CustomersPage";
 import DashboardPage from "./pages/DashboardPage";
@@ -46,6 +47,7 @@ export default function App() {
         <Route path="branches" element={<BranchesPage />} />
         <Route path="teams" element={<TeamsPage />} />
         <Route path="companies" element={<CompaniesPage />} />
+        <Route path="buckets" element={<BucketsPage />} />
         <Route path="import" element={<ImportPage />} />
         <Route path="customers" element={<CustomersPage />} />
         <Route path="allocation" element={<AllocationPage />} />

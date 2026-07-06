@@ -8,6 +8,7 @@ import allocationRoutes from "./routes/allocations";
 import attendanceRoutes from "./routes/attendance";
 import authRoutes from "./routes/auth";
 import branchRoutes from "./routes/branches";
+import bucketRoutes from "./routes/buckets";
 import callLogRoutes from "./routes/call-logs";
 import catalogRoutes from "./routes/catalog";
 import companyRoutes from "./routes/companies";
@@ -59,6 +60,7 @@ export function createApp() {
   app.use("/api/tracking", trackingRoutes);
   app.use("/api/field-visits", fieldVisitRoutes);
   app.use("/api/reallocation-requests", reallocationRequestRoutes);
+  app.use("/api/buckets", bucketRoutes);
   app.use("/api", catalogRoutes);
 
   app.use(notFoundHandler);

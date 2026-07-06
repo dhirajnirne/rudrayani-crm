@@ -103,7 +103,7 @@ function useCompanyFilters() {
       api.get("/buckets", { params: { company_id: companyId } }),
     ]).then(([pRes, bRes]) => {
       setProducts(pRes.data.products);
-      setBuckets(bRes.data.buckets);
+      setBuckets(bRes.data.buckets.map((b: { label: string }) => b.label));
     });
   }, [companyId]);
 
