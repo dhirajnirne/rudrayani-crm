@@ -152,6 +152,90 @@ router.get(
   }),
 );
 
+/**
+ * Deposit reconciliation (Phase 5 "Deposited Metrics"): payments are pending
+ * until admin/ops mark the cash as banked. Listing + bulk marking.
+ */
+router.get(
+  "/deposits",
+  requirePermission("payments.deposit"),
+  asyncHandler(async (req, res) => {
+    const query = z
+      .object({
+        deposited: z.enum(["true", "false"]).optional(),
+        month: z
+          .string()
+          .regex(/^\d{4}-(0[1-9]|1[0-2])$/)
+          .optional(),
+        agent_id: z.string().uuid().optional(),
+        company_id: z.string().uuid().optional(),
+      })
+      .parse(req.query);
+
+    const conditions = ["co.agency_id = $1"];
+    const params: unknown[] = [req.user!.agency_id];
+    if (query.deposited === "true") conditions.push("p.deposited_at IS NOT NULL");
+    if (query.deposited === "false") conditions.push("p.deposited_at IS NULL");
+    if (query.month) {
+      params.push(`${query.month}-01`);
+      conditions.push(
+        `p.paid_at >= ($${params.length}::date::timestamp AT TIME ZONE 'Asia/Kolkata')
+         AND p.paid_at < ((($${params.length}::date + interval '1 month')::date)::timestamp AT TIME ZONE 'Asia/Kolkata')`,
+      );
+    }
+    if (query.agent_id) {
+      params.push(query.agent_id);
+      conditions.push(`p.collected_by_user_id = $${params.length}`);
+    }
+    if (query.company_id) {
+      params.push(query.company_id);
+      conditions.push(`c.company_id = $${params.length}`);
+    }
+
+    const { rows } = await pool.query(
+      `SELECT p.id, p.amount, p.mode, p.paid_at, p.deposited_at,
+              c.customer_name, c.loan_number, co.name AS company_name,
+              u.full_name AS collected_by_name,
+              du.full_name AS deposited_by_name
+         FROM payments p
+         JOIN customers c ON c.id = p.customer_id
+         JOIN companies co ON co.id = c.company_id
+         JOIN users u ON u.id = p.collected_by_user_id
+         LEFT JOIN users du ON du.id = p.deposited_by_user_id
+        WHERE ${conditions.join(" AND ")}
+        ORDER BY p.paid_at DESC
+        LIMIT 500`,
+      params,
+    );
+    res.json({ payments: rows });
+  }),
+);
+
+const markDepositedSchema = z.object({
+  payment_ids: z.array(z.string().uuid()).min(1).max(500),
+});
+
+/** Idempotent bulk mark: already-deposited and foreign-agency ids are skipped. */
+router.patch(
+  "/mark-deposited",
+  requirePermission("payments.deposit"),
+  asyncHandler(async (req, res) => {
+    const body = markDepositedSchema.parse(req.body);
+    const { rowCount } = await pool.query(
+      `UPDATE payments p
+          SET deposited_at = now(), deposited_by_user_id = $1
+         FROM customers c
+         JOIN companies co ON co.id = c.company_id
+        WHERE p.customer_id = c.id
+          AND co.agency_id = $2
+          AND p.id = ANY($3)
+          AND p.deposited_at IS NULL`,
+      [req.user!.id, req.user!.agency_id, body.payment_ids],
+    );
+    res.json({ ok: true, marked: rowCount ?? 0 });
+  }),
+);
+
 const PHOTO_CONTENT_TYPES: Record<string, string> = {
   jpg: "image/jpeg",
   png: "image/png",

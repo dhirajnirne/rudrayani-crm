@@ -7,6 +7,7 @@ import {
   AimOutlined,
   EnvironmentOutlined,
   FilterOutlined,
+  WalletOutlined,
   FileSearchOutlined,
   LogoutOutlined,
   ShopOutlined,
@@ -84,6 +85,11 @@ export default function AppLayout() {
       key: "/targets",
       icon: <AimOutlined />,
       label: <Link to="/targets">Targets</Link>,
+    },
+    hasPermission("payments.deposit") && {
+      key: "/deposits",
+      icon: <WalletOutlined />,
+      label: <Link to="/deposits">Deposits</Link>,
     },
   ].filter(Boolean) as { key: string }[];
 

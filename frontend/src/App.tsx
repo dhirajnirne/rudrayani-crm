@@ -8,6 +8,7 @@ import BucketsPage from "./pages/BucketsPage";
 import CompaniesPage from "./pages/CompaniesPage";
 import CustomersPage from "./pages/CustomersPage";
 import DashboardPage from "./pages/DashboardPage";
+import DepositsPage from "./pages/DepositsPage";
 import DispositionsPage from "./pages/DispositionsPage";
 import EmployeesPage from "./pages/EmployeesPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
@@ -55,6 +56,7 @@ export default function App() {
         <Route path="dispositions" element={<DispositionsPage />} />
         <Route path="tracking" element={<TrackingPage />} />
         <Route path="targets" element={<TargetsPage />} />
+        <Route path="deposits" element={<DepositsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
