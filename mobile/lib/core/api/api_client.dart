@@ -2,7 +2,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-const _baseUrl = String.fromEnvironment('API_URL', defaultValue: 'http://10.0.2.2:3000');
+// 10.0.2.2 = Android emulator -> host loopback; backend listens on 4000.
+const _baseUrl = String.fromEnvironment('API_URL', defaultValue: 'http://10.0.2.2:4000');
 
 final _storage = FlutterSecureStorage(
   aOptions: const AndroidOptions(encryptedSharedPreferences: true),
