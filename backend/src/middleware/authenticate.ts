@@ -48,3 +48,16 @@ export function requirePermission(permissionKey: string) {
     next();
   });
 }
+
+/** Passes when the user holds ANY of the given permissions (e.g. full vs self-scoped reports). */
+export function requireAnyPermission(...permissionKeys: string[]) {
+  return asyncHandler(async (req: Request, _res: Response, next: NextFunction) => {
+    const user = req.user;
+    if (!user) throw new HttpError(401, "Not authenticated");
+
+    for (const key of permissionKeys) {
+      if (await capabilitiesHavePermission(capabilitiesOf(user), key)) return next();
+    }
+    throw new HttpError(403, `Missing permission: ${permissionKeys.join(" or ")}`);
+  });
+}
