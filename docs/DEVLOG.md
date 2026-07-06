@@ -238,3 +238,317 @@ data loss, and products/buckets derived from the data itself.
 - `cd backend && npm test`
 - The UI for this arrives next (Tasks 2.3 + 2.4: disposition master admin +
   import wizard screens). Until then the flow is exercisable via curl/tests.
+
+---
+
+## 2026-07-05 — Task 2.3: Disposition master admin API
+
+**Goal:** brief §7 — agency-scoped CRUD on the disposition code master (70 seeded
+from Trail_Codes.xlsx), with retire/restore state management.
+
+### Changes
+- **`GET /api/dispositions`** — returns active codes for the logged-in agency;
+  `?include_inactive=true` shows retired ones. Open to any authenticated user
+  (field agents need the code list to log calls in Phase 3).
+- **`POST /api/dispositions`** — create a new code with all fields (action_code,
+  category, result_code, description, remark_template, needs_* flags).
+  Requires `dispositions.manage` permission (admin + ops manager).
+- **`PATCH /api/dispositions/:id`** — partial update, including `is_active` to
+  retire/restore. Validates the code belongs to the caller's agency (404 if not).
+- **8 integration tests** (`test/disposition.test.ts`) — agency scoping, active-only
+  list, include_inactive query, create, edit, retire, restore, and permission
+  checks (agents cannot edit). **All 8/8 green.**
+
+### How to view
+- `cd backend && npm test` — disposition tests included.
+- API: `GET http://localhost:4000/api/dispositions` (auth required) → 70 codes
+  from the seeded Trail_Codes.xlsx.
+
+---
+
+## 2026-07-05 — Task 2.4: Web portal — disposition, customer, and import screens
+
+**Goal:** complete the Phase 2 data-ingestion UI — disposition master admin, customer
+list, and the 4-step import wizard.
+
+### Changes (frontend)
+- **DispositionsPage** — table of all codes with action/category/result/description,
+  and tags showing required fields (needs_amount, needs_date, etc.). "Show
+  retired" toggle. Edit and Retire/Restore buttons behind the `dispositions.manage`
+  permission. Add Code modal with all fields and a template textarea.
+- **CustomersPage** — paginated list filterable by company → product → bucket
+  cascade, search bar (name/loan/mobile), expandable rows to show custom_fields
+  from unmapped import columns. "0 records / import data first" empty state when
+  the company has no customers.
+- **ImportPage** — 4-step wizard:
+  1. Company picker + .xlsx file upload (≤15 MB, drag-drop UI).
+  2. Excel column → system field mapper; load / save / version templates by name.
+  3. Preview validation report: total/valid/error/duplicate stats, unmapped-column
+     warning, first 50 error rows, first 50 duplicate loan numbers.
+  4. Commit confirmation with final counts, redirect to Customers list.
+  Plus an "Import History" tab showing per-company import runs (date/file/template/
+  uploader/inserted/duplicates/errors/status).
+- **AppLayout sidebar** now shows Import, Customers, Dispositions entries, gated on
+  the respective view/manage permissions.
+- **UI fixes:** `Typography.Statistic` → standalone `Statistic` component (Ant Design
+  API), removed unused `Space` import.
+- Seeded 5 real companies (Hero FinCorp, Bajaj Finance, TVS Credit, HDB Financial,
+  Tata Capital) via the live API for testing. Confirmed import → products derived →
+  customers queryable.
+
+### How to view
+1. Log in as admin at http://localhost:5173.
+2. **Dispositions screen:** click "Add code", fill in action/result/description, check
+   "Amount" and "Date" flags, paste a template, save. Table re-populates. Click Edit
+   to modify; Retire to hide (still visible with "Show retired" toggle).
+3. **Customers screen:** empty (no imports yet). Filter by company/product/bucket
+   becomes active once data is imported. Expandable rows show custom_fields.
+4. **Import screen (Wizard tab):**
+   - Pick a company, upload a sample .xlsx (70 cols or more), system detects columns.
+   - Map each column (e.g. "Loan Number" → loan_number, "Customer" → customer_name).
+   - Save as a template (version 1). Click "Apply Template & Parse Ledger".
+   - Preview: shows counts, any errors, or "All dupes" if rows already exist.
+   - Commit: inserts valid rows, ignores duplicates, stores unmapped columns as
+     JSON. Redirects to Customers list showing the imported data.
+   - Re-import the same file with the saved template → all rows show as duplicates
+     (correct behavior).
+5. **Import History tab:** shows all imports for each company, with template
+   versions and status tags (Clean / Partial / All dupes).
+
+---
+
+## 2026-07-05 — Tasks 3.1–3.3: Allocation, calling/disposition/PTP, payments
+
+**Goal:** brief §5/§6/§8 — the core collection workflow. Team leaders allocate
+customers; agents log dispositions with structured inputs (amount/date/mode/etc.);
+PTPs auto-created; payments recorded with photo proof.
+
+### Changes (backend)
+
+**Migration `1783500000000_collection-workflow.sql`:**
+- `customers.status` (active/closed) — the full customer journey ends at Closed.
+- `allocation_logs` — every (re)allocation is audited: from agent, to agent, by whom,
+  reason, timestamp. First allocation has `from_agent_id = NULL`; reallocations must
+  include a reason (enforced by the API).
+- `ptps` — PTP records: amount, promised_date, mode, status (pending/kept/broken).
+  Created automatically when a "promise" disposition is logged.
+- `call_logs.details` JSONB — structured inputs (amount/date/time/mode/reason/
+  name_relation) kept as data alongside the composed remark.
+- Two new data-driven permissions: `calls.log`, `payments.record` — granted to all
+  working roles (admin, ops manager, team leader, telecaller, field agent).
+
+**Allocation endpoints** (`src/routes/allocations.ts`):
+- **`GET /api/allocations/unallocated`** — queue of customers with `assigned_agent_id
+  = NULL`, filterable by company/product/bucket. Team leaders see this.
+- **`POST /api/allocations/assign`** — multi-select (up to 500) assign to an agent.
+  On reallocation (customer already assigned to someone else), a reason is required
+  and logged in `allocation_logs`. Agency-scoped, transaction-safe.
+- **`GET /api/allocations/logs?customer_id=`** — timeline of all moves for one
+  customer (from/to/by/reason/timestamp).
+
+**Disposition service** (`src/services/disposition-service.ts`):
+- Validates structured inputs against a code's `needs_*` flags (if `needs_amount=true`
+  but the agent didn't provide an amount, 400 error).
+- **Composes remarks** from the code's `remark_template` by matching placeholders
+  (e.g., `<amount>`, `<Date>`, `<mode>`) — flexible pattern matching covers
+  inconsistencies in the seeded Trail_Codes.xlsx.
+- **Auto-opens PTPs:** if the code's result_code/category/description contains "PTP"
+  or "Promise" (case-insensitive) and `needs_amount && needs_date`, a PTP row is
+  created.
+
+**Call-log endpoints** (`src/routes/call-logs.ts`):
+- **`POST /api/call-logs`** — log a disposition against a customer. Validates
+  required fields, composes the remark, stores the structured inputs in JSONB,
+  auto-creates PTPs for promise codes.
+- **`GET /api/call-logs?customer_id=`** — call history (remark, agent, disposition
+  code, duration, created_at).
+
+**Agent worklist & PTP endpoints:**
+- **`GET /api/worklist`** — the agent's today's allocation (assigned customers with
+  status=active). Returns last call remark + result_code, and any pending PTP with
+  its promised_date. Ordered by PTP promised_date ASC (most urgent first), then by
+  due_amount DESC (largest balances next).
+- **`GET /api/ptps/due?date=YYYY-MM-DD`** — reminders due by that date. Agents see
+  only their own; team leaders (with `customers.allocate`) see the entire agency.
+  Ordered by promised_date ASC, amount DESC.
+
+**Payment endpoints** (`src/routes/payments.ts`):
+- **`POST /api/payments`** (multipart) — record a payment. Accepts amount, mode,
+  paid_at (business date, optional, defaults to now), and an optional photo
+  (JPEG/PNG/WebP, ≤8 MB). Photo stored via `StorageProvider` under
+  `payments/<uuid>.ext`. Optional `close_customer=true` flag transitions the
+  customer to `status=closed` and clears `assigned_agent_id`.
+- **`GET /api/payments?customer_id=`** — payment history (amount, mode, paid_at,
+  has_photo flag, collected_by name).
+- **`GET /api/payments/:id/photo`** — streams the photo proof (agency-scoped,
+  Content-Type inferred from file ext). 404 if no photo attached or payment not
+  found.
+
+**Customer enhancements** (updated `GET /api/customers`):
+- Added filters: `status` (active/closed), `assigned` (true/false), `agent_id`.
+- Response now includes: customer `status`, `assigned_agent_id`, `assigned_agent_name`.
+
+**Integration tests** (`test/collection-workflow.test.ts`):
+- 14 tests driving the entire Phase 3 journey: allocation → worklist → real seeded
+  PTP code logged (template composed) → PTP reminder due → payment with photo →
+  customer closed → removed from worklist. Permission checks (agents cannot allocate).
+  All 14/14 green.
+
+### Changes (frontend)
+
+**AllocationPage** (`src/pages/AllocationPage.tsx`):
+- **Unallocated Queue tab** — company/product/bucket filters, multi-select customers,
+  picker to select which agent to assign to, "Assign" button (behind `customers
+  .allocate` permission).
+- **Allocated tab** — shows active customers currently assigned. Multi-select to
+  reallocate with a **mandatory reason** (enforced in the modal). Each row has a
+  "History" button opening a timeline modal showing all allocations (from → to, by
+  whom, reason, timestamp).
+- Company/product/bucket cascades work in both tabs (selecting a company loads its
+  products & buckets).
+
+**AppLayout sidebar** — "Allocation" entry visible to anyone with
+`customers.allocate` (team leader + up).
+
+**Type updates** (`src/types.ts`):
+- `Customer` now includes: `status`, `assigned_agent_id`, `assigned_agent_name`.
+- New type: `AllocationLog` (all fields from the allocation_logs table).
+
+### Verification
+
+**Tests:** 53/53 pass (14 new collection-workflow tests cover the full journey).
+
+**Live UI (Playwright):**
+1. Logged in as admin.
+2. Allocation page showed 4 demo customers unallocated.
+3. Selected 2, assigned to Priya Sharma (telecaller) → queue reduced to 2, Allocated
+   tab showed Priya's tag.
+4. Reallocated DEMO-1001 from Priya to Rahul Verma (field agent) with reason "Demo
+   reallocation — agent on leave" → both moves logged with timestamps.
+5. Clicked History on DEMO-1001 → timeline showed first allocation (to Priya) and
+   reallocation (to Rahul) with reason.
+
+**API flow (as Priya Sharma, telecaller):**
+1. `GET /api/worklist` → 3 customers assigned to her (DEMO-1002, DEMO-1003, DEMO-1004).
+2. Fetched the real seeded PTP disposition code (`result_code=PTP`, needs_amount +
+   needs_date, no mode required). Template: *"Customer agree to make payment of
+   <amount> on <Date> at <Time>"*.
+3. `POST /api/call-logs` on DEMO-1002 with amount ₹15,000, date 2026-07-08, time
+   "11:00 AM" → composed remark: *"Customer agree to make payment of 15000 on
+   2026-07-08 at 11:00 AM"*. PTP created automatically (status=pending, promised_date
+   2026-07-07 in DB / UTC, normalized to 2026-07-08 per the date).
+4. `GET /api/ptps/due?date=2026-07-08` → Sunita Rao's ₹15,000 promise appeared in
+   the reminders list.
+5. Recorded a payment: `POST /api/payments` (multipart) with amount ₹15,000, mode UPI,
+   paid_at 2026-07-05, photo (1×1 PNG), and `close_customer=true` → payment stored
+   with photo under `payments/1f1158d1….png`.
+6. `GET /api/worklist` afterward → customer removed (now closed, status=closed,
+   assigned_agent_id=NULL).
+
+**DB state after run:**
+- DEMO-1002: `status=closed`, no agent assigned, 1 call_log with JSONB details, 1
+  pending PTP, 1 payment with photo.
+- allocation_logs: 5 rows (4 first allocations, 1 reallocation with reason).
+
+### How to view
+1. Start the servers: `cd backend && npm run dev` (in another shell: `cd frontend &&
+   npm run dev`).
+2. Log in as the dev admin at http://localhost:5173 (phone 9999999999 / Admin@1234).
+3. **Allocation page** → Unallocated Queue tab shows demo customers (if seeded).
+   Multi-select → assign to an agent → table refreshes.
+4. Click the Allocated tab → see assigned customers with their agent tags. Select
+   one → "Reallocate" button → pick new agent + mandatory reason → history timeline
+   shows both moves.
+5. To log a disposition and payment manually: switch to a telecaller account
+   (create one via Employees screen, log in). Their worklist shows only their
+   customers. Log a disposition via the API (not yet a UI screen — Phase 3 agent
+   app gets this). Record a payment with photo via the API. Watch the customer
+   disappear from the worklist after close_customer=true.
+6. `cd backend && npm test` — 53/53 green (disposition, org, auth, import, and
+   new collection-workflow tests all pass).
+
+---
+
+## 2026-07-06 — Tasks 3.4 + 3.5: Flutter mobile app — foundation + agent workflow
+
+**Goal:** brief §8 + §10 — the Android agent app: login with device binding,
+today's worklist, click-to-call, disposition logging with dynamic forms,
+payment capture with photo proof, and PTP history. Backend Tasks 3.1–3.3 were
+re-verified before starting (routes, tests, and web allocation screen all in
+place; `npm test` 53/53 green).
+
+### Changes (mobile/ — new Flutter project, Android-only)
+
+**Project setup**
+- `flutter create` project `rudrayani_mobile` (Flutter 3.44.3 / Dart 3.12.2),
+  Android platform only per the confirmed plan.
+- `pubspec.yaml` dependencies: `dio` (HTTP), `flutter_secure_storage` (encrypted
+  token persistence), `device_info_plus` (device binding), `go_router`
+  (navigation), `flutter_riverpod` (state), `intl` (₹/date formatting),
+  `url_launcher` (tel: handoff), `image_picker` (camera/gallery).
+- `AndroidManifest.xml`: INTERNET, CALL_PHONE, CAMERA, READ_MEDIA_IMAGES
+  permissions + a `tel:` intent query so `canLaunchUrl` works on Android 11+.
+
+**Core (`lib/core/`)**
+- `api/api_client.dart` — Dio client pointed at `http://10.0.2.2:3000/api` by
+  default (Android-emulator bridge to host; override with
+  `--dart-define=API_URL=...`). Interceptor attaches the Bearer token from
+  secure storage; on 401 it exchanges the refresh token once via
+  `/auth/refresh`, retries the original request, and clears tokens if the
+  refresh fails (go_router's guard then lands the user on /login).
+- `auth/auth_provider.dart` — `AuthNotifier` (Riverpod StateNotifier): `login()`
+  sends phone/password plus `device_id` from `device_info_plus` (brief §10
+  device binding); `init()` restores the session from secure storage on app
+  start; `logout()` clears tokens. Exposes `isTeamLeader` / `isTelecaller` /
+  `isFieldAgent` getters for role-aware UI.
+- `models/customer.dart`, `models/disposition_code.dart` — worklist row (incl.
+  JSONB custom fields, last disposition, active PTP) and disposition code with
+  the `needs_*` flags that drive the dynamic call-log form.
+- `router.dart` — GoRouter with an auth redirect guard. Routes: `/login`,
+  `/home` (worklist), `/customer/:id`, `/call-log`, `/payment`, `/ptps`;
+  customer object passed via `extra` so detail screens render instantly.
+- `main.dart` — Material 3 theme seeded with Deep Trust Teal `#00535B` from
+  `docs/design-brief.md`; session restore on startup.
+
+**Screens (`lib/features/`)**
+- `auth/login_screen.dart` — 10-digit phone + password, loading state, lockout
+  and generic error handling.
+- `worklist/worklist_screen.dart` — today's allocation with search (name /
+  loan number / mobile), pull-to-refresh, per-card last-result code and PTP
+  badge (orange when due/overdue), logout confirmation.
+- `worklist/customer_detail_screen.dart` — full customer context: loan card
+  (loan no., company, product, bucket, due, EMI), custom fields from the
+  import template, last disposition, active PTP; 48px action buttons for
+  Call / Log Call / Payment / PTPs. **Click-to-call** launches the OS dialer
+  via `url_launcher` `tel:` — handoff only, no VoIP (brief §8).
+- `call_log/call_log_screen.dart` — disposition picker loaded from
+  `/api/dispositions`; the form renders only the fields the selected code's
+  `needs_*` flags require (amount/date/time/mode/reason/name-relation), with
+  client-side required-field validation, a live composed-remark preview, and
+  submit to `POST /api/call-logs` (server composes the final remark from the
+  `remark_template` and creates the PTP row when applicable).
+- `payment/payment_screen.dart` — amount, mode, date + **photo proof** via
+  camera or gallery (`image_picker`, resized to ≤1920px q80), preview +
+  remove, "Mark customer as Closed" toggle, multipart upload to
+  `POST /api/payments`.
+- `ptps/ptps_screen.dart` — the customer's PTP history with status badges
+  (pending/kept/broken) and an overdue indicator on past-due pending promises.
+
+### Verification
+- `dart analyze lib/` — **No issues found** (fixed 9 warnings along the way:
+  unused import, deprecated `value`/`activeColor` Material 3 APIs, string
+  interpolation braces, if-block style, BuildContext-across-async-gap).
+- Backend re-verification: `cd backend && npm test` — 53/53 green.
+
+### How to view
+1. Start the backend (`cd backend && npm run dev`) and an Android emulator.
+2. `cd mobile && flutter run` (emulator reaches the host API via 10.0.2.2; on
+   a physical device pass `--dart-define=API_URL=http://<your-LAN-IP>:3000`).
+3. Log in as the demo telecaller (8888888801 / Admin@1234). The worklist shows
+   customers allocated to them (allocate on the web portal first).
+4. Tap a customer → Call opens the dialer → Log Call → pick a PTP code → the
+   form asks for amount/date/mode → preview → save → worklist refreshes.
+5. Record Payment → amount + photo from camera → save; with "Mark as Closed"
+   on, the customer drops off the worklist. PTPs screen shows the promise.
+
+---
