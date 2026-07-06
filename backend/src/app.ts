@@ -23,6 +23,7 @@ import locationRoutes from "./routes/location";
 import paymentRoutes from "./routes/payments";
 import ptpRoutes from "./routes/ptps";
 import reallocationRequestRoutes from "./routes/reallocation-requests";
+import targetRoutes from "./routes/targets";
 import teamRoutes from "./routes/teams";
 import trackingRoutes from "./routes/tracking";
 import worklistRoutes from "./routes/worklist";
@@ -61,6 +62,7 @@ export function createApp() {
   app.use("/api/field-visits", fieldVisitRoutes);
   app.use("/api/reallocation-requests", reallocationRequestRoutes);
   app.use("/api/buckets", bucketRoutes);
+  app.use("/api/targets", targetRoutes);
   app.use("/api", catalogRoutes);
 
   app.use(notFoundHandler);

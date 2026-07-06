@@ -13,6 +13,7 @@ import EmployeesPage from "./pages/EmployeesPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ImportPage from "./pages/ImportPage";
 import LoginPage from "./pages/LoginPage";
+import TargetsPage from "./pages/TargetsPage";
 import TeamsPage from "./pages/TeamsPage";
 import TrackingPage from "./pages/TrackingPage";
 
@@ -53,6 +54,7 @@ export default function App() {
         <Route path="allocation" element={<AllocationPage />} />
         <Route path="dispositions" element={<DispositionsPage />} />
         <Route path="tracking" element={<TrackingPage />} />
+        <Route path="targets" element={<TargetsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

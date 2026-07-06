@@ -4,6 +4,7 @@ import {
   AuditOutlined,
   BankOutlined,
   DashboardOutlined,
+  AimOutlined,
   EnvironmentOutlined,
   FilterOutlined,
   FileSearchOutlined,
@@ -78,6 +79,11 @@ export default function AppLayout() {
       key: "/tracking",
       icon: <EnvironmentOutlined />,
       label: <Link to="/tracking">Tracking</Link>,
+    },
+    hasPermission("targets.manage") && {
+      key: "/targets",
+      icon: <AimOutlined />,
+      label: <Link to="/targets">Targets</Link>,
     },
   ].filter(Boolean) as { key: string }[];
 
