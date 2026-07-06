@@ -5,6 +5,7 @@ import pinoHttp from "pino-http";
 import { logger } from "./config/logger";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler";
 import allocationRoutes from "./routes/allocations";
+import attendanceRoutes from "./routes/attendance";
 import authRoutes from "./routes/auth";
 import branchRoutes from "./routes/branches";
 import callLogRoutes from "./routes/call-logs";
@@ -16,6 +17,7 @@ import employeeRoutes from "./routes/employees";
 import healthRoutes from "./routes/health";
 import importTemplateRoutes from "./routes/import-templates";
 import importRoutes from "./routes/imports";
+import locationRoutes from "./routes/location";
 import paymentRoutes from "./routes/payments";
 import ptpRoutes from "./routes/ptps";
 import teamRoutes from "./routes/teams";
@@ -49,8 +51,9 @@ export function createApp() {
   app.use("/api/worklist", worklistRoutes);
   app.use("/api/ptps", ptpRoutes);
   app.use("/api/payments", paymentRoutes);
+  app.use("/api/attendance", attendanceRoutes);
+  app.use("/api/location", locationRoutes);
   app.use("/api", catalogRoutes);
-  // TODO (Phase 4): location-ping ingestion route (Section 9 of the build brief)
 
   app.use(notFoundHandler);
   app.use(errorHandler);
