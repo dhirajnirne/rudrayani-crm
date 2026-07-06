@@ -21,6 +21,7 @@ import locationRoutes from "./routes/location";
 import paymentRoutes from "./routes/payments";
 import ptpRoutes from "./routes/ptps";
 import teamRoutes from "./routes/teams";
+import trackingRoutes from "./routes/tracking";
 import worklistRoutes from "./routes/worklist";
 
 export function createApp() {
@@ -53,6 +54,7 @@ export function createApp() {
   app.use("/api/payments", paymentRoutes);
   app.use("/api/attendance", attendanceRoutes);
   app.use("/api/location", locationRoutes);
+  app.use("/api/tracking", trackingRoutes);
   app.use("/api", catalogRoutes);
 
   app.use(notFoundHandler);

@@ -663,3 +663,72 @@ the design keeps the permission story minimal.
 5. Punch Out → banner grey, notification gone, `attendance` row closed.
 
 ---
+
+## 2026-07-06 — Task 4.5 (pulled forward): Web live tracking, route replay, stationary alerts
+
+**Goal:** brief §9 — managers see where field agents are live, replay the
+day's route as a highlighted path, and get alerted when an agent sits at one
+location too long (new requirement: > 20 minutes). Verified the permission
+model along the way.
+
+### Changes (backend)
+- **Migration `1783700000000_tracking-view.sql`** — permission
+  `tracking.view` granted to `agency_admin`, `operations_manager`,
+  `team_leader` (agents excluded).
+- **`GET /api/tracking/live`** — every on-duty user in scope with their
+  latest ping and an actionable status:
+  - `moving` · `stationary` (inside 100 m of the current spot for ≥ 20 min;
+    both thresholds overridable per agency via `agencies.settings`) ·
+    `no_signal` (last ping > 10 min old — app killed / GPS off / no network,
+    a different problem than standing still) · `awaiting_first_ping`.
+  - `stationary_since` is the first ping of the *current dwell* (only pings
+    since punch-in count, so yesterday's parking spot can't trigger it).
+  - Response includes an `alerts` array (stationary + no_signal).
+- **`GET /api/tracking/route?user_id&date`** — the day's ordered pings
+  (day boundaries in IST, not server timezone), total path length via
+  PostGIS `ST_MakeLine`/`ST_Length`, and that day's shifts. Scope-checked:
+  404 for users outside the caller's scope or agency.
+- **Scoping** (brief §3): Agency Admin / Ops Manager → whole agency;
+  Team Leader → own team only (a TL with no team sees nothing, not
+  everything); agents → 403.
+- **16 integration tests** (`test/tracking.test.ts`), including a
+  **permission audit**: agency_admin holds *every* permission in the
+  catalog, operations_manager everything except `ops_managers.create` +
+  `billing.view` — a regression net for future migrations that forget
+  grants. Suite **82/82 green**.
+
+### Changes (frontend)
+- `leaflet` + `react-leaflet@4` (React-18 compatible), OSM tiles (free, per
+  the brief's map-provider decision).
+- **`TrackingPage.tsx`** (menu item "Tracking", visible only with
+  `tracking.view`):
+  - **Live Map tab** — auto-refresh every 30 s; colored dot per agent
+    (green moving, red stationary, orange no-signal); red **alert banners**
+    ("X has been at one location for N minutes…") and an on-duty table with
+    status tags, last-ping and punch-in times.
+  - **Route Replay tab** — employee + date (limited to the 60-day retention
+    window) → the day's path drawn as a teal polyline with per-ping dots
+    (timestamps on hover), Start/End markers, ping count and km total.
+    A pure Team Leader's employee dropdown is pre-filtered to their team,
+    mirroring the server's scope.
+
+### Verification (all run)
+- `npm test` — 82/82, including scoping, stationary/no-signal/first-ping
+  edge cases, IST date handling, empty-day routes, malformed dates, and the
+  cross-agency leak checks.
+- Playwright against live servers: logged in as admin → Tracking → the
+  seeded demo agent (Rahul Verma) shows a red "stationary 28 min" alert on
+  the live map; Route Replay draws his seeded 2.48 km route (screenshots
+  under the job tmp dir).
+
+### How to view
+1. `cd backend && npm run dev` + `cd frontend && npm run dev`.
+2. Log in as admin (9999999999 / Admin@1234) → **Tracking** in the sidebar.
+3. Live Map shows anyone punched in (demo data seeded for Rahul Verma —
+   his pings have gone stale by now, so he demos the *no-signal* alert).
+4. Route Replay → pick Rahul Verma + today → highlighted path with
+   start/end markers and distance.
+5. Log in as a TL → only their team is visible; as a telecaller/field agent
+   the Tracking menu item is absent and the API returns 403.
+
+---

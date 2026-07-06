@@ -13,6 +13,7 @@ import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ImportPage from "./pages/ImportPage";
 import LoginPage from "./pages/LoginPage";
 import TeamsPage from "./pages/TeamsPage";
+import TrackingPage from "./pages/TrackingPage";
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const { user, loading } = useAuth();
@@ -49,6 +50,7 @@ export default function App() {
         <Route path="customers" element={<CustomersPage />} />
         <Route path="allocation" element={<AllocationPage />} />
         <Route path="dispositions" element={<DispositionsPage />} />
+        <Route path="tracking" element={<TrackingPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

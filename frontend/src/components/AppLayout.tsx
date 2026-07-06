@@ -4,6 +4,7 @@ import {
   AuditOutlined,
   BankOutlined,
   DashboardOutlined,
+  EnvironmentOutlined,
   FileSearchOutlined,
   LogoutOutlined,
   ShopOutlined,
@@ -65,6 +66,11 @@ export default function AppLayout() {
       key: "/dispositions",
       icon: <AuditOutlined />,
       label: <Link to="/dispositions">Dispositions</Link>,
+    },
+    hasPermission("tracking.view") && {
+      key: "/tracking",
+      icon: <EnvironmentOutlined />,
+      label: <Link to="/tracking">Tracking</Link>,
     },
   ].filter(Boolean) as { key: string }[];
 
