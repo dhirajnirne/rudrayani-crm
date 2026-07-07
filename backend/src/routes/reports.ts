@@ -3,13 +3,19 @@ import ExcelJS from "exceljs";
 import { z } from "zod";
 import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requireAnyPermission } from "../middleware/authenticate";
+import { HttpError } from "../middleware/error-handler";
 import { capabilitiesHavePermission } from "../services/permission-service";
 import { capabilitiesOf } from "../types/user";
 import {
   agentBreakdown,
+  bucketMovementReport,
   dashboard,
+  dimensionBreakdown,
   filterOptions,
   overview,
+  recallReport,
+  trailAnalytics,
+  type BreakdownDimension,
   type ReportFilters,
 } from "../services/report-service";
 
@@ -32,6 +38,7 @@ const filtersSchema = z.object({
   agent_id: z.string().uuid().optional(),
   product: z.string().trim().min(1).max(200).optional(),
   bucket: z.string().trim().min(1).max(200).optional(),
+  status: z.enum(["active", "closed", "recalled"]).optional(),
 });
 
 async function hasFullView(req: Request): Promise<boolean> {
@@ -74,6 +81,81 @@ router.get(
     const full = await hasFullView(req);
     const rows = await agentBreakdown(req.user!, filters, full);
     res.json({ rows });
+  }),
+);
+
+const DIMENSIONS = ["company", "product", "bucket", "branch", "team", "agent"] as const;
+
+router.get(
+  "/breakdown",
+  asyncHandler(async (req, res) => {
+    const { dimension, ...rest } = z
+      .object({ dimension: z.enum(DIMENSIONS) })
+      .and(filtersSchema)
+      .parse(req.query);
+    const filters = rest as ReportFilters;
+    const full = await hasFullView(req);
+    const rows = await dimensionBreakdown(req.user!, filters, full, dimension as BreakdownDimension);
+    res.json({ dimension, rows });
+  }),
+);
+
+const dateRangeSchema = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "from must be YYYY-MM-DD"),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "to must be YYYY-MM-DD"),
+  company_id: z.string().uuid().optional(),
+  team_id: z.string().uuid().optional(),
+  agent_id: z.string().uuid().optional(),
+  product: z.string().trim().min(1).max(200).optional(),
+  bucket: z.string().trim().min(1).max(200).optional(),
+});
+
+/** Trail/disposition analytics: event-level data, so a free date range fits better than month-at-a-time. */
+router.get(
+  "/trail",
+  asyncHandler(async (req, res) => {
+    const { from, to, ...filters } = dateRangeSchema.parse(req.query);
+    const full = await hasFullView(req);
+    // Same scope clamp as everything else -- just applied to a date range, not a month.
+    let scope: Omit<ReportFilters, "month">;
+    if (full) {
+      scope = filters;
+    } else {
+      if (filters.agent_id && filters.agent_id !== req.user!.id) {
+        throw new HttpError(403, "You can only view your own trail activity");
+      }
+      scope = { ...filters, agent_id: req.user!.id, team_id: undefined };
+    }
+    const result = await trailAnalytics(req.user!.agency_id, from, to, scope);
+    res.json(result);
+  }),
+);
+
+router.get(
+  "/recalls",
+  asyncHandler(async (req, res) => {
+    const q = z
+      .object({
+        month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "month must be YYYY-MM"),
+        company_id: z.string().uuid().optional(),
+      })
+      .parse(req.query);
+    const result = await recallReport(req.user!.agency_id, `${q.month}-01`, q.company_id);
+    res.json(result);
+  }),
+);
+
+router.get(
+  "/bucket-movements",
+  asyncHandler(async (req, res) => {
+    const q = z
+      .object({
+        month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "month must be YYYY-MM"),
+        company_id: z.string().uuid().optional(),
+      })
+      .parse(req.query);
+    const result = await bucketMovementReport(req.user!.agency_id, `${q.month}-01`, q.company_id);
+    res.json(result);
   }),
 );
 
@@ -183,6 +265,74 @@ router.get(
       ]);
     }
     agentsSheet.getColumn(1).width = 24;
+
+    const breakdownDimension = z
+      .enum(DIMENSIONS)
+      .default("product")
+      .parse(req.query.breakdown_dimension);
+    const breakdownRows = await dimensionBreakdown(req.user!, filters, full, breakdownDimension);
+    const breakdownSheet = wb.addWorksheet("Breakdown");
+    breakdownSheet.addRow([`By ${breakdownDimension}`, "Allocated Amount", "Allocated Count", "Collected", "Resolution %", "Rollback %", "Normalization %", "Recovery %", "Trail %", "Target", "Achievement %"]);
+    breakdownSheet.getRow(1).font = { bold: true };
+    for (const r of breakdownRows) {
+      breakdownSheet.addRow([
+        r.label,
+        r.allocated_amount,
+        r.allocated_count,
+        r.collected_amount,
+        r.resolution_pct,
+        r.rollback_pct,
+        r.normalization_pct,
+        r.recovery_pct,
+        r.trail_pct,
+        r.target_amount,
+        r.achievement_pct,
+      ]);
+    }
+    breakdownSheet.getColumn(1).width = 24;
+
+    // Trail/recalls/bucket-movements are month-scoped here (the export's own
+    // filters.month), even though /trail itself takes a free date range.
+    const [y, m] = filters.month.split("-").map(Number);
+    const monthStart = filters.month;
+    const monthEnd = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+    const trail = await trailAnalytics(req.user!.agency_id, monthStart, monthEnd, filters);
+    const trailSheet = wb.addWorksheet("Trail");
+    trailSheet.addRow(["Total Trails", trail.total_trails]);
+    trailSheet.addRow(["Unique Customers Contacted", trail.unique_customers_contacted]);
+    trailSheet.addRow(["PTPs Created", trail.ptps_created]);
+    trailSheet.addRow(["PTPs Kept", trail.ptps_kept]);
+    trailSheet.addRow(["PTPs Broken", trail.ptps_broken]);
+    trailSheet.addRow(["PTP Conversion %", trail.ptp_conversion_pct]);
+    trailSheet.addRow([]);
+    trailSheet.addRow(["Action Code", "Count"]);
+    for (const r of trail.by_action_code) trailSheet.addRow([r.action_code, r.count]);
+    trailSheet.addRow([]);
+    trailSheet.addRow(["Result Code", "Count"]);
+    for (const r of trail.by_result_code) trailSheet.addRow([r.result_code, r.count]);
+    trailSheet.getColumn(1).width = 28;
+
+    const recalls = await recallReport(req.user!.agency_id, filters.month, filters.company_id);
+    const recallsSheet = wb.addWorksheet("Recalls");
+    recallsSheet.addRow(["Total Recalled This Month", recalls.total_recalled_count]);
+    recallsSheet.addRow(["Total Recalled Amount", recalls.total_recalled_amount]);
+    recallsSheet.addRow(["Lifetime Recalled Book", recalls.lifetime_recalled_count]);
+    recallsSheet.addRow([]);
+    recallsSheet.addRow(["Company", "Recalled Count", "Recalled Amount"]);
+    recallsSheet.getRow(5).font = { bold: true };
+    for (const r of recalls.by_company) {
+      recallsSheet.addRow([r.company_name, r.recalled_count, r.recalled_amount]);
+    }
+    recallsSheet.getColumn(1).width = 24;
+
+    const movements = await bucketMovementReport(req.user!.agency_id, filters.month, filters.company_id);
+    const movementsSheet = wb.addWorksheet("Bucket Movements");
+    movementsSheet.addRow(["Company", "Bucket", "Payment-Detected", "Allocation-Confirmed", "Detected Not Confirmed"]);
+    movementsSheet.getRow(1).font = { bold: true };
+    for (const r of movements.rows) {
+      movementsSheet.addRow([r.company_name, r.bucket, r.payment_detected, r.allocation_confirmed, r.detected_not_confirmed]);
+    }
+    movementsSheet.getColumn(1).width = 24;
 
     res.setHeader(
       "Content-Type",

@@ -388,6 +388,65 @@ describe("report engine", () => {
     expect((res.body as Buffer).length).toBeGreaterThan(1000);
   });
 
+  it("breakdown by product reconciles with the dashboard totals for the same filters", async () => {
+    const res = await request(app)
+      .get("/api/reports/breakdown?month=2026-05&dimension=product")
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    const totalCount = res.body.rows.reduce((s: number, r: { allocated_count: number }) => s + r.allocated_count, 0);
+    const totalAmount = res.body.rows.reduce((s: number, r: { allocated_amount: number }) => s + r.allocated_amount, 0);
+    expect(totalCount).toBe(6); // reconciles with dashboard allocated.count
+    expect(totalAmount).toBe(950000); // reconciles with dashboard allocated.amount
+
+    const lpl = res.body.rows.find((r: { label: string }) => r.label === "LPL");
+    expect(lpl).toMatchObject({ allocated_count: 1, allocated_amount: 300000 });
+    const cvl = res.body.rows.find((r: { label: string }) => r.label === "CVL");
+    expect(cvl).toMatchObject({ allocated_count: 5, allocated_amount: 650000 });
+    expect(cvl.target_amount).toBeNull(); // product isn't an org scope level -- no target
+  });
+
+  it("breakdown by bucket is ordered by delinquency progression, not amount", async () => {
+    const res = await request(app)
+      .get("/api/reports/breakdown?month=2026-05&dimension=bucket")
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    const labels = res.body.rows.map((r: { label: string }) => r.label);
+    expect(labels).toEqual(["30", "60", "NPA"]); // sort_order 2, 3, 4 -- not the biggest book first
+    const thirty = res.body.rows.find((r: { label: string }) => r.label === "30");
+    expect(thirty).toMatchObject({ allocated_count: 4, allocated_amount: 450000 });
+  });
+
+  it("breakdown by branch reconciles across teams sharing the same branch", async () => {
+    const res = await request(app)
+      .get("/api/reports/breakdown?month=2026-05&dimension=branch")
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    // Team A and Team B both belong to the one seeded branch -- a single row
+    // whose totals equal the whole agency's, not two double-counted halves.
+    expect(res.body.rows).toHaveLength(1);
+    expect(res.body.rows[0]).toMatchObject({ allocated_count: 6, allocated_amount: 950000 });
+  });
+
+  it("breakdown by team splits the same book agent breakdown already verified", async () => {
+    const res = await request(app)
+      .get("/api/reports/breakdown?month=2026-05&dimension=team")
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    const teamA = res.body.rows.find((r: { key: string }) => r.key === teamId);
+    const teamB = res.body.rows.find((r: { key: string }) => r.key === team2Id);
+    expect(teamA.allocated_count).toBe(4);
+    expect(teamB.allocated_count).toBe(2);
+  });
+
+  it("a team leader's breakdown by agent is clamped to their own team", async () => {
+    const res = await request(app)
+      .get("/api/reports/breakdown?month=2026-05&dimension=agent")
+      .set("Authorization", `Bearer ${tlToken}`);
+    expect(res.status).toBe(200);
+    const agentIds = res.body.rows.map((r: { key: string }) => r.key);
+    expect(agentIds).toEqual([agentId]); // agent2Id (team B) never appears
+  });
+
   it("monthDays handles past, current and future months in IST", () => {
     expect(monthDays("2026-05", new Date("2026-07-06T12:00:00Z"))).toEqual({
       in_month: 31,
@@ -403,5 +462,188 @@ describe("report engine", () => {
     expect(current.in_month).toBe(31);
     expect(current.elapsed).toBe(6);
     expect(current.left).toBe(25);
+  });
+});
+
+describe("trail analytics", () => {
+  let trailCustomerId: string;
+  let ptpCallLogId: string;
+
+  beforeAll(async () => {
+    const cust = await pool.query(
+      `INSERT INTO customers (company_id, loan_number, customer_name, product, due_amount, emi)
+       VALUES ($1, 'RPT-TRAIL-1', 'Trail Customer', 'CVL', 10000, 5000) RETURNING id`,
+      [companyId],
+    );
+    trailCustomerId = cust.rows[0].id;
+
+    const dc1 = await pool.query(
+      `INSERT INTO disposition_codes (agency_id, action_code, result_code, description)
+       VALUES ($1, 'OC', 'PTP', 'Promise to pay') RETURNING id`,
+      [agencyId],
+    );
+    const dc2 = await pool.query(
+      `INSERT INTO disposition_codes (agency_id, action_code, result_code, description)
+       VALUES ($1, 'OC', 'RNR', 'Ringing not responding') RETURNING id`,
+      [agencyId],
+    );
+
+    const call1 = await pool.query(
+      `INSERT INTO call_logs (customer_id, agent_id, disposition_code_id, remark, created_at)
+       VALUES ($1, $2, $3, 'will pay', ('2026-05-20 10:00:00'::timestamp AT TIME ZONE 'Asia/Kolkata'))
+       RETURNING id`,
+      [trailCustomerId, agentId, dc1.rows[0].id],
+    );
+    ptpCallLogId = call1.rows[0].id;
+    await pool.query(
+      `INSERT INTO call_logs (customer_id, agent_id, disposition_code_id, remark, created_at)
+       VALUES ($1, $2, $3, 'no answer', ('2026-05-21 10:00:00'::timestamp AT TIME ZONE 'Asia/Kolkata'))`,
+      [trailCustomerId, agentId, dc2.rows[0].id],
+    );
+
+    await pool.query(
+      `INSERT INTO ptps (customer_id, call_log_id, agent_id, amount, promised_date, status)
+       VALUES ($1, $2, $3, 5000, '2026-05-25', 'kept')`,
+      [trailCustomerId, ptpCallLogId, agentId],
+    );
+  });
+
+  afterAll(async () => {
+    await pool.query(`DELETE FROM ptps WHERE customer_id = $1`, [trailCustomerId]);
+    await pool.query(`DELETE FROM call_logs WHERE customer_id = $1`, [trailCustomerId]);
+    await pool.query(`DELETE FROM disposition_codes WHERE agency_id = $1`, [agencyId]);
+    await pool.query(`DELETE FROM customers WHERE id = $1`, [trailCustomerId]);
+  });
+
+  it("counts trails by action/result code and computes PTP conversion", async () => {
+    const res = await request(app)
+      .get("/api/reports/trail?from=2026-05-01&to=2026-05-31")
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    // 2 dispositioned calls from this block + the 1 un-dispositioned call from
+    // the May fixture (RPT-01) -- total_trails counts every call_log row.
+    expect(res.body.total_trails).toBe(3);
+    expect(res.body.unique_customers_contacted).toBe(2); // trailCustomerId + RPT-01
+
+    const ptpAction = res.body.by_action_code.find((r: { action_code: string }) => r.action_code === "OC");
+    expect(ptpAction.count).toBe(2); // only the two dispositioned calls have an action_code
+    const ptpResult = res.body.by_result_code.find((r: { result_code: string }) => r.result_code === "PTP");
+    expect(ptpResult.count).toBe(1);
+
+    expect(res.body.ptps_created).toBe(1);
+    expect(res.body.ptps_kept).toBe(1);
+    expect(res.body.ptps_broken).toBe(0);
+    expect(res.body.ptp_conversion_pct).toBe(100); // 1 kept / (1 kept + 0 broken)
+  });
+
+  it("an agent's own trail request is scope-clamped, not 403'd, when they don't try to widen", async () => {
+    const res = await request(app)
+      .get("/api/reports/trail?from=2026-05-01&to=2026-05-31")
+      .set("Authorization", `Bearer ${agentToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.total_trails).toBe(3); // all logged by agentId
+
+    const widen = await request(app)
+      .get(`/api/reports/trail?from=2026-05-01&to=2026-05-31&agent_id=${agent2Id}`)
+      .set("Authorization", `Bearer ${agentToken}`);
+    expect(widen.status).toBe(403);
+  });
+});
+
+describe("recall report", () => {
+  let recalledCustomerId: string;
+
+  beforeAll(async () => {
+    const cust = await pool.query(
+      `INSERT INTO customers (company_id, loan_number, customer_name, due_amount, status, recalled_at)
+       VALUES ($1, 'RPT-RECALL-1', 'Recalled Customer', 25000, 'recalled', '2026-05-15')
+       RETURNING id`,
+      [companyId],
+    );
+    recalledCustomerId = cust.rows[0].id;
+  });
+
+  afterAll(async () => {
+    await pool.query(`DELETE FROM customers WHERE id = $1`, [recalledCustomerId]);
+  });
+
+  it("counts recalled cases for the month, separate from closed/active", async () => {
+    const res = await request(app)
+      .get("/api/reports/recalls?month=2026-05")
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.total_recalled_count).toBe(1);
+    expect(res.body.total_recalled_amount).toBe(25000);
+    expect(res.body.lifetime_recalled_count).toBe(1);
+    expect(res.body.by_company[0]).toMatchObject({ company_name: "Reports NBFC", recalled_count: 1 });
+
+    // A different month has nothing to show -- recalled_at is May, not June.
+    const juneRes = await request(app)
+      .get("/api/reports/recalls?month=2026-06")
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(juneRes.body.total_recalled_count).toBe(0);
+    expect(juneRes.body.lifetime_recalled_count).toBe(1); // lifetime is month-independent
+  });
+
+  it("the dashboard's status filter can narrow to recalled customers only", async () => {
+    const res = await request(app)
+      .get("/api/reports/dashboard?month=2026-05&status=recalled")
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.allocated.count).toBe(0); // recalled customer has no May snapshot
+  });
+});
+
+describe("bucket movement report", () => {
+  let movementCustomerId: string;
+
+  beforeAll(async () => {
+    const cust = await pool.query(
+      `INSERT INTO customers (company_id, loan_number, customer_name, bucket, emi, due_amount)
+       VALUES ($1, 'RPT-MOVE-1', 'Movement Customer', '30', 5000, 10000) RETURNING id`,
+      [companyId],
+    );
+    movementCustomerId = cust.rows[0].id;
+    await pool.query(
+      `INSERT INTO bucket_movements (customer_id, company_id, from_bucket, to_bucket, trigger, month)
+       VALUES ($1, $2, '30', 'Current', 'payment', '2026-05-01')`,
+      [movementCustomerId, companyId],
+    );
+  });
+
+  afterAll(async () => {
+    await pool.query(`DELETE FROM bucket_movements WHERE customer_id = $1`, [movementCustomerId]);
+    await pool.query(`DELETE FROM customers WHERE id = $1`, [movementCustomerId]);
+  });
+
+  it("reports a payment-detected movement with no allocation confirmation yet", async () => {
+    const res = await request(app)
+      .get("/api/reports/bucket-movements?month=2026-05")
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    const row = res.body.rows.find((r: { bucket: string }) => r.bucket === "30");
+    expect(row).toMatchObject({ payment_detected: 1, allocation_confirmed: 0, detected_not_confirmed: 1 });
+  });
+});
+
+describe("export includes every new sheet", () => {
+  it("the workbook has Breakdown, Trail, Recalls and Bucket Movements sheets alongside Summary/Agents", async () => {
+    const ExcelJS = (await import("exceljs")).default;
+    const res = await request(app)
+      .get("/api/reports/export?month=2026-05")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .buffer()
+      .parse((res2, cb) => {
+        const chunks: Buffer[] = [];
+        res2.on("data", (c: Buffer) => chunks.push(c));
+        res2.on("end", () => cb(null, Buffer.concat(chunks)));
+      });
+    expect(res.status).toBe(200);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(res.body as Buffer);
+    const sheetNames = wb.worksheets.map((s) => s.name);
+    expect(sheetNames).toEqual(
+      expect.arrayContaining(["Summary", "Agents", "Breakdown", "Trail", "Recalls", "Bucket Movements"]),
+    );
   });
 });

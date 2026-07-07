@@ -40,6 +40,8 @@ export interface ReportFilters {
   agent_id?: string;
   product?: string;
   bucket?: string;
+  /** Narrows to the customer's CURRENT status (not the status at the time of the snapshot). */
+  status?: "active" | "closed" | "recalled";
 }
 
 export interface ResolvedScope {
@@ -136,6 +138,10 @@ function baseConditions(filters: ReportFilters, params: unknown[]): string[] {
     params.push(filters.bucket);
     conditions.push(`lower(s.bucket) = lower($${params.length})`);
   }
+  if (filters.status) {
+    params.push(filters.status);
+    conditions.push(`c.status = $${params.length}`);
+  }
   return conditions;
 }
 
@@ -185,12 +191,18 @@ function classifiedCtes(conditions: string[]): string {
       SELECT s.customer_id, s.due_amount, s.emi, s.assigned_agent_id, s.assigned_team_id,
              s.product, s.company_id, s.bucket,
              bm.sort_order AS cur_sort, COALESCE(bm.category, 'normal') AS cur_cat,
-             c.status
+             c.status,
+             co.name AS company_name, tm.branch_id, tm.name AS team_name, br.name AS branch_name,
+             au.full_name AS agent_name,
+             COALESCE(pr.canonical_label, s.product) AS canonical_product
         FROM customer_month_snapshots s
         JOIN companies co ON co.id = s.company_id AND co.agency_id = $1
         JOIN customers c ON c.id = s.customer_id
         LEFT JOIN buckets bm ON bm.company_id = s.company_id AND lower(bm.label) = lower(s.bucket)
         LEFT JOIN teams tm ON tm.id = s.assigned_team_id
+        LEFT JOIN branches br ON br.id = tm.branch_id
+        LEFT JOIN users au ON au.id = s.assigned_agent_id
+        LEFT JOIN products pr ON pr.company_id = s.company_id AND lower(pr.raw_label) = lower(s.product)
        WHERE s.month = $2::date ${where}
     ),
     pays AS (
@@ -691,6 +703,313 @@ export async function agentBreakdown(
   }
   result.sort((a, b) => b.collected_amount - a.collected_amount);
   return result;
+}
+
+export type BreakdownDimension = "company" | "product" | "bucket" | "branch" | "team" | "agent";
+
+export interface BreakdownRow {
+  key: string | null;
+  label: string;
+  allocated_amount: number;
+  allocated_count: number;
+  collected_amount: number;
+  resolution_amount: number;
+  resolution_pct: number | null;
+  rollback_amount: number;
+  rollback_pct: number | null;
+  normalization_amount: number;
+  normalization_pct: number | null;
+  recovery_amount: number;
+  recovery_pct: number | null;
+  trail_pct: number | null;
+  target_amount: number | null;
+  achievement_pct: number | null;
+}
+
+const DIMENSION_GROUP: Record<BreakdownDimension, { group: string; label: string }> = {
+  company: { group: "class.company_id", label: "MAX(class.company_name)" },
+  product: { group: "class.canonical_product", label: "MAX(class.canonical_product)" },
+  bucket: { group: "class.bucket", label: "MAX(class.bucket)" },
+  branch: { group: "class.branch_id", label: "MAX(class.branch_name)" },
+  team: { group: "class.assigned_team_id", label: "MAX(class.team_name)" },
+  agent: { group: "class.assigned_agent_id", label: "MAX(class.agent_name)" },
+};
+
+/**
+ * Per-dimension slice of the same classification used by the dashboard and
+ * agent breakdown (brief §15's "product wise view" and friends). Targets are
+ * only meaningful for organizational dimensions (company/branch/team/agent)
+ * -- product/bucket are cross-cutting narrowing filters in the targets model,
+ * not their own scope level, so those rows carry a null target.
+ */
+export async function dimensionBreakdown(
+  user: UserRow,
+  requested: ReportFilters,
+  hasFullView: boolean,
+  dimension: BreakdownDimension,
+): Promise<BreakdownRow[]> {
+  const scope = resolveReportScope(user, requested, hasFullView);
+  const filters = scope.filters;
+  const useTransition = await hasNextMonthSnapshot(user.agency_id, filters);
+  const params: unknown[] = [user.agency_id, filters.month, useTransition];
+  const conditions = baseConditions(filters, params);
+  const dim = DIMENSION_GROUP[dimension];
+  const orderBy = dimension === "bucket" ? "MIN(class.cur_sort) ASC NULLS LAST" : "allocated_amount DESC";
+
+  const { rows } = await pool.query(
+    `WITH ${classifiedCtes(conditions)}
+     SELECT ${dim.group} AS key, ${dim.label} AS label, ${AGGREGATE_SELECT}
+       FROM class
+      WHERE ${dim.group} IS NOT NULL
+      GROUP BY ${dim.group}
+      ORDER BY ${orderBy}`,
+    params,
+  );
+
+  const isOrgDimension =
+    dimension === "company" || dimension === "branch" || dimension === "team" || dimension === "agent";
+  const result: BreakdownRow[] = [];
+  for (const row of rows) {
+    let target: TargetValue = { target_amount: null, target_count: null };
+    if (isOrgDimension) {
+      const scopeFilter: ReportFilters = { ...filters };
+      if (dimension === "company") scopeFilter.company_id = row.key;
+      if (dimension === "branch") scopeFilter.branch_id = row.key;
+      if (dimension === "team") scopeFilter.team_id = row.key;
+      if (dimension === "agent") scopeFilter.agent_id = row.key;
+      target = await resolveTarget(user.agency_id, "collection", scopeFilter);
+    }
+    result.push({
+      key: row.key,
+      label: row.label ?? "—",
+      allocated_amount: row.allocated_amount,
+      allocated_count: row.allocated_count,
+      collected_amount: row.collected_amount,
+      resolution_amount: row.resolution_amount,
+      resolution_pct: pct(row.resolution_amount, row.allocated_amount),
+      rollback_amount: row.rollback_amount,
+      rollback_pct: pct(row.rollback_amount, row.allocated_amount),
+      normalization_amount: row.normalization_amount,
+      normalization_pct: pct(row.normalization_amount, row.allocated_amount),
+      recovery_amount: row.recovery_amount,
+      recovery_pct: pct(row.recovery_amount, row.recovery_allocated_amount),
+      trail_pct: pct(row.trail_count, row.allocated_count),
+      target_amount: target.target_amount,
+      achievement_pct: pct(row.collected_amount, target.target_amount),
+    });
+  }
+  return result;
+}
+
+export interface TrailAnalytics {
+  from: string;
+  to: string;
+  total_trails: number;
+  unique_customers_contacted: number;
+  by_action_code: { action_code: string; count: number }[];
+  by_result_code: { result_code: string; count: number }[];
+  ptps_created: number;
+  ptps_kept: number;
+  ptps_broken: number;
+  ptps_pending: number;
+  ptp_conversion_pct: number | null; // kept / (kept + broken)
+}
+
+/** Date-range trail/disposition analytics (event-level, so a range fits naturally here). */
+export async function trailAnalytics(
+  agencyId: string,
+  from: string,
+  to: string,
+  filters: Omit<ReportFilters, "month">,
+): Promise<TrailAnalytics> {
+  const conditions = ["co.agency_id = $1", "cl.created_at >= $2::date", "cl.created_at < ($3::date + interval '1 day')"];
+  const params: unknown[] = [agencyId, from, to];
+  if (filters.company_id) {
+    params.push(filters.company_id);
+    conditions.push(`c.company_id = $${params.length}`);
+  }
+  if (filters.team_id) {
+    params.push(filters.team_id);
+    conditions.push(`u.team_id = $${params.length}`);
+  }
+  if (filters.agent_id) {
+    params.push(filters.agent_id);
+    conditions.push(`cl.agent_id = $${params.length}`);
+  }
+  if (filters.product) {
+    params.push(filters.product);
+    conditions.push(`lower(c.product) = lower($${params.length})`);
+  }
+  if (filters.bucket) {
+    params.push(filters.bucket);
+    conditions.push(`lower(c.bucket) = lower($${params.length})`);
+  }
+  const where = conditions.join(" AND ");
+
+  const [totals, byAction, byResult, ptps] = await Promise.all([
+    pool.query(
+      `SELECT COUNT(*)::int AS total, COUNT(DISTINCT cl.customer_id)::int AS unique_customers
+         FROM call_logs cl
+         JOIN customers c ON c.id = cl.customer_id
+         JOIN companies co ON co.id = c.company_id
+         JOIN users u ON u.id = cl.agent_id
+        WHERE ${where}`,
+      params,
+    ),
+    pool.query(
+      `SELECT dc.action_code, COUNT(*)::int AS count
+         FROM call_logs cl
+         JOIN customers c ON c.id = cl.customer_id
+         JOIN companies co ON co.id = c.company_id
+         JOIN users u ON u.id = cl.agent_id
+         JOIN disposition_codes dc ON dc.id = cl.disposition_code_id
+        WHERE ${where}
+        GROUP BY dc.action_code ORDER BY count DESC`,
+      params,
+    ),
+    pool.query(
+      `SELECT dc.result_code, COUNT(*)::int AS count
+         FROM call_logs cl
+         JOIN customers c ON c.id = cl.customer_id
+         JOIN companies co ON co.id = c.company_id
+         JOIN users u ON u.id = cl.agent_id
+         JOIN disposition_codes dc ON dc.id = cl.disposition_code_id
+        WHERE ${where} AND dc.result_code IS NOT NULL
+        GROUP BY dc.result_code ORDER BY count DESC`,
+      params,
+    ),
+    pool.query(
+      `SELECT p.status, COUNT(*)::int AS count
+         FROM ptps p
+         JOIN call_logs cl ON cl.id = p.call_log_id
+         JOIN customers c ON c.id = cl.customer_id
+         JOIN companies co ON co.id = c.company_id
+         JOIN users u ON u.id = cl.agent_id
+        WHERE ${where}
+        GROUP BY p.status`,
+      params,
+    ),
+  ]);
+
+  const ptpCounts: Record<string, number> = { pending: 0, kept: 0, broken: 0 };
+  for (const r of ptps.rows) ptpCounts[r.status as string] = r.count as number;
+  const ptpsCreated = ptpCounts.pending + ptpCounts.kept + ptpCounts.broken;
+
+  return {
+    from,
+    to,
+    total_trails: totals.rows[0].total,
+    unique_customers_contacted: totals.rows[0].unique_customers,
+    by_action_code: byAction.rows as { action_code: string; count: number }[],
+    by_result_code: byResult.rows as { result_code: string; count: number }[],
+    ptps_created: ptpsCreated,
+    ptps_kept: ptpCounts.kept,
+    ptps_broken: ptpCounts.broken,
+    ptps_pending: ptpCounts.pending,
+    ptp_conversion_pct: pct(ptpCounts.kept, ptpCounts.kept + ptpCounts.broken),
+  };
+}
+
+export interface RecallReportRow {
+  company_id: string;
+  company_name: string;
+  recalled_count: number;
+  recalled_amount: number;
+}
+
+export interface RecallReport {
+  month: string;
+  by_company: RecallReportRow[];
+  total_recalled_count: number;
+  total_recalled_amount: number;
+  lifetime_recalled_count: number;
+}
+
+/** Recalled cases (Phase 7 discrepancy review) -- a distinct fact from `closed`, reported separately. */
+export async function recallReport(
+  agencyId: string,
+  month: string,
+  companyId?: string,
+): Promise<RecallReport> {
+  const params: unknown[] = [agencyId, month];
+  let companyClause = "";
+  if (companyId) {
+    params.push(companyId);
+    companyClause = `AND c.company_id = $${params.length}`;
+  }
+  const byCompany = await pool.query(
+    `SELECT c.company_id, co.name AS company_name,
+            COUNT(*)::int AS recalled_count,
+            COALESCE(SUM(c.due_amount), 0)::float AS recalled_amount
+       FROM customers c
+       JOIN companies co ON co.id = c.company_id
+      WHERE co.agency_id = $1 AND c.status = 'recalled'
+        AND c.recalled_at >= $2::date AND c.recalled_at < ($2::date + interval '1 month')
+        ${companyClause}
+      GROUP BY c.company_id, co.name
+      ORDER BY recalled_count DESC`,
+    params,
+  );
+  const lifetime = await pool.query(
+    `SELECT COUNT(*)::int AS n FROM customers c
+       JOIN companies co ON co.id = c.company_id
+      WHERE co.agency_id = $1 AND c.status = 'recalled' ${companyClause}`,
+    companyId ? [agencyId, companyId] : [agencyId],
+  );
+  const rows = byCompany.rows as RecallReportRow[];
+  return {
+    month: month.slice(0, 7),
+    by_company: rows,
+    total_recalled_count: rows.reduce((s, r) => s + r.recalled_count, 0),
+    total_recalled_amount: rows.reduce((s, r) => s + r.recalled_amount, 0),
+    lifetime_recalled_count: lifetime.rows[0].n,
+  };
+}
+
+export interface BucketMovementReportRow {
+  company_id: string;
+  company_name: string;
+  bucket: string;
+  payment_detected: number;
+  allocation_confirmed: number;
+  detected_not_confirmed: number;
+}
+
+/**
+ * Payment-detected normalizations vs. allocation-confirmed ones, per
+ * company/bucket. "Detected but not confirmed" is the owner-level insight:
+ * in-house signal the lender's next file hasn't (yet) agreed with.
+ */
+export async function bucketMovementReport(
+  agencyId: string,
+  month: string,
+  companyId?: string,
+): Promise<{ month: string; rows: BucketMovementReportRow[] }> {
+  const params: unknown[] = [agencyId, month];
+  let companyClause = "";
+  if (companyId) {
+    params.push(companyId);
+    companyClause = `AND bm.company_id = $${params.length}`;
+  }
+  const { rows } = await pool.query(
+    `SELECT bm.company_id, co.name AS company_name, bm.from_bucket AS bucket,
+            COUNT(*) FILTER (WHERE bm.trigger = 'payment')::int AS payment_detected,
+            COUNT(*) FILTER (WHERE bm.trigger = 'allocation')::int AS allocation_confirmed,
+            COUNT(*) FILTER (
+              WHERE bm.trigger = 'payment' AND NOT EXISTS (
+                SELECT 1 FROM bucket_movements c2
+                 WHERE c2.customer_id = bm.customer_id AND c2.trigger = 'allocation'
+                   AND c2.month >= bm.month
+              )
+            )::int AS detected_not_confirmed
+       FROM bucket_movements bm
+       JOIN companies co ON co.id = bm.company_id
+      WHERE co.agency_id = $1 AND bm.month = $2::date ${companyClause}
+      GROUP BY bm.company_id, co.name, bm.from_bucket
+      ORDER BY co.name, bm.from_bucket`,
+    params,
+  );
+  return { month: month.slice(0, 7), rows: rows as BucketMovementReportRow[] };
 }
 
 /** Products + buckets available under the current scope (dashboard filter options). */
