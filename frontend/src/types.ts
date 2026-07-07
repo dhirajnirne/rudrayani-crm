@@ -45,6 +45,7 @@ export interface ImportTemplate {
   company_id: string;
   name: string;
   column_mapping: Record<string, string>;
+  detail_fields: string[];
   version: number;
   is_active: boolean;
   created_at: string;

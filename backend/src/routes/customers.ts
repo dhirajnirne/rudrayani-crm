@@ -3,6 +3,9 @@ import { z } from "zod";
 import { pool } from "../config/db";
 import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
+import { HttpError } from "../middleware/error-handler";
+import { capabilitiesHavePermission } from "../services/permission-service";
+import { capabilitiesOf } from "../types/user";
 
 const router = Router();
 router.use(authenticate, requirePermission("customers.view"));
@@ -15,7 +18,7 @@ router.get(
         company_id: z.string().uuid().optional(),
         product: z.string().optional(),
         bucket: z.string().optional(),
-        status: z.enum(["active", "closed"]).optional(),
+        status: z.enum(["active", "closed", "recalled"]).optional(),
         assigned: z.enum(["true", "false"]).optional(),
         agent_id: z.string().uuid().optional(),
         q: z.string().optional(),
@@ -72,7 +75,7 @@ router.get(
 
     const { rows } = await pool.query(
       `SELECT c.id, c.loan_number, c.customer_name, c.mobile_number,
-              c.product, c.bucket, c.due_amount, c.emi, c.status,
+              c.product, c.bucket, c.due_amount, c.emi, c.status, c.recalled_at,
               c.custom_fields, c.created_at, c.assigned_agent_id,
               a.full_name AS assigned_agent_name,
               co.name AS company_name, co.id AS company_id
@@ -90,6 +93,106 @@ router.get(
       total: countResult.rows[0].total,
       page: q.page,
       limit: q.limit,
+    });
+  }),
+);
+
+/**
+ * Customer 360 view (Phase 7): identity + the source columns the agency chose
+ * to keep as "detail" fields at import time, plus every trail of activity —
+ * calls, PTPs, payments, bucket movements, allocation history, month
+ * snapshots. Telecallers/field agents (no customers.allocate) may only open
+ * their OWN assigned customers; 404 rather than 403 so the scope check
+ * doesn't leak whether an out-of-scope loan number exists.
+ */
+router.get(
+  "/:id",
+  asyncHandler(async (req, res) => {
+    const id = z.string().uuid().parse(req.params.id);
+
+    const { rows: customerRows } = await pool.query(
+      `SELECT c.*, co.name AS company_name, co.id AS company_id_check
+         FROM customers c
+         JOIN companies co ON co.id = c.company_id
+        WHERE c.id = $1 AND co.agency_id = $2`,
+      [id, req.user!.agency_id],
+    );
+    const customer = customerRows[0];
+    if (!customer) throw new HttpError(404, "Customer not found");
+
+    const canSeeAnyCustomer = await capabilitiesHavePermission(
+      capabilitiesOf(req.user!),
+      "customers.allocate",
+    );
+    if (!canSeeAnyCustomer && customer.assigned_agent_id !== req.user!.id) {
+      throw new HttpError(404, "Customer not found");
+    }
+
+    const [detailFields, trail, ptps, payments, bucketMovements, allocationHistory, snapshots] =
+      await Promise.all([
+        // "Latest" = most recently touched active template for this company.
+        // Version is scoped per template NAME, so it can't be used to compare
+        // across different named templates -- updated_at can.
+        pool.query(
+          `SELECT detail_fields FROM import_templates
+            WHERE company_id = $1 AND is_active = true
+            ORDER BY updated_at DESC LIMIT 1`,
+          [customer.company_id],
+        ),
+        pool.query(
+          `SELECT cl.id, cl.remark, cl.call_duration_seconds, cl.details, cl.created_at,
+                  dc.action_code, dc.result_code, u.full_name AS agent_name
+             FROM call_logs cl
+             LEFT JOIN disposition_codes dc ON dc.id = cl.disposition_code_id
+             LEFT JOIN users u ON u.id = cl.agent_id
+            WHERE cl.customer_id = $1
+            ORDER BY cl.created_at DESC LIMIT 50`,
+          [id],
+        ),
+        pool.query(
+          `SELECT id, amount, promised_date, mode, status, created_at
+             FROM ptps WHERE customer_id = $1 ORDER BY created_at DESC`,
+          [id],
+        ),
+        pool.query(
+          `SELECT id, amount, mode, photo_proof_url, paid_at, deposited_at
+             FROM payments WHERE customer_id = $1 ORDER BY paid_at DESC`,
+          [id],
+        ),
+        pool.query(
+          `SELECT id, from_bucket, to_bucket, trigger, month, detected_at
+             FROM bucket_movements WHERE customer_id = $1 ORDER BY detected_at DESC`,
+          [id],
+        ),
+        pool.query(
+          `SELECT al.id, al.reason, al.created_at,
+                  fu.full_name AS from_agent_name, tu.full_name AS to_agent_name,
+                  bu.full_name AS allocated_by_name
+             FROM allocation_logs al
+             LEFT JOIN users fu ON fu.id = al.from_agent_id
+             JOIN users tu ON tu.id = al.to_agent_id
+             JOIN users bu ON bu.id = al.allocated_by
+            WHERE al.customer_id = $1
+            ORDER BY al.created_at DESC`,
+          [id],
+        ),
+        pool.query(
+          `SELECT month, bucket, due_amount, emi, product
+             FROM customer_month_snapshots WHERE customer_id = $1 ORDER BY month DESC`,
+          [id],
+        ),
+      ]);
+
+    res.json({
+      customer,
+      company_name: customer.company_name,
+      detail_fields: detailFields.rows[0]?.detail_fields ?? [],
+      trail: trail.rows,
+      ptps: ptps.rows,
+      payments: payments.rows,
+      bucket_movements: bucketMovements.rows,
+      allocation_history: allocationHistory.rows,
+      snapshots: snapshots.rows,
     });
   }),
 );

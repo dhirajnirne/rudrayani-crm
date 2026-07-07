@@ -2,6 +2,7 @@ import {
   Alert,
   Button,
   Card,
+  Checkbox,
   Col,
   DatePicker,
   Descriptions,
@@ -110,6 +111,7 @@ function ImportWizard() {
   const [rowCount, setRowCount] = useState(0);
   const [templates, setTemplates] = useState<ImportTemplate[]>([]);
   const [mapping, setMapping] = useState<Record<string, string>>({});
+  const [detailFields, setDetailFields] = useState<string[]>([]);
   const [templateName, setTemplateName] = useState("");
   const [savedTemplateId, setSavedTemplateId] = useState<string | null>(null);
 
@@ -161,6 +163,7 @@ function ImportWizard() {
       setRowCount(res.data.row_count);
       // Clear mapping for the new file
       setMapping({});
+      setDetailFields([]);
       setSavedTemplateId(null);
       setTemplateName("");
       setStep(1);
@@ -182,6 +185,7 @@ function ImportWizard() {
       if (mapped) newMapping[col] = mapped;
     }
     setMapping(newMapping);
+    setDetailFields((tpl.detail_fields ?? []).filter((f) => detectedColumns.includes(f)));
   };
 
   const handlePreview = async () => {
@@ -200,6 +204,7 @@ function ImportWizard() {
           company_id: companyId,
           name: templateName.trim(),
           column_mapping: mapping,
+          detail_fields: detailFields,
         });
         resolvedTemplateId = saveRes.data.template.id;
         setSavedTemplateId(resolvedTemplateId);
@@ -260,6 +265,7 @@ function ImportWizard() {
     setUploadKey("");
     setDetectedColumns([]);
     setMapping({});
+    setDetailFields([]);
     setTemplateName("");
     setSavedTemplateId(null);
     setPreview(null);
@@ -360,7 +366,12 @@ function ImportWizard() {
         </div>
       )}
 
-      {/* Two-column mapping matrix */}
+      <Typography.Text type="secondary">
+        Tick "Keep as customer detail" for any source column (mapped or not) you want visible on the
+        customer's detail view. Empty values show as "-".
+      </Typography.Text>
+
+      {/* Mapping matrix */}
       <Table
         rowKey="col"
         dataSource={mappingTableData}
@@ -370,7 +381,7 @@ function ImportWizard() {
           {
             title: "Excel Column",
             dataIndex: "col",
-            width: "45%",
+            width: "40%",
             render: (v: string) => (
               <Typography.Text style={{ fontFamily: "monospace" }}>{v}</Typography.Text>
             ),
@@ -378,7 +389,7 @@ function ImportWizard() {
           {
             title: "Maps to system field",
             dataIndex: "mapped",
-            width: "55%",
+            width: "40%",
             render: (_: string, record: { col: string }) => (
               <Select
                 style={{ width: "100%" }}
@@ -394,6 +405,20 @@ function ImportWizard() {
                   })
                 }
                 options={SYSTEM_FIELDS}
+              />
+            ),
+          },
+          {
+            title: "Keep as customer detail",
+            width: "20%",
+            render: (_: string, record: { col: string }) => (
+              <Checkbox
+                checked={detailFields.includes(record.col)}
+                onChange={(e) =>
+                  setDetailFields((prev) =>
+                    e.target.checked ? [...prev, record.col] : prev.filter((f) => f !== record.col),
+                  )
+                }
               />
             ),
           },

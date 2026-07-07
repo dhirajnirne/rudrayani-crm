@@ -13,7 +13,14 @@ import {
 import { SearchOutlined } from "@ant-design/icons";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api/client";
+import CustomerDetailDrawer from "../components/CustomerDetailDrawer";
 import type { Company, Customer } from "../types";
+
+const STATUS_TAG: Record<string, { color: string; label: string }> = {
+  active: { color: "green", label: "Active" },
+  closed: { color: "default", label: "Closed" },
+  recalled: { color: "orange", label: "Recalled" },
+};
 
 interface Product {
   id: string;
@@ -28,12 +35,14 @@ export default function CustomersPage() {
   const [buckets, setBuckets] = useState<string[]>([]);
   const [product, setProduct] = useState<string | null>(null);
   const [bucket, setBucket] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [detailId, setDetailId] = useState<string | null>(null);
 
   useEffect(() => {
     api.get("/companies").then((res) => setCompanies(res.data.companies));
@@ -63,6 +72,7 @@ export default function CustomersPage() {
       if (companyId) params.company_id = companyId;
       if (product) params.product = product;
       if (bucket) params.bucket = bucket;
+      if (status) params.status = status;
       if (query) params.q = query;
       const res = await api.get("/customers", { params });
       setCustomers(res.data.customers);
@@ -71,7 +81,7 @@ export default function CustomersPage() {
     } finally {
       setLoading(false);
     }
-  }, [companyId, product, bucket, query]);
+  }, [companyId, product, bucket, status, query]);
 
   useEffect(() => {
     load(1);
@@ -106,7 +116,7 @@ export default function CustomersPage() {
 
       {/* Filters */}
       <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
-        <Col xs={24} sm={8}>
+        <Col xs={24} sm={7}>
           <Select
             style={{ width: "100%" }}
             placeholder="All companies"
@@ -116,7 +126,7 @@ export default function CustomersPage() {
             options={companies.map((c) => ({ value: c.id, label: c.name }))}
           />
         </Col>
-        <Col xs={12} sm={5}>
+        <Col xs={12} sm={4}>
           <Select
             style={{ width: "100%" }}
             placeholder="All products"
@@ -141,7 +151,21 @@ export default function CustomersPage() {
             options={buckets.map((b) => ({ value: b, label: b }))}
           />
         </Col>
-        <Col xs={24} sm={7}>
+        <Col xs={12} sm={4}>
+          <Select
+            style={{ width: "100%" }}
+            placeholder="All statuses"
+            allowClear
+            value={status}
+            onChange={(v) => setStatus(v ?? null)}
+            options={[
+              { value: "active", label: "Active" },
+              { value: "recalled", label: "Recalled" },
+              { value: "closed", label: "Closed" },
+            ]}
+          />
+        </Col>
+        <Col xs={24} sm={5}>
           <Input.Search
             placeholder="Loan no / name / mobile"
             value={search}
@@ -164,6 +188,10 @@ export default function CustomersPage() {
           expandedRowRender: expandedRow,
           rowExpandable: (r) => Object.keys(r.custom_fields ?? {}).length > 0,
         }}
+        onRow={(record) => ({
+          onClick: () => setDetailId(record.id),
+          style: { cursor: "pointer" },
+        })}
         pagination={{
           current: page,
           pageSize: 50,
@@ -172,8 +200,14 @@ export default function CustomersPage() {
           showTotal: (t) => `${t.toLocaleString()} customers`,
           onChange: (pg) => load(pg),
         }}
-        scroll={{ x: 900 }}
+        scroll={{ x: 950 }}
         columns={[
+          {
+            title: "Status",
+            dataIndex: "status",
+            width: 90,
+            render: (v: string) => <Tag color={STATUS_TAG[v]?.color ?? "default"}>{STATUS_TAG[v]?.label ?? v}</Tag>,
+          },
           {
             title: "Loan No",
             dataIndex: "loan_number",
@@ -225,6 +259,12 @@ export default function CustomersPage() {
             },
           },
         ]}
+      />
+
+      <CustomerDetailDrawer
+        customerId={detailId}
+        open={detailId !== null}
+        onClose={() => setDetailId(null)}
       />
     </div>
   );
