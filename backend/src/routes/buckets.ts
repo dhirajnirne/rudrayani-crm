@@ -29,7 +29,7 @@ router.get(
     const companyId = z.string().uuid().parse(req.query.company_id);
     await assertCompanyInAgency(companyId, req.user!.agency_id);
     const { rows } = await pool.query(
-      `SELECT id, label, sort_order, category, is_current
+      `SELECT id, label, sort_order, category, is_current, canonical_bucket
          FROM buckets WHERE company_id = $1
         ORDER BY sort_order, label`,
       [companyId],
@@ -86,10 +86,14 @@ const patchSchema = z
   .object({
     category: z.enum(["normal", "npa"]).optional(),
     is_current: z.boolean().optional(),
+    // 0 = X/current month EMI, 1 = 30 DPD, 2 = 60 DPD, ... null clears the mapping
+    // (movement detection then skips this bucket rather than guessing).
+    canonical_bucket: z.number().int().min(0).nullable().optional(),
   })
-  .refine((b) => b.category !== undefined || b.is_current !== undefined, {
-    message: "Nothing to update",
-  });
+  .refine(
+    (b) => b.category !== undefined || b.is_current !== undefined || b.canonical_bucket !== undefined,
+    { message: "Nothing to update" },
+  );
 
 router.patch(
   "/:id",
@@ -107,10 +111,14 @@ router.patch(
     if (rows.length === 0) throw new HttpError(404, "Bucket not found");
     const companyId = rows[0].company_id as string;
 
+    // canonical_bucket=0 means "this IS the current/no-arrears bucket" --
+    // that's the same fact is_current encodes, so setting one implies the other.
+    const willBeCurrent = body.is_current === true || body.canonical_bucket === 0;
+
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
-      if (body.is_current === true) {
+      if (willBeCurrent) {
         // Only one bucket per company can mean "account is current".
         await client.query(
           "UPDATE buckets SET is_current = false WHERE company_id = $1 AND id <> $2",
@@ -120,10 +128,18 @@ router.patch(
       const { rows: updated } = await client.query(
         `UPDATE buckets
             SET category = COALESCE($2, category),
-                is_current = COALESCE($3, is_current)
+                is_current = CASE WHEN $3 THEN true ELSE COALESCE($4, is_current) END,
+                canonical_bucket = CASE WHEN $5 THEN canonical_bucket ELSE $6 END
           WHERE id = $1
-        RETURNING id, label, sort_order, category, is_current`,
-        [id, body.category ?? null, body.is_current ?? null],
+        RETURNING id, label, sort_order, category, is_current, canonical_bucket`,
+        [
+          id,
+          body.category ?? null,
+          willBeCurrent,
+          body.is_current ?? null,
+          body.canonical_bucket === undefined,
+          body.canonical_bucket ?? null,
+        ],
       );
       await client.query("COMMIT");
       res.json({ bucket: updated[0] });

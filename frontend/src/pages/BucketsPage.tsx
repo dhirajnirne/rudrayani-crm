@@ -1,4 +1,4 @@
-import { Alert, Button, Radio, Select, Space, Table, Tag, Typography, message } from "antd";
+import { Alert, Button, InputNumber, Radio, Select, Space, Table, Tag, Typography, message } from "antd";
 import { ArrowDownOutlined, ArrowUpOutlined } from "@ant-design/icons";
 import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api/client";
@@ -9,6 +9,7 @@ type Bucket = {
   sort_order: number;
   category: "normal" | "npa";
   is_current: boolean;
+  canonical_bucket: number | null;
 };
 
 type Company = { id: string; name: string };
@@ -64,7 +65,10 @@ export default function BucketsPage() {
     }
   };
 
-  const patch = async (id: string, body: Partial<Pick<Bucket, "category" | "is_current">>) => {
+  const patch = async (
+    id: string,
+    body: Partial<Pick<Bucket, "category" | "is_current" | "canonical_bucket">>,
+  ) => {
     try {
       await api.patch(`/buckets/${id}`, body);
       void load();
@@ -81,7 +85,10 @@ export default function BucketsPage() {
       <Typography.Paragraph type="secondary">
         Order buckets from least to most overdue. Mark the bucket that means the account is
         fully regular as <Tag>Current</Tag> and flag NPA buckets — the performance dashboard
-        uses these to compute Normalization, Rollback and Recovery.
+        uses these to compute Normalization, Rollback and Recovery. Map each label to a{" "}
+        <b>canonical bucket</b> (0 = X / current month, 1 = 30 DPD, 2 = 60 DPD, …) once, so
+        in-house payment activity can be compared to a standard delinquency scale across
+        companies whose own labels differ.
       </Typography.Paragraph>
 
       <Space style={{ marginBottom: 16 }}>
@@ -157,6 +164,24 @@ export default function BucketsPage() {
                   Mark current
                 </Button>
               ),
+          },
+          {
+            title: "Canonical (DPD bucket)",
+            width: 200,
+            render: (_, b) => (
+              <Space>
+                <InputNumber
+                  size="small"
+                  min={0}
+                  max={20}
+                  style={{ width: 70 }}
+                  value={b.canonical_bucket}
+                  placeholder="—"
+                  onChange={(v) => void patch(b.id, { canonical_bucket: v })}
+                />
+                {b.canonical_bucket === null && <Tag color="warning">Unmapped</Tag>}
+              </Space>
+            ),
           },
         ]}
       />

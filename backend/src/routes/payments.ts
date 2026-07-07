@@ -5,6 +5,7 @@ import { pool } from "../config/db";
 import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
+import { detectPaymentNormalization } from "../services/bucket-movement-service";
 import { getStorage } from "../services/storage/storage-provider";
 
 /**
@@ -103,6 +104,8 @@ router.post(
           [body.customer_id],
         );
       }
+
+      await detectPaymentNormalization(client, body.customer_id, payRes.rows[0].id);
 
       await client.query("COMMIT");
       res.status(201).json({

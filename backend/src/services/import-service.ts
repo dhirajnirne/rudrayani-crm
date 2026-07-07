@@ -2,6 +2,7 @@ import ExcelJS from "exceljs";
 import type { PoolClient } from "pg";
 import { pool } from "../config/db";
 import { HttpError } from "../middleware/error-handler";
+import { detectAllocationConfirmation } from "./bucket-movement-service";
 
 /** System fields an Excel column can map to (brief Section 4). */
 export const SYSTEM_FIELDS = [
@@ -598,6 +599,16 @@ export async function commitImport(params: {
                  assigned_agent_id = EXCLUDED.assigned_agent_id,
                  import_run_id = EXCLUDED.import_run_id`,
           [customerId, params.allocationMonth, runId],
+        );
+        // Confirms (or no-ops on) any bucket drop vs. the customer's prior
+        // month -- an in-house signal independent of whether a payment
+        // already flagged it this month (Task 7.5).
+        await detectAllocationConfirmation(
+          client,
+          customerId,
+          params.companyId,
+          params.allocationMonth!,
+          runId,
         );
       }
     }

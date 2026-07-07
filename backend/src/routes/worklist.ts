@@ -22,7 +22,8 @@ router.get(
               lc.created_at AS last_call_at,
               ld.result_code AS last_result_code,
               pp.amount AS ptp_amount,
-              pp.promised_date AS ptp_date
+              pp.promised_date AS ptp_date,
+              bm.normalized_pending
          FROM customers c
          JOIN companies co ON co.id = c.company_id
          LEFT JOIN LATERAL (
@@ -38,6 +39,13 @@ router.get(
                WHERE p.customer_id = c.id AND p.status = 'pending'
                ORDER BY p.promised_date ASC LIMIT 1
          ) pp ON true
+         LEFT JOIN LATERAL (
+              SELECT EXISTS(
+                SELECT 1 FROM bucket_movements m
+                 WHERE m.customer_id = c.id AND m.trigger = 'payment'
+                   AND m.month = date_trunc('month', now())
+              ) AS normalized_pending
+         ) bm ON true
         WHERE c.assigned_agent_id = $1 AND c.status = 'active'
         ORDER BY pp.promised_date ASC NULLS LAST, c.due_amount DESC NULLS LAST`,
       [req.user!.id],
