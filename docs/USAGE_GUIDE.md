@@ -414,6 +414,31 @@ Step 4: Escalate
   Free agent to focus on productive cases
 ```
 
+#### 4. Reviewing Reallocation Requests
+
+Agents raise these from the mobile app (customer detail -> ⋮ -> "Request
+Reallocation") whenever they genuinely can't work a case -- wrong
+area/language, a dispute, safety concerns. Nothing changes until you decide.
+
+```
+Web: Reallocation Requests (left nav, visible with Allocation permission)
+
+For each pending request you'll see:
+  • Loan number, customer, company, due amount
+  • Who requested it, and their stated reason
+  • How long it's been waiting (age)
+
+Decide:
+  Approve -> reassign to a named agent (pick from the dropdown), or leave
+            blank to return the customer to the unallocated pool for anyone
+            to pick up later
+  Reject  -> customer stays with their current agent (e.g. the same area
+            is already understaffed, or the reason doesn't hold up)
+
+Both actions are logged in the customer's Allocation History (Customer 360
+view), so there's always a record of who moved a case and why.
+```
+
 ---
 
 ## For Field Agents & Telecallers
@@ -583,8 +608,11 @@ Scenario 1: Abusive customer
     • Note disposition: "needs_escalation" (or TL contact)
     • End call with: "I'll escalate to my manager, they'll reach out soon"
   After call:
-    • Tell TL immediately (don't wait for app)
-    • TL decides: re-allocate or escalate to ops
+    • Open the customer in the app -> menu (⋮) -> "Request Reallocation"
+      -> give a reason ("Abusive, customer requested another agent")
+    • This goes straight to your TL/Ops's Reallocation Approvals queue --
+      no need to also message them separately, though a heads-up never hurts
+      for anything urgent (safety concern, etc.)
 
 Scenario 2: Customer claims they already paid
   Action:
