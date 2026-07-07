@@ -1141,3 +1141,121 @@ is what caught the recalls param bug that no unit test exercised.
    drill-down), Bucket Movements card — all filter-aware, all exportable.
 
 ---
+
+## 2026-07-07 — Phase 7 correction round: owner feedback on real-world collection-agency practice
+
+**Why:** after Phase 7 shipped, the owner reviewed it with fresh eyes and
+flagged five things: (1) "mid-month" sounded like a calendar-day rule when
+it isn't one, (2) buckets should be cross-checked against EMI due dates like
+a real collection agency does, not taken 100% on faith from the lender file,
+(3) field agents/telecallers needed the same capability on mobile, (4) the
+recalled-customer report needed a real downloadable list, not just a count,
+and (5) the test coverage needed genuinely realistic multi-company,
+multi-month data, not just single-scenario unit fixtures. Six groups of
+work, each independently committed and verified.
+
+### Terminology: "mid-month" → accurate naming
+`isMidMonthImport()` never checked a calendar day anywhere — it purely asked
+"does a prior allocation import already exist for this company+month."
+Allocation files can arrive at any point in the month, so the logic was
+already right but the name implied a date check that never existed. Renamed
+throughout: `isMidMonthImport` → `hasExistingAllocationForMonth`,
+`is_mid_month` → `is_repeat_import`; reworded the import wizard/review queue
+UI copy and test comments to match. Pure rename — full suite unchanged.
+
+### DPD cross-check (EMI due date vs. lender bucket)
+Buckets had been 100% lender-supplied with no independent aging calculation
+— matching the original brief, not standard collection-agency practice
+(EMIs fall due on different days of the month, and buckets are
+conventionally derived from that). Added a new mappable `emi_due_date`
+system field → `customers.due_date` / `customer_month_snapshots.due_date`.
+New `GET /reports/bucket-mismatches` (live, as-of-today, not month-scoped —
+a mismatch is a right-now fact): computes DPD = today − due_date using the
+standard 30-day-increment convention (0-29=X, 30-59=1, 60-89=2, …) and flags
+disagreement with the lender's canonical bucket. **Informational only** —
+`customers.bucket` is never touched, same as `bucket_movements`. New
+dashboard card + export sheet; due_date/DPD shown on the customer drawer.
+
+Fixed a real, broadly-impactful bug this feature's own tests surfaced:
+node-postgres's default `DATE` parser builds a JS `Date` at LOCAL midnight,
+and serializing it (`res.json`, `JSON.stringify`) converts to UTC — silently
+rolling the date back a day in any timezone ahead of UTC (IST included).
+This affected every `DATE` column in the schema (`due_date`,
+`allocation_month`, `month`, `promised_date`), not just the new one. Fixed
+with a global type-parser override in `db.ts` returning the raw
+`'YYYY-MM-DD'` string; confirmed via code search that no application code
+anywhere relied on these values being actual `Date` objects.
+
+### Mobile (Flutter): a real bug fix + Phase 7 parity
+Found and fixed a severe, **pre-existing** bug while verifying "action
+code/result code/remarks" worked end-to-end as required: `worklist_provider.dart`
+fetched `GET /dispositions` expecting a `'codes'` JSON key, but the backend
+responds with `'disposition_codes'` — a cast error at runtime that silently
+broke the call-log disposition dropdown for every field agent and
+telecaller. The rest of the pipeline (dynamic `needs_*` fields, remark
+composition, PTP auto-creation, offline idempotency) was already correct;
+only this one wrong key blocked it from mobile entirely. `Customer` model
+gains `status`/`recalledAt`/`normalizedPending`; the "normalized, pending
+lender confirmation" badge now shows on both the worklist card and the
+customer detail screen, mirroring the web drawer.
+
+### Recalled-customer report: a real downloadable list
+`recallReport()` gains a per-customer array (loan number, name, recalled
+date, last known bucket/due amount, last assigned agent — resolved from
+`allocation_logs`, since the assignment itself is cleared at recall time)
+alongside the existing by-company summary. New "Recalled Customers" sheet in
+`/reports/export`; the dashboard's recalled-cases modal gets a tabbed view
+(Customer List / By Company).
+
+### Realistic multi-company, multi-month test fixtures + end-to-end test
+Two synthetic companies with deliberately different column layouts (mirrors
+how real lenders never agree on a schema): "Alpha Finance NBFC" (Hero-style:
+`loan_agreement_no, customername, Bkt, PROD, pos, emi_amount`) and "Beta
+Credit Corp" (Indifi-style: `App Id, Promoter Name, Updated Bucket, POS,
+EMI`), each with a real three-file reporting cycle (first-of-month, then two
+repeat/refresh imports for that month) plus a genuinely later calendar
+month. `backend/test/fixtures/build-scenarios.ts` is the single source of
+truth, used both by `generate.ts` (writes tracked `.xlsx` files under
+`backend/test/fixtures/` for manual QA/demo through the actual Import
+wizard — see that folder's README) and by
+`backend/test/e2e-allocation-lifecycle.test.ts` (drives the same scenario
+through the real HTTP API), so the demo files and the automated coverage
+can never silently drift apart.
+
+The end-to-end test covers: first-of-month vs. repeat-import addition
+routing, a removal and an addition waiting in Import Review, a reactivation
+of a recalled loan, canonical bucket mapping across two entirely different
+label schemes, the DPD cross-check catching a deliberate mismatch on each
+company, allocation-confirmed bucket movement events on real drops (and
+confirming a rollback never produces one), a payment-driven movement event
+independent of any import, dimension breakdown reconciling against the
+dashboard's headline total, and the recalled-customer report + full export
+workbook listing a genuinely-recalled customer with its last agent resolved
+from allocation history. Caught one bug in the test's own first draft:
+`recalled_at` is the real wall-clock approval time, not the allocation
+month the review belonged to — fixed to query the actual current month,
+which is the correct real-world behavior.
+
+### Hardening
+Payments blocked on `recalled` customers (mirrors the existing `closed`
+guard — nothing left to collect through this agency once the lender pulls a
+case). Approving a removal now also clears the agent assignment, mirroring
+how closing a customer already does. Swept every `status`-based query in
+the codebase: all use explicit `= 'active'` equality, never a `!= 'closed'`
+negation, so `recalled` was automatically excluded everywhere it should be.
+
+### Verification
+Backend `npm test` — **198/198** across 20 files (up from 178 before this
+round). `tsc --noEmit` + `npm run lint` clean on backend (one pre-existing,
+unrelated lint error in `buckets.test.ts`, confirmed untouched by this work).
+Frontend `tsc -b` + `vite build` clean. Mobile `flutter analyze` clean (the
+one pre-existing `test/widget_test.dart` issue, also confirmed unrelated —
+Android licenses aren't accepted in this environment so a debug APK build
+wasn't possible here). Live-server verification against a real database (uploading a real file with
+an EMI due date column, committing it, and reading `due_date` back over
+HTTP) confirmed the DATE-parser fix end-to-end, not just in the test
+runner — reinforcing that the test suite passing is necessary but not
+sufficient on its own; the mobile disposition-key bug was likewise only
+caught by reading the actual runtime data flow, not by an existing test.
+
+---
