@@ -8,8 +8,10 @@ import { HttpError } from "../middleware/error-handler";
 import {
   SYSTEM_FIELDS,
   commitImport,
-  countMissingFromFile,
+  computeAllocationDiff,
+  isMidMonthImport,
   parseWorkbook,
+  previewNewLabels,
   validateRows,
   type ColumnMapping,
 } from "../services/import-service";
@@ -113,22 +115,76 @@ router.post(
     );
     const sheet = await parseWorkbook(await getStorage().read(body.upload_key));
     const result = await validateRows(body.company_id, sheet, mapping);
-    // In allocation mode, loans already in the DB are updates — the expected case.
-    const missingFromFile =
-      body.mode === "allocation"
-        ? await countMissingFromFile(body.company_id, result.validRows)
-        : 0;
+
+    if (body.mode !== "allocation") {
+      res.json({
+        mode: body.mode,
+        total_rows: sheet.rows.length,
+        valid_rows: result.validRows.length - result.duplicatesInDb.length,
+        error_rows: result.errors.length,
+        duplicates_in_db: result.duplicatesInDb.length,
+        unmapped_columns: result.unmappedColumns,
+        errors: result.errors.slice(0, 50),
+        duplicate_loan_numbers: result.duplicatesInDb.slice(0, 50),
+        sample_rows: result.validRows.slice(0, 5),
+      });
+      return;
+    }
+
+    // Allocation mode: show the actual diff against the active book, not just
+    // a dupes/missing count, so the reviewer knows what will need a decision.
+    const isMidMonth = await isMidMonthImport(body.company_id, body.allocation_month!);
+    const diff = await computeAllocationDiff(body.company_id, result.validRows);
+    const labels = await previewNewLabels(body.company_id, result.validRows);
+
+    const removalCustomerIds = diff.removals.map((r) => r.customerId);
+    const removalDetails = removalCustomerIds.length
+      ? await pool.query(
+          `SELECT c.id, c.customer_name, c.bucket, c.due_amount, u.full_name AS agent_name
+             FROM customers c LEFT JOIN users u ON u.id = c.assigned_agent_id
+            WHERE c.id = ANY($1)`,
+          [removalCustomerIds],
+        )
+      : { rows: [] as { id: string; customer_name: string; bucket: string | null; due_amount: string | null; agent_name: string | null }[] };
+    const removalById = new Map(removalDetails.rows.map((r) => [r.id, r]));
+
     res.json({
-      mode: body.mode,
+      mode: "allocation",
       total_rows: sheet.rows.length,
-      valid_rows: result.validRows.length - result.duplicatesInDb.length,
       error_rows: result.errors.length,
-      duplicates_in_db: body.mode === "allocation" ? 0 : result.duplicatesInDb.length,
-      updates_in_db: body.mode === "allocation" ? result.duplicatesInDb.length : 0,
-      missing_from_file: missingFromFile,
+      is_mid_month: isMidMonth,
+      will_update: diff.updates.length,
+      additions: {
+        count: diff.additions.length,
+        sample: diff.additions.slice(0, 20).map((a) => ({
+          loan_number: a.loan_number,
+          customer_name: a.row.customer_name,
+          bucket: a.row.bucket,
+          due_amount: a.row.due_amount,
+        })),
+      },
+      removals: {
+        count: diff.removals.length,
+        sample: diff.removals.slice(0, 20).map((r) => ({
+          loan_number: r.loanNumber,
+          customer_name: removalById.get(r.customerId)?.customer_name ?? null,
+          bucket: removalById.get(r.customerId)?.bucket ?? null,
+          due_amount: removalById.get(r.customerId)?.due_amount ?? null,
+          agent_name: removalById.get(r.customerId)?.agent_name ?? null,
+        })),
+      },
+      reactivations: {
+        count: diff.reactivations.length,
+        sample: diff.reactivations.slice(0, 20).map((r) => ({
+          loan_number: r.row.loan_number,
+          customer_name: r.row.customer_name,
+          previous_status: r.previousStatus,
+        })),
+      },
+      new_buckets: labels.new_buckets,
+      new_products: labels.new_products,
       unmapped_columns: result.unmappedColumns,
       errors: result.errors.slice(0, 50),
-      duplicate_loan_numbers: body.mode === "allocation" ? [] : result.duplicatesInDb.slice(0, 50),
       sample_rows: result.validRows.slice(0, 5),
     });
   }),

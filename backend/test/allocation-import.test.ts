@@ -205,7 +205,7 @@ describe("monthly allocation import", () => {
     expect(snaps.rows[0].bucket).toBe("X");
   });
 
-  it("allocation preview reports updates and loans missing from the file", async () => {
+  it("allocation preview reports the diff: updates, and loans missing from the file flagged as removals", async () => {
     const up = await request(app)
       .post("/api/imports/upload")
       .set("Authorization", `Bearer ${token}`)
@@ -225,9 +225,12 @@ describe("monthly allocation import", () => {
         allocation_month: "2026-08-01",
       });
     expect(res.status).toBe(200);
-    expect(res.body.updates_in_db).toBe(1);
-    expect(res.body.duplicates_in_db).toBe(0);
-    expect(res.body.missing_from_file).toBe(3); // AL-002/003/004 active but absent
+    expect(res.body.is_mid_month).toBe(false); // first import for 2026-08-01
+    expect(res.body.will_update).toBe(1);
+    expect(res.body.additions.count).toBe(0);
+    expect(res.body.removals.count).toBe(3); // AL-002/003/004 active but absent
+    const removedLoans = res.body.removals.sample.map((r: { loan_number: string }) => r.loan_number);
+    expect(new Set(removedLoans)).toEqual(new Set(["AL-002", "AL-003", "AL-004"]));
   });
 
   it("allocation mode requires allocation_month", async () => {
@@ -238,17 +241,47 @@ describe("monthly allocation import", () => {
     expect(res.status).toBe(400);
   });
 
-  it("unknown agent phones are surfaced, not fatal", async () => {
+  it("mid-month addition (brand-new loan number) is routed to review, not inserted directly", async () => {
+    // 2026-07-01 already had two allocation runs (month 2 + the re-upload above),
+    // so this is a mid-month refresh: a new loan number must wait for review.
     const res = await uploadAndCommit(
       await buildSheet([["AL-010", "Ghost Agent", "30", 60000, 3000, "7000000000"]]),
       "allocation",
       "2026-07-01",
     );
     expect(res.status).toBe(201);
-    expect(res.body.inserted_rows).toBe(1);
-    expect(res.body.unknown_agent_phones).toEqual(["7000000000"]);
+    expect(res.body.is_mid_month).toBe(true);
+    expect(res.body.inserted_rows).toBe(0);
+    expect(res.body.pending_review).toBeGreaterThanOrEqual(1);
+    // Not written to customers at all -- payload lives on the review item.
     const cust = await pool.query(
-      `SELECT assigned_agent_id FROM customers WHERE company_id = $1 AND loan_number = 'AL-010'`,
+      `SELECT id FROM customers WHERE company_id = $1 AND loan_number = 'AL-010'`,
+      [companyId],
+    );
+    expect(cust.rows).toHaveLength(0);
+    const item = await pool.query(
+      `SELECT item_type, status, payload FROM import_review_items
+        WHERE company_id = $1 AND loan_number = 'AL-010'`,
+      [companyId],
+    );
+    expect(item.rows).toHaveLength(1);
+    expect(item.rows[0].item_type).toBe("addition");
+    expect(item.rows[0].status).toBe("pending");
+    expect(item.rows[0].payload.agent_phone).toBe("7000000000");
+  });
+
+  it("first-of-month addition with an unknown agent phone still inserts directly and surfaces the phone", async () => {
+    const res = await uploadAndCommit(
+      await buildSheet([["AL-020", "Fresh Month", "30", 60000, 3000, "7000000001"]]),
+      "allocation",
+      "2026-09-01", // never imported before -> first-of-month, additions insert directly
+    );
+    expect(res.status).toBe(201);
+    expect(res.body.is_mid_month).toBe(false);
+    expect(res.body.inserted_rows).toBe(1);
+    expect(res.body.unknown_agent_phones).toEqual(["7000000001"]);
+    const cust = await pool.query(
+      `SELECT assigned_agent_id FROM customers WHERE company_id = $1 AND loan_number = 'AL-020'`,
       [companyId],
     );
     expect(cust.rows[0].assigned_agent_id).toBeNull();
@@ -286,5 +319,107 @@ describe("monthly allocation import", () => {
       .set("Authorization", `Bearer ${token}`);
     const labels = res.body.buckets.map((b: { label: string }) => b.label);
     expect(new Set(labels)).toEqual(new Set(["30", "60", "90", "Current", "X"]));
+  });
+
+  it("a recalled customer whose loan reappears is routed to review as a reactivation, not silently updated", async () => {
+    await pool.query(
+      `INSERT INTO customers (company_id, loan_number, customer_name, bucket, due_amount, emi, status, recalled_at)
+       VALUES ($1, 'AL-REACT-1', 'Recalled Ravi', '30', 40000, 2000, 'recalled', now())`,
+      [companyId],
+    );
+    const res = await uploadAndCommit(
+      await buildSheet([["AL-REACT-1", "Recalled Ravi", "30", 40000, 2000, ""]]),
+      "allocation",
+      "2026-10-01", // fresh month for this company -> first-of-month
+    );
+    expect(res.status).toBe(201);
+    expect(res.body.inserted_rows).toBe(0);
+    expect(res.body.updated_rows).toBe(0);
+    expect(res.body.pending_review).toBeGreaterThanOrEqual(1);
+    // Status is untouched until a human approves the reactivation (Task 7.3).
+    const cust = await pool.query(
+      `SELECT status FROM customers WHERE company_id = $1 AND loan_number = 'AL-REACT-1'`,
+      [companyId],
+    );
+    expect(cust.rows[0].status).toBe("recalled");
+    const item = await pool.query(
+      `SELECT item_type, status FROM import_review_items
+        WHERE company_id = $1 AND loan_number = 'AL-REACT-1' ORDER BY created_at DESC LIMIT 1`,
+      [companyId],
+    );
+    expect(item.rows[0]).toMatchObject({ item_type: "reactivation", status: "pending" });
+  });
+
+  it("a fresher file for the same month supersedes older pending review items for that month only", async () => {
+    // First commit for a brand-new month: AL-001 (active since "month 1") is
+    // absent from this file, so it's flagged as a removal review item.
+    const first = await uploadAndCommit(
+      await buildSheet([["AL-SUP-EXISTING", "Keeper", "30", 10000, 500, ""]]),
+      "allocation",
+      "2026-11-01",
+    );
+    expect(first.status).toBe(201);
+    expect(first.body.inserted_rows).toBe(1); // first-of-month: inserts directly
+    expect(first.body.removal_flagged).toBeGreaterThanOrEqual(1);
+
+    const second = await uploadAndCommit(
+      await buildSheet([
+        ["AL-SUP-EXISTING", "Keeper", "30", 10000, 500, ""],
+        ["AL-SUP-NEW", "Newcomer", "30", 20000, 1000, ""],
+      ]),
+      "allocation",
+      "2026-11-01", // same month again -> mid-month refresh
+    );
+    expect(second.status).toBe(201);
+    expect(second.body.is_mid_month).toBe(true);
+    expect(second.body.pending_review).toBeGreaterThanOrEqual(1);
+
+    // AL-SUP-NEW's addition item from the second commit is fresh and pending.
+    const newItem = await pool.query(
+      `SELECT status FROM import_review_items
+        WHERE company_id = $1 AND loan_number = 'AL-SUP-NEW' ORDER BY created_at DESC LIMIT 1`,
+      [companyId],
+    );
+    expect(newItem.rows[0].status).toBe("pending");
+
+    // AL-001's removal item from the FIRST commit (this month) is now
+    // superseded, and the second commit created a fresh pending removal item
+    // for it (still absent). Scoped to this test's month -- AL-001 also picked
+    // up an unrelated, still-pending removal item from a DIFFERENT month
+    // earlier in this file, which must NOT be touched by this supersede.
+    const al001Items = await pool.query(
+      `SELECT iri.status FROM import_review_items iri
+         JOIN import_runs ir ON ir.id = iri.import_run_id
+        WHERE iri.company_id = $1 AND iri.loan_number = 'AL-001' AND iri.item_type = 'removal'
+          AND ir.allocation_month = '2026-11-01'
+        ORDER BY iri.created_at ASC`,
+      [companyId],
+    );
+    expect(al001Items.rows.length).toBeGreaterThanOrEqual(2);
+    expect(al001Items.rows[0].status).toBe("superseded");
+    expect(al001Items.rows[al001Items.rows.length - 1].status).toBe("pending");
+  });
+
+  it("matches loan numbers to existing customers regardless of case/whitespace, so it updates instead of duplicating", async () => {
+    await pool.query(
+      `INSERT INTO customers (company_id, loan_number, customer_name, bucket, due_amount, emi, status)
+       VALUES ($1, 'CI-001', 'Case Insensitive Carl', '30', 15000, 750, 'active')`,
+      [companyId],
+    );
+    const res = await uploadAndCommit(
+      await buildSheet([[" ci-001 ", "Case Insensitive Carl", "60", 16000, 750, ""]]),
+      "allocation",
+      "2026-12-01", // fresh month
+    );
+    expect(res.status).toBe(201);
+    expect(res.body.inserted_rows).toBe(0);
+    expect(res.body.updated_rows).toBe(1);
+    const cust = await pool.query(
+      `SELECT bucket, loan_number FROM customers WHERE company_id = $1 AND UPPER(TRIM(loan_number)) = 'CI-001'`,
+      [companyId],
+    );
+    expect(cust.rows).toHaveLength(1); // no duplicate row created
+    expect(cust.rows[0].bucket).toBe("60");
+    expect(cust.rows[0].loan_number).toBe("CI-001"); // original casing preserved, not overwritten
   });
 });

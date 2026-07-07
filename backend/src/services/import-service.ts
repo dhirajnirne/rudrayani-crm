@@ -204,20 +204,25 @@ export async function validateRows(
   };
 }
 
+/** Discovered-label return value lets callers surface "new this run" on import_runs (Phase 7). */
 async function deriveProducts(
   client: PoolClient,
   companyId: string,
   rows: MappedRow[],
-): Promise<void> {
+): Promise<string[]> {
   const labels = [...new Set(rows.map((r) => r.product).filter((p): p is string => !!p))];
+  const newLabels: string[] = [];
   for (const label of labels) {
     // canonical starts equal to raw; normalization is a later admin action (brief §4)
-    await client.query(
+    const { rows: inserted } = await client.query(
       `INSERT INTO products (company_id, raw_label, canonical_label)
-       VALUES ($1, $2, $2) ON CONFLICT (company_id, raw_label) DO NOTHING`,
+       VALUES ($1, $2, $2) ON CONFLICT (company_id, raw_label) DO NOTHING
+       RETURNING raw_label`,
       [companyId, label],
     );
+    if (inserted[0]) newLabels.push(inserted[0].raw_label as string);
   }
+  return newLabels;
 }
 
 /**
@@ -229,17 +234,142 @@ async function deriveBuckets(
   client: PoolClient,
   companyId: string,
   rows: MappedRow[],
-): Promise<void> {
+): Promise<string[]> {
   const labels = [...new Set(rows.map((r) => r.bucket).filter((b): b is string => !!b))];
+  const newLabels: string[] = [];
   for (const label of labels) {
-    await client.query(
+    const { rows: inserted } = await client.query(
       `INSERT INTO buckets (company_id, label, sort_order)
        VALUES ($1, $2,
                COALESCE((SELECT MAX(sort_order) + 1 FROM buckets WHERE company_id = $1), 0))
-       ON CONFLICT (company_id, label) DO NOTHING`,
+       ON CONFLICT (company_id, label) DO NOTHING
+       RETURNING label`,
       [companyId, label],
     );
+    if (inserted[0]) newLabels.push(inserted[0].label as string);
   }
+  return newLabels;
+}
+
+/**
+ * Read-only preview of which product/bucket labels in this file are not yet
+ * registered for the company -- lets the import wizard show "3 new buckets
+ * will be created" before commit actually writes them.
+ */
+export async function previewNewLabels(
+  companyId: string,
+  validRows: MappedRow[],
+): Promise<{ new_buckets: string[]; new_products: string[] }> {
+  const productLabels = [...new Set(validRows.map((r) => r.product).filter((p): p is string => !!p))];
+  const bucketLabels = [...new Set(validRows.map((r) => r.bucket).filter((b): b is string => !!b))];
+
+  const existingProducts = productLabels.length
+    ? await pool.query(`SELECT raw_label FROM products WHERE company_id = $1 AND raw_label = ANY($2)`, [
+        companyId,
+        productLabels,
+      ])
+    : { rows: [] as { raw_label: string }[] };
+  const existingBuckets = bucketLabels.length
+    ? await pool.query(`SELECT label FROM buckets WHERE company_id = $1 AND label = ANY($2)`, [
+        companyId,
+        bucketLabels,
+      ])
+    : { rows: [] as { label: string }[] };
+
+  const existingProductSet = new Set(existingProducts.rows.map((r) => r.raw_label));
+  const existingBucketSet = new Set(existingBuckets.rows.map((r) => r.label));
+  return {
+    new_products: productLabels.filter((l) => !existingProductSet.has(l)),
+    new_buckets: bucketLabels.filter((l) => !existingBucketSet.has(l)),
+  };
+}
+
+/** Case/whitespace-insensitive key used only to MATCH file rows to DB customers; storage stays as-is. */
+function normalizeLoanNumber(loanNumber: string): string {
+  return loanNumber.trim().toUpperCase();
+}
+
+export interface AllocationDiff {
+  /** Valid rows whose loan number has no customer at all for this company yet. */
+  additions: { loan_number: string; row: MappedRow }[];
+  /** Valid rows matching an existing ACTIVE customer -- applies directly, as before. */
+  updates: { row: MappedRow; customerId: string }[];
+  /** Valid rows matching an existing RECALLED/CLOSED customer -- can't blind-update status. */
+  reactivations: { row: MappedRow; customerId: string; previousStatus: string }[];
+  /** Active customers of this company that the file does not mention at all. */
+  removals: { customerId: string; loanNumber: string }[];
+}
+
+/**
+ * Diffs a validated allocation file against the company's current book so
+ * mid-month refreshes (Phase 7) can be reviewed instead of applied blind:
+ * additions/reactivations/removals all need a human decision; only updates
+ * to already-active loans apply straight through, same as before this phase.
+ */
+export async function computeAllocationDiff(
+  companyId: string,
+  validRows: MappedRow[],
+): Promise<AllocationDiff> {
+  const { rows: existing } = await pool.query(
+    `SELECT id, loan_number, status FROM customers WHERE company_id = $1`,
+    [companyId],
+  );
+  const dbByNormalized = new Map<string, { id: string; loan_number: string; status: string }>();
+  for (const c of existing) {
+    dbByNormalized.set(normalizeLoanNumber(c.loan_number as string), {
+      id: c.id as string,
+      loan_number: c.loan_number as string,
+      status: c.status as string,
+    });
+  }
+  const fileNormalized = new Set(validRows.map((r) => normalizeLoanNumber(r.loan_number)));
+
+  const additions: AllocationDiff["additions"] = [];
+  const updates: AllocationDiff["updates"] = [];
+  const reactivations: AllocationDiff["reactivations"] = [];
+
+  for (const row of validRows) {
+    const match = dbByNormalized.get(normalizeLoanNumber(row.loan_number));
+    if (!match) {
+      additions.push({ loan_number: row.loan_number, row });
+    } else if (match.status === "active") {
+      updates.push({ row, customerId: match.id });
+    } else {
+      reactivations.push({ row, customerId: match.id, previousStatus: match.status });
+    }
+  }
+
+  const removals = existing
+    .filter(
+      (c) => c.status === "active" && !fileNormalized.has(normalizeLoanNumber(c.loan_number as string)),
+    )
+    .map((c) => ({ customerId: c.id as string, loanNumber: c.loan_number as string }));
+
+  return { additions, updates, reactivations, removals };
+}
+
+/** Has this company already had a committed allocation run for this month? Decides addition routing. */
+export async function isMidMonthImport(companyId: string, allocationMonth: string): Promise<boolean> {
+  const { rows } = await pool.query(
+    `SELECT EXISTS(
+       SELECT 1 FROM import_runs WHERE company_id = $1 AND mode = 'allocation' AND allocation_month = $2
+     ) AS exists`,
+    [companyId, allocationMonth],
+  );
+  return rows[0].exists as boolean;
+}
+
+function rowToReviewPayload(row: MappedRow): Record<string, unknown> {
+  return {
+    customer_name: row.customer_name,
+    mobile_number: row.mobile_number,
+    product: row.product,
+    bucket: row.bucket,
+    due_amount: row.due_amount,
+    emi: row.emi,
+    agent_phone: row.agent_phone,
+    custom_fields: row.custom_fields,
+  };
 }
 
 export interface CommitResult {
@@ -250,6 +380,14 @@ export interface CommitResult {
   duplicate_rows: number;
   error_rows: number;
   unknown_agent_phones: string[];
+  /** Additions/reactivations waiting on agency_admin/operations_manager review (allocation mode). */
+  pending_review: number;
+  /** Active customers missing from this file, flagged for review as possible recalls (allocation mode). */
+  removal_flagged: number;
+  new_buckets: string[];
+  new_products: string[];
+  /** True when this company already had a committed allocation run for this month. */
+  is_mid_month: boolean;
 }
 
 /** phone -> {id, team_id} for the agency's active users named in the file. */
@@ -286,14 +424,50 @@ export async function commitImport(params: {
     throw new HttpError(400, "allocation_month is required for a monthly allocation import");
   }
   const validation = await validateRows(params.companyId, params.sheet, params.mapping);
+
+  let diff: AllocationDiff | null = null;
+  let isMidMonth = false;
+  if (mode === "allocation") {
+    isMidMonth = await isMidMonthImport(params.companyId, params.allocationMonth!);
+    diff = await computeAllocationDiff(params.companyId, validation.validRows);
+  }
+
   const dbDupes = new Set(validation.duplicatesInDb);
-  const toInsert = validation.validRows.filter((r) => !dbDupes.has(r.loan_number));
-  // In allocation mode existing loans are the point of the file: update them.
-  const toUpdate = mode === "allocation" ? validation.validRows.filter((r) => dbDupes.has(r.loan_number)) : [];
+  // mode='new': unchanged -- straight insert, DB dupes rejected.
+  // mode='allocation', first import of the month: additions are the expected new
+  // book, so they insert directly. Mid-month refresh: additions wait for review,
+  // same as reactivations and removals always do (a lender pull-back or a
+  // recalled/closed loan reappearing needs a human decision either way).
+  const toInsert: MappedRow[] =
+    mode === "new"
+      ? validation.validRows.filter((r) => !dbDupes.has(r.loan_number))
+      : isMidMonth
+        ? []
+        : diff!.additions.map((a) => a.row);
+  const toUpdate: { row: MappedRow; customerId: string }[] = mode === "allocation" ? diff!.updates : [];
+  const reviewAdditions = mode === "allocation" && isMidMonth ? diff!.additions : [];
+  const reviewReactivations = mode === "allocation" ? diff!.reactivations : [];
+  const reviewRemovals = mode === "allocation" ? diff!.removals : [];
 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+
+    if (mode === "allocation") {
+      // The newest file is the truth for ITS month: a pending decision from an
+      // older diff of the SAME month is moot once a fresher file for that month
+      // exists. Scoped to the same allocation_month (not company-wide) so an
+      // unrelated month's import can never silently discard a still-open review.
+      await client.query(
+        `UPDATE import_review_items iri SET status = 'superseded'
+           FROM import_runs ir
+          WHERE iri.import_run_id = ir.id
+            AND iri.company_id = $1
+            AND ir.allocation_month = $2
+            AND iri.status = 'pending'`,
+        [params.companyId, params.allocationMonth],
+      );
+    }
 
     // Run row first so snapshots can reference it; counts patched at the end.
     const run = await client.query(
@@ -314,7 +488,13 @@ export async function commitImport(params: {
     );
     const runId = run.rows[0].id as string;
 
-    const agents = await resolveAgents(client, params.companyId, [...toInsert, ...toUpdate]);
+    // Agent-phone resolution for review-pending additions/reactivations happens
+    // fresh at approval time (Task 7.3) -- it's only resolved here for rows
+    // actually being written now.
+    const agents = await resolveAgents(client, params.companyId, [
+      ...toInsert,
+      ...toUpdate.map((u) => u.row),
+    ]);
     const unknownPhones = new Set<string>();
     const snapshotIds: string[] = [];
 
@@ -354,13 +534,12 @@ export async function commitImport(params: {
       }
     }
 
-    for (const row of toUpdate) {
+    for (const { row, customerId } of toUpdate) {
       const agent = row.agent_phone ? agents.get(row.agent_phone) : undefined;
       if (row.agent_phone && !agent) unknownPhones.add(row.agent_phone);
       const existing = await client.query(
-        `SELECT id, assigned_agent_id FROM customers
-          WHERE company_id = $1 AND loan_number = $2 FOR UPDATE`,
-        [params.companyId, row.loan_number],
+        `SELECT id, assigned_agent_id FROM customers WHERE id = $1 FOR UPDATE`,
+        [customerId],
       );
       const cust = existing.rows[0];
       if (!cust) continue; // deleted between validate and commit — skip quietly
@@ -423,15 +602,42 @@ export async function commitImport(params: {
       }
     }
 
-    const affected = [...toInsert, ...toUpdate];
-    await deriveProducts(client, params.companyId, affected);
-    await deriveBuckets(client, params.companyId, affected);
+    // Additions/reactivations wait for a human decision; nothing is written to
+    // customers yet, so their data lives entirely in the review item's payload.
+    for (const { row, loan_number } of reviewAdditions) {
+      await client.query(
+        `INSERT INTO import_review_items (import_run_id, company_id, item_type, customer_id, loan_number, payload)
+         VALUES ($1, $2, 'addition', NULL, $3, $4)`,
+        [runId, params.companyId, loan_number, JSON.stringify(rowToReviewPayload(row))],
+      );
+    }
+    for (const { row, customerId } of reviewReactivations) {
+      await client.query(
+        `INSERT INTO import_review_items (import_run_id, company_id, item_type, customer_id, loan_number, payload)
+         VALUES ($1, $2, 'reactivation', $3, $4, $5)`,
+        [runId, params.companyId, customerId, row.loan_number, JSON.stringify(rowToReviewPayload(row))],
+      );
+    }
+    for (const { customerId, loanNumber } of reviewRemovals) {
+      await client.query(
+        `INSERT INTO import_review_items (import_run_id, company_id, item_type, customer_id, loan_number, payload)
+         VALUES ($1, $2, 'removal', $3, $4, '{}'::jsonb)`,
+        [runId, params.companyId, customerId, loanNumber],
+      );
+    }
+
+    // Unique buckets/products drive reports regardless of whether the row that
+    // carried the label ended up inserted, updated, or parked in review.
+    const newProducts = await deriveProducts(client, params.companyId, validation.validRows);
+    const newBuckets = await deriveBuckets(client, params.companyId, validation.validRows);
 
     const duplicateRows = mode === "new" ? validation.duplicatesInDb.length : 0;
+    const pendingReviewRows = reviewAdditions.length + reviewReactivations.length;
     await client.query(
       `UPDATE import_runs
           SET inserted_rows = $2, updated_rows = $3, duplicate_rows = $4,
-              error_rows = $5, errors = $6
+              error_rows = $5, errors = $6, pending_review_rows = $7,
+              removal_rows = $8, new_buckets = $9, new_products = $10
         WHERE id = $1`,
       [
         runId,
@@ -440,6 +646,10 @@ export async function commitImport(params: {
         duplicateRows,
         validation.errors.length,
         JSON.stringify(validation.errors.slice(0, 100)),
+        pendingReviewRows,
+        reviewRemovals.length,
+        JSON.stringify(newBuckets),
+        JSON.stringify(newProducts),
       ],
     );
     await client.query("COMMIT");
@@ -451,6 +661,11 @@ export async function commitImport(params: {
       duplicate_rows: duplicateRows,
       error_rows: validation.errors.length,
       unknown_agent_phones: [...unknownPhones],
+      pending_review: pendingReviewRows,
+      removal_flagged: reviewRemovals.length,
+      new_buckets: newBuckets,
+      new_products: newProducts,
+      is_mid_month: isMidMonth,
     };
   } catch (err) {
     await client.query("ROLLBACK");
@@ -460,17 +675,3 @@ export async function commitImport(params: {
   }
 }
 
-/** Active loans of the company that a given file does not mention (allocation preview stat). */
-export async function countMissingFromFile(
-  companyId: string,
-  rows: MappedRow[],
-): Promise<number> {
-  const loanNumbers = rows.map((r) => r.loan_number);
-  const { rows: result } = await pool.query(
-    `SELECT COUNT(*)::int AS missing FROM customers
-      WHERE company_id = $1 AND status = 'active'
-        AND NOT (loan_number = ANY($2))`,
-    [companyId, loanNumbers],
-  );
-  return result[0].missing as number;
-}
