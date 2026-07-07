@@ -950,11 +950,20 @@ export async function recallReport(
       ORDER BY recalled_count DESC`,
     params,
   );
+  // Independent param numbering from the byCompany query above -- that one's
+  // companyClause references $3 (built after month occupies $2), which
+  // doesn't exist in this two-param query.
+  const lifetimeParams: unknown[] = [agencyId];
+  let lifetimeCompanyClause = "";
+  if (companyId) {
+    lifetimeParams.push(companyId);
+    lifetimeCompanyClause = `AND c.company_id = $${lifetimeParams.length}`;
+  }
   const lifetime = await pool.query(
     `SELECT COUNT(*)::int AS n FROM customers c
        JOIN companies co ON co.id = c.company_id
-      WHERE co.agency_id = $1 AND c.status = 'recalled' ${companyClause}`,
-    companyId ? [agencyId, companyId] : [agencyId],
+      WHERE co.agency_id = $1 AND c.status = 'recalled' ${lifetimeCompanyClause}`,
+    lifetimeParams,
   );
   const rows = byCompany.rows as RecallReportRow[];
   return {

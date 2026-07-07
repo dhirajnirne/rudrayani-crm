@@ -18,9 +18,13 @@ import dayjs, { type Dayjs } from "dayjs";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, errorMessage } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import BreakdownTable from "../components/dashboard/BreakdownTable";
+import BucketMovementCard from "../components/dashboard/BucketMovementCard";
 import MetricPanel from "../components/dashboard/MetricPanel";
 import MetricTabsCard from "../components/dashboard/MetricTabsCard";
 import OverviewChart from "../components/dashboard/OverviewChart";
+import RecalledStatTile from "../components/dashboard/RecalledStatTile";
+import TrailAnalyticsCard from "../components/dashboard/TrailAnalyticsCard";
 import { lakh, compactCount, pctText } from "../components/dashboard/format";
 import {
   METRIC_TITLES,
@@ -62,6 +66,7 @@ export default function DashboardPage() {
   const [agentId, setAgentId] = useState<string>();
   const [product, setProduct] = useState<string>();
   const [bucket, setBucket] = useState<string>();
+  const [status, setStatus] = useState<"active" | "closed" | "recalled">();
   const [amountMode, setAmountMode] = useState(true);
   const [activeMetric, setActiveMetric] = useState<MetricKey>("resolution");
 
@@ -102,15 +107,16 @@ export default function DashboardPage() {
       agent_id: agentId,
       product,
       bucket,
+      status,
     }),
-    [month, companyId, branchId, teamId, agentId, product, bucket],
+    [month, companyId, branchId, teamId, agentId, product, bucket, status],
   );
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const params: Record<string, string> = { month: filters.month };
-      for (const key of ["company_id", "branch_id", "team_id", "agent_id", "product", "bucket"] as const) {
+      for (const key of ["company_id", "branch_id", "team_id", "agent_id", "product", "bucket", "status"] as const) {
         if (filters[key]) params[key] = filters[key]!;
       }
       const res = await api.get("/reports/dashboard", { params });
@@ -130,7 +136,7 @@ export default function DashboardPage() {
     setExporting(true);
     try {
       const params: Record<string, string> = { month: filters.month };
-      for (const key of ["company_id", "branch_id", "team_id", "agent_id", "product", "bucket"] as const) {
+      for (const key of ["company_id", "branch_id", "team_id", "agent_id", "product", "bucket", "status"] as const) {
         if (filters[key]) params[key] = filters[key]!;
       }
       const res = await api.get("/reports/export", { params, responseType: "blob" });
@@ -211,6 +217,18 @@ export default function DashboardPage() {
           value={bucket}
           onChange={setBucket}
           options={buckets.map((b) => ({ value: b, label: b }))}
+        />
+        <Select
+          style={{ width: 150 }}
+          placeholder="All Statuses"
+          allowClear
+          value={status}
+          onChange={(v) => setStatus(v ?? undefined)}
+          options={[
+            { value: "active", label: "Active" },
+            { value: "recalled", label: "Recalled" },
+            { value: "closed", label: "Closed" },
+          ]}
         />
         {isManager && (
           <>
@@ -365,6 +383,22 @@ export default function DashboardPage() {
               </Card>
             </Col>
           </Row>
+
+          {/* Recalled cases + bucket movements (Phase 7) */}
+          <Row gutter={[16, 16]}>
+            <Col xs={24} md={6}>
+              <RecalledStatTile filters={filters} />
+            </Col>
+            <Col xs={24} md={18}>
+              <BucketMovementCard filters={filters} />
+            </Col>
+          </Row>
+
+          {/* Dimension breakdown ("product wise view" and every other cut) */}
+          <BreakdownTable filters={filters} />
+
+          {/* Trail / disposition analytics */}
+          <TrailAnalyticsCard filters={filters} />
 
           {/* Monthly overview chart */}
           <OverviewChart filters={filters} />

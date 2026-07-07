@@ -585,6 +585,15 @@ describe("recall report", () => {
     expect(juneRes.body.lifetime_recalled_count).toBe(1); // lifetime is month-independent
   });
 
+  it("filtering recalls by company_id doesn't 500 (the lifetime query has its own param numbering)", async () => {
+    const res = await request(app)
+      .get(`/api/reports/recalls?month=2026-05&company_id=${companyId}`)
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.total_recalled_count).toBe(1);
+    expect(res.body.lifetime_recalled_count).toBe(1);
+  });
+
   it("the dashboard's status filter can narrow to recalled customers only", async () => {
     const res = await request(app)
       .get("/api/reports/dashboard?month=2026-05&status=recalled")

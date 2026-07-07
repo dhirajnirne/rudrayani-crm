@@ -49,4 +49,5 @@ export interface DashboardFilters {
   agent_id?: string;
   product?: string;
   bucket?: string;
+  status?: "active" | "closed" | "recalled";
 }
