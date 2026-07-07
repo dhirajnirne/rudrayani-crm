@@ -202,6 +202,21 @@ describe("payment-driven movement detection", () => {
     ]);
     expect(events.rows).toHaveLength(0);
   });
+
+  it("a recalled customer can no longer receive payments (Task 7.8 hardening)", async () => {
+    const cust = await pool.query(
+      `INSERT INTO customers (company_id, loan_number, customer_name, bucket, emi, due_amount, status, recalled_at)
+       VALUES ($1, 'MOV-005', 'Movement Five (recalled)', '1', 5000, 10000, 'recalled', now())
+       RETURNING id`,
+      [companyId],
+    );
+    const res = await pay(cust.rows[0].id, 5000);
+    expect(res.status).toBe(400);
+    const payments = await pool.query(`SELECT * FROM payments WHERE customer_id = $1`, [
+      cust.rows[0].id,
+    ]);
+    expect(payments.rows).toHaveLength(0);
+  });
 });
 
 describe("allocation-confirmed movement", () => {

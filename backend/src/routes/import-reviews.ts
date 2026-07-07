@@ -219,8 +219,13 @@ async function approveAddition(
 }
 
 async function approveRemoval(client: PoolClient, customerId: string): Promise<void> {
+  // Mirrors how closing a customer already clears the assignment (payments.ts)
+  // -- a recalled case has nothing left to work, so it shouldn't linger as
+  // "assigned" to an agent even though every current query already filters
+  // status='active' before checking assignment.
   const { rows } = await client.query(
-    `UPDATE customers SET status = 'recalled', recalled_at = now()
+    `UPDATE customers SET status = 'recalled', recalled_at = now(),
+            assigned_agent_id = NULL, assigned_team_id = NULL
       WHERE id = $1 AND status = 'active' RETURNING id`,
     [customerId],
   );

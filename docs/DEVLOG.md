@@ -996,3 +996,148 @@ runtime stays out of the login bundle.
    collection vs target.
 
 ---
+
+## 2026-07-07 — Phase 7 (Tasks 7.1–7.8): Allocation Lifecycle, Discrepancy Review, Customer 360, Granular Reporting
+
+**Why:** allocation files stopped arriving once a month — companies now send
+a **refreshed full list mid-month**, adding and pulling back customers.
+Before this phase the import engine only warned about active loans missing
+from a file; nothing was flagged, persisted, or reviewable, and a lender
+pull-back was indistinguishable from a customer paying off. This phase adds
+the review layer, a customer 360 view, lender-independent bucket-movement
+signals, and the granular reporting cuts the owner needs to run the book with
+confidence instead of guesswork.
+
+### 7.1 Schema
+`customers.status` gains **`recalled`** (+ `recalled_at`) — distinct from
+`closed` so billing/reporting never conflate "lender withdrew the case" with
+"customer paid off". New `import_review_items` (the discrepancy queue: type
+addition/removal/reactivation, payload, pending/approved/rejected/superseded).
+`import_runs` gains `pending_review_rows`, `removal_rows`, `new_buckets`,
+`new_products`. `import_templates.detail_fields` (customer-detail column
+selection). `buckets.canonical_bucket` (0=X/current, 1=30 DPD, 2=60 DPD, …).
+New `bucket_movements` event log (payment-detected vs allocation-confirmed,
+partial unique index dedupes payment events per customer-month). New
+`imports.review` permission (agency_admin + operations_manager only).
+
+### 7.2 Diff engine (backend/src/services/import-service.ts)
+`computeAllocationDiff` matches file rows to the active book by
+case/whitespace-normalized loan number: **additions** (no existing
+customer), **updates** (existing active — applies directly, unchanged),
+**reactivations** (existing recalled/closed — can't blind-update status),
+**removals** (active customers missing from the file). First allocation
+import of a month inserts additions directly (expected new book); every
+mid-month refresh routes additions to review too — reactivations and
+removals always go to review, regardless of month. A fresher file supersedes
+older pending items **for that month only** (scoped by `allocation_month`,
+not company-wide, so an unrelated month's import can never silently discard
+a still-open review). `deriveProducts`/`deriveBuckets` now return the
+genuinely-new labels for the run to surface. Verified end-to-end against the
+real "Hero Fincorp allocations july.xlsx": a modified re-import (10 loans
+dropped, 3 fabricated ones added) produced exactly 3 pending additions + 10
+pending removals, zero rows applied without review.
+
+### 7.3 Review API + queue UI
+`backend/src/routes/import-reviews.ts` (list/detail-with-context/decision/
+bulk-decision, gated on `imports.review`): approving an addition inserts the
+customer + writes its month snapshot; approving a removal recalls the
+customer; approving a reactivation restores active status while applying the
+file's data. Deciding twice, or deciding on a superseded item, is a 409.
+`ImportReviewPage` (filterable, row + bulk approve/reject, payload +
+trail/PTP/payment context on expand); the import wizard's preview/done steps
+show the real diff and link straight to the queue when anything's pending.
+
+### 7.4 Customer 360 (backend/src/routes/customers.ts)
+`GET /customers/:id`: identity, the source columns the agency chose to keep
+as "detail" fields at import time (from the company's most-recently-touched
+active template — version numbers can't be compared across differently-named
+templates, so `updated_at` decides "latest"), and every trail of activity —
+calls, PTPs, payments, bucket movements, allocation history, month snapshots.
+Scope is a 404 (not 403) for agents opening a customer not assigned to them,
+so the check never leaks whether an out-of-scope loan number exists.
+`CustomerDetailDrawer` renders it (missing detail values as "-"); wired from
+CustomersPage, which also gains a status filter/column for `recalled`.
+
+### 7.5 Canonical buckets + movement detection
+`backend/src/services/bucket-movement-service.ts`: payment-driven detection
+(canonical_bucket × emi, falling back to due_amount) records an
+informational event when a customer's payments this month cover their
+arrears — `customers.bucket` is never touched, the lender's file stays
+authoritative. Allocation-confirmed detection compares an updated customer's
+bucket to their prior month's snapshot (ranked by canonical_bucket, falling
+back to sort_order) and records a confirmation when it dropped or landed on
+the current bucket. BucketsPage gets an editable canonical-bucket column
+with an "Unmapped" warning; setting canonical 0 also marks the bucket
+current, since they encode the same fact.
+
+### 7.6 Report engine extensions (backend/src/services/report-service.ts)
+`GET /reports/breakdown?dimension=company|product|bucket|branch|team|agent`
+generalizes the existing classification CTE to every axis — the "product
+wise view" the dashboard mockup calls for. Targets/achievement only apply to
+organizational dimensions; product/bucket are narrowing filters in the
+targets model, not their own scope level, so those rows carry a null target
+rather than a misleading one. New `GET /reports/trail` (date-range
+action/result-code counts, PTP conversion), `/reports/recalls` (recalled
+counts/amounts, separate from closed), `/reports/bucket-movements`
+(payment-detected vs allocation-confirmed per bucket — "detected not
+confirmed" is the owner-level watch item). A `status` filter is now
+available across the snapshot-based reports. `/reports/export` gains
+Breakdown/Trail/Recalls/Bucket Movements sheets. Every new number was
+hand-reconciled against the existing May/June test fixture, not just trusted
+from a fixture round-trip.
+
+### 7.7 Dashboard wiring
+`BreakdownTable` (dimension selector, achievement progress bars),
+`TrailAnalyticsCard` (result-code chart + PTP stat tiles, date range
+defaulting to the selected month), `RecalledStatTile` (drill-down modal),
+`BucketMovementCard`. Manually driving the new endpoints against a live
+server (not just the test suite) caught a real bug: `recallReport`'s
+lifetime-count query reused the byCompany query's parameter numbering,
+500ing whenever `company_id` was passed — a path the original test never hit
+over HTTP. Fixed with its own independent param array + a regression test.
+
+### 7.8 Hardening
+Payments are now blocked on `recalled` customers (mirrors the existing
+`closed` guard) — a lender pull-back means there's nothing left to collect
+through this agency. Approving a removal now also clears the agent
+assignment (mirrors how closing a customer already does), so a recalled case
+never lingers as "assigned" even though every current query already filters
+`status='active'` first. Swept every `status`-based query in the codebase —
+all of them use explicit `= 'active'` equality (never a `!= 'closed'`
+negation), so `recalled` was automatically excluded everywhere it should be
+without further changes. `seed:demo` now seeds a full allocation lifecycle
+(first-of-month import → mid-month refresh leaving 1 addition + 1 removal
+pending in Import Review, canonical bucket mappings, a payment-driven
+movement event, one already-recalled customer) — idempotent, using
+`commitImport`/`detectPaymentNormalization` directly rather than duplicating
+their logic. Caught and fixed a real idempotency bug in the process: the new
+company lookup relied on `ON CONFLICT DO NOTHING`, but `companies` has no
+unique constraint on `(agency_id, name)` (the same latent issue already
+present in the pre-existing branches/teams seeding), so every re-run created
+a duplicate "Demo Finance Co" — fixed with a select-first pattern.
+
+### Verification
+Backend `npm test` — **177/177** across 18 files (up from 140 at the start
+of this phase): allocation-import (13, incl. supersede-scoping and
+case-insensitive loan matching), import-review (8), customer-detail (6),
+bucket-movements (8, incl. the recalled-payment guard), reports (23, incl.
+hand-reconciled breakdown/branch/team totals and the recall-report param-bug
+regression). `tsc --noEmit` and `vite build` green on both. Real-file
+verification against `Hero Fincorp allocations july.xlsx` (Task 7.2) and a
+live server smoke-test of every new report endpoint (Task 7.7) — the latter
+is what caught the recalls param bug that no unit test exercised.
+
+### How to view
+1. `npm run seed:demo` → log in as admin → **Import Review**: 2 pending
+   items (1 addition, 1 removal) for "Demo Finance Co" this month — approve/
+   reject either and watch the customer list update.
+2. **Buckets**: "Demo Finance Co" already has canonical buckets mapped
+   (X=0, 1=1, 2=2); DEMO-002 already has a payment-driven movement event.
+3. **Customers**: open DEMO-000 (recalled) or any Demo Finance Co customer —
+   the drawer shows detail fields, trail, PTPs, payments, movements,
+   allocation history, and snapshots.
+4. **Dashboard**: Breakdown table (switch dimension), Trail Analytics
+   (date-range chart + PTP conversion), Recalled tile (click for the
+   drill-down), Bucket Movements card — all filter-aware, all exportable.
+
+---

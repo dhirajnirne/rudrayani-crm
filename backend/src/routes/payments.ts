@@ -72,6 +72,9 @@ router.post(
     );
     if (!custRes.rows[0]) throw new HttpError(404, "Customer not found in this agency");
     if (custRes.rows[0].status === "closed") throw new HttpError(400, "Customer is already closed");
+    if (custRes.rows[0].status === "recalled") {
+      throw new HttpError(400, "Customer was recalled by the lender -- no longer collectible here");
+    }
 
     let photoKey: string | null = null;
     if (req.file) {

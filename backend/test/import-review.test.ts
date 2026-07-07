@@ -229,10 +229,10 @@ describe("import review queue: addition approval", () => {
 });
 
 describe("import review queue: removal approval and rejection", () => {
-  it("approving a removal recalls the customer; rejecting one keeps it active", async () => {
+  it("approving a removal recalls the customer, clearing their agent assignment; rejecting one keeps it active", async () => {
     const first = await uploadAndCommit(
       await buildSheet([
-        ["REV-RM-APPROVE", "Will Be Recalled", "30", 10000, 500, ""],
+        ["REV-RM-APPROVE", "Will Be Recalled", "30", 10000, 500, TELECALLER_PHONE],
         ["REV-RM-REJECT", "Will Stay Active", "30", 10000, 500, ""],
       ]),
       "2026-02-01",
@@ -262,11 +262,12 @@ describe("import review queue: removal approval and rejection", () => {
     expect(rejectRes.status).toBe(200);
 
     const approved = await pool.query(
-      `SELECT status, recalled_at FROM customers WHERE company_id = $1 AND loan_number = 'REV-RM-APPROVE'`,
+      `SELECT status, recalled_at, assigned_agent_id FROM customers WHERE company_id = $1 AND loan_number = 'REV-RM-APPROVE'`,
       [companyId],
     );
     expect(approved.rows[0].status).toBe("recalled");
     expect(approved.rows[0].recalled_at).not.toBeNull();
+    expect(approved.rows[0].assigned_agent_id).toBeNull(); // recalled cases don't linger as "assigned"
 
     const rejected = await pool.query(
       `SELECT status FROM customers WHERE company_id = $1 AND loan_number = 'REV-RM-REJECT'`,
