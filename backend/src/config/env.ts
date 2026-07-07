@@ -17,6 +17,14 @@ const envSchema = z.object({
   OTP_EXPIRY_MINUTES: z.coerce.number().int().positive().default(10),
   OTP_MAX_VERIFY_ATTEMPTS: z.coerce.number().int().positive().default(5),
   UPLOAD_DIR: z.string().default("uploads"),
+
+  // Optional S3-compatible storage (e.g. Cloudflare R2). When all four are
+  // set, getStorage() uses it instead of local disk -- needed on hosts that
+  // don't persist local disk across deploys/restarts (Render, Fly, Vercel).
+  R2_ENDPOINT: z.string().optional(),
+  R2_ACCESS_KEY_ID: z.string().optional(),
+  R2_SECRET_ACCESS_KEY: z.string().optional(),
+  R2_BUCKET: z.string().optional(),
 });
 
 export const env = envSchema.parse(process.env);

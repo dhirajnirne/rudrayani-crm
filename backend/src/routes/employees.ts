@@ -6,6 +6,8 @@ import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
 import { hashPassword } from "../services/auth-service";
 import { capabilitiesHavePermission } from "../services/permission-service";
+import { getSmsProvider } from "../services/sms/sms-provider";
+import { logger } from "../config/logger";
 import { capabilitiesOf, publicUser, type UserRow } from "../types/user";
 
 const router = Router();
@@ -48,6 +50,23 @@ async function assertCanEditOpsManager(actor: UserRow): Promise<void> {
   const allowed = await capabilitiesHavePermission(capabilitiesOf(actor), "ops_managers.create");
   if (!allowed) {
     throw new HttpError(403, "Only the Agency Admin can add or remove an Operations Manager");
+  }
+}
+
+/**
+ * Best-effort: an employee (or their password reset) is useless until they
+ * actually know the phone+password to log in with -- the exact confusion
+ * that prompted this. Never let an SMS failure block account creation.
+ */
+async function notifyCredentials(phone: string, password: string, isReset: boolean): Promise<void> {
+  try {
+    const action = isReset ? "Your Rudrayani CRM password has been reset." : "Your Rudrayani CRM account is ready.";
+    await getSmsProvider().sendSms(
+      phone,
+      `${action} Login with phone ${phone} and password ${password} on the web portal or mobile app. Please change your password after logging in.`,
+    );
+  } catch (err) {
+    logger.warn({ err, phone }, "Failed to send employee credentials SMS (account/reset still succeeded)");
   }
 }
 
@@ -125,6 +144,7 @@ router.post(
         body.capabilities.is_field_agent ?? false,
       ],
     );
+    await notifyCredentials(body.phone, body.password, false);
     res.status(201).json({ employee: { ...publicUser(rows[0]), is_active: rows[0].is_active } });
   }),
 );
@@ -243,6 +263,7 @@ router.post(
       "UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL",
       [req.params.id],
     );
+    await notifyCredentials(rows[0].phone, body.new_password, true);
     res.json({ ok: true });
   }),
 );

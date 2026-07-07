@@ -1,0 +1,234 @@
+import { Alert, Badge, Button, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
+import { CheckOutlined, CloseOutlined, ReloadOutlined } from "@ant-design/icons";
+import dayjs from "dayjs";
+import relativeTime from "dayjs/plugin/relativeTime";
+import { useCallback, useEffect, useState } from "react";
+import { api, errorMessage } from "../api/client";
+import type { Employee, ReallocationRequest, ReallocationStatus } from "../types";
+
+dayjs.extend(relativeTime);
+
+const fmtAmount = (v: string | number | null | undefined) =>
+  v == null ? "-" : Number(v).toLocaleString("en-IN", { maximumFractionDigits: 0 });
+
+const STATUS_TAG: Record<ReallocationStatus, { color: string; label: string }> = {
+  pending: { color: "gold", label: "Pending" },
+  approved: { color: "green", label: "Approved" },
+  rejected: { color: "red", label: "Rejected" },
+};
+
+/**
+ * Reallocation approvals (build brief §8): an agent flags a customer they
+ * can't work (wrong area, language, dispute) from the mobile app; anyone
+ * with customers.allocate decides here -- reassign to a named agent, return
+ * to the unallocated pool, or reject the request outright.
+ */
+export default function ReallocationRequestsPage() {
+  const [status, setStatus] = useState<ReallocationStatus>("pending");
+  const [requests, setRequests] = useState<ReallocationRequest[]>([]);
+  const [agents, setAgents] = useState<Employee[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [approveTarget, setApproveTarget] = useState<ReallocationRequest | null>(null);
+  const [newAgentId, setNewAgentId] = useState<string | undefined>(undefined);
+  const [rejectTarget, setRejectTarget] = useState<ReallocationRequest | null>(null);
+
+  useEffect(() => {
+    api.get("/employees").then((res) => {
+      setAgents(
+        (res.data.employees as Employee[]).filter(
+          (e) => e.is_active && e.capabilities.some((c) => ["telecaller", "field_agent"].includes(c)),
+        ),
+      );
+    });
+  }, []);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await api.get("/reallocation-requests", { params: { status } });
+      setRequests(res.data.requests);
+      if (status === "pending") setPendingCount(res.data.total);
+    } catch (err) {
+      message.error(errorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [status]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  useEffect(() => {
+    api
+      .get("/reallocation-requests", { params: { status: "pending" } })
+      .then((res) => setPendingCount(res.data.total));
+  }, [requests]);
+
+  const decide = async (id: string, approve: boolean, opts?: { new_agent_id?: string; note?: string }) => {
+    try {
+      await api.post(`/reallocation-requests/${id}/decide`, { approve, ...opts });
+      message.success(approve ? "Approved" : "Rejected");
+      void load();
+    } catch (err) {
+      message.error(errorMessage(err));
+    }
+  };
+
+  return (
+    <div>
+      <Typography.Title level={4}>
+        Reallocation Approvals{" "}
+        <Badge count={pendingCount} showZero={false} style={{ backgroundColor: "#d77a00" }} />
+      </Typography.Title>
+      <Typography.Paragraph type="secondary">
+        An agent flags a customer they can&apos;t work (wrong area, language mismatch, a dispute) from
+        the mobile app. Nothing changes until you decide here -- reassign to a named agent, return the
+        customer to the unallocated pool, or reject the request.
+      </Typography.Paragraph>
+
+      <Space style={{ marginBottom: 16 }}>
+        <Select
+          style={{ width: 160 }}
+          value={status}
+          onChange={setStatus}
+          options={[
+            { value: "pending", label: "Pending" },
+            { value: "approved", label: "Approved" },
+            { value: "rejected", label: "Rejected" },
+          ]}
+        />
+        <Button icon={<ReloadOutlined />} onClick={() => void load()}>
+          Refresh
+        </Button>
+      </Space>
+
+      <Table<ReallocationRequest>
+        rowKey="id"
+        loading={loading}
+        dataSource={requests}
+        pagination={{ pageSize: 20 }}
+        columns={[
+          {
+            title: "Loan Number",
+            dataIndex: "loan_number",
+            render: (v: string) => <Typography.Text code>{v}</Typography.Text>,
+          },
+          { title: "Customer", dataIndex: "customer_name" },
+          { title: "Company", dataIndex: "company_name" },
+          {
+            title: "Due Amount",
+            dataIndex: "due_amount",
+            width: 120,
+            align: "right" as const,
+            render: (v: string | null) => <span className="money">{fmtAmount(v)}</span>,
+          },
+          { title: "Requested By", dataIndex: "requested_by_name" },
+          { title: "Reason", dataIndex: "reason", ellipsis: true },
+          {
+            title: "Age",
+            width: 110,
+            render: (_, r) => dayjs(r.created_at).fromNow(),
+          },
+          ...(status !== "pending"
+            ? [
+                {
+                  title: "Status",
+                  width: 110,
+                  render: (_: unknown, r: ReallocationRequest) => (
+                    <Tag color={STATUS_TAG[r.status].color}>{STATUS_TAG[r.status].label}</Tag>
+                  ),
+                },
+                {
+                  title: "Decided",
+                  width: 160,
+                  render: (_: unknown, r: ReallocationRequest) =>
+                    r.decided_at
+                      ? `${dayjs(r.decided_at).fromNow()} by ${r.decided_by_name ?? "-"}`
+                      : "-",
+                },
+              ]
+            : []),
+          {
+            title: "Actions",
+            width: 200,
+            render: (_, r) =>
+              r.status === "pending" ? (
+                <Space>
+                  <Button
+                    size="small"
+                    type="primary"
+                    icon={<CheckOutlined />}
+                    onClick={() => {
+                      setNewAgentId(undefined);
+                      setApproveTarget(r);
+                    }}
+                  >
+                    Approve
+                  </Button>
+                  <Button size="small" danger icon={<CloseOutlined />} onClick={() => setRejectTarget(r)}>
+                    Reject
+                  </Button>
+                </Space>
+              ) : (
+                <Typography.Text type="secondary">{r.decision_note ?? "-"}</Typography.Text>
+              ),
+          },
+        ]}
+      />
+
+      <Modal
+        title={`Approve reallocation for ${approveTarget?.customer_name ?? ""}?`}
+        open={!!approveTarget}
+        onCancel={() => setApproveTarget(null)}
+        onOk={async () => {
+          if (!approveTarget) return;
+          await decide(approveTarget.id, true, { new_agent_id: newAgentId });
+          setApproveTarget(null);
+        }}
+        okText="Approve"
+      >
+        <Typography.Paragraph type="secondary">
+          Choose a new agent to reassign this customer, or leave blank to return it to the unallocated
+          pool for a Team Leader to pick up later.
+        </Typography.Paragraph>
+        <Select
+          style={{ width: "100%" }}
+          placeholder="Return to unallocated pool"
+          allowClear
+          value={newAgentId}
+          onChange={(v) => setNewAgentId(v ?? undefined)}
+          options={agents.map((a) => ({ value: a.id, label: a.full_name }))}
+        />
+      </Modal>
+
+      <Modal
+        title={`Reject reallocation request for ${rejectTarget?.customer_name ?? ""}?`}
+        open={!!rejectTarget}
+        onCancel={() => setRejectTarget(null)}
+        onOk={async () => {
+          if (!rejectTarget) return;
+          await decide(rejectTarget.id, false);
+          setRejectTarget(null);
+        }}
+        okText="Reject"
+        okButtonProps={{ danger: true }}
+      >
+        <Typography.Paragraph type="secondary">
+          The customer stays with their current agent. Use this when the request doesn&apos;t hold up
+          (e.g. the same area is already understaffed).
+        </Typography.Paragraph>
+      </Modal>
+
+      {requests.length === 0 && !loading && (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginTop: 16 }}
+          message={status === "pending" ? "No pending reallocation requests." : `No ${status} requests.`}
+        />
+      )}
+    </div>
+  );
+}

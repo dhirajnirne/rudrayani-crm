@@ -138,6 +138,25 @@ export interface ReviewItem {
   current_agent_name: string | null;
 }
 
+export type ReallocationStatus = "pending" | "approved" | "rejected";
+
+export interface ReallocationRequest {
+  id: string;
+  reason: string;
+  status: ReallocationStatus;
+  created_at: string;
+  decided_at: string | null;
+  decision_note: string | null;
+  customer_id: string;
+  loan_number: string;
+  customer_name: string;
+  due_amount: string | null;
+  company_name: string;
+  requested_by_id: string;
+  requested_by_name: string;
+  decided_by_name: string | null;
+}
+
 export const CAPABILITY_LABELS: Record<Capability, string> = {
   agency_admin: "Agency Admin",
   operations_manager: "Operations Manager",

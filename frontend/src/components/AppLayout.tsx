@@ -1,4 +1,5 @@
-import { Layout, Menu, Typography, Space, Tag, Button } from "antd";
+import { Layout, Menu, Spin, Typography, Space, Tag, Button } from "antd";
+import { Suspense } from "react";
 import {
   ApartmentOutlined,
   AuditOutlined,
@@ -77,6 +78,11 @@ export default function AppLayout() {
       icon: <FileSearchOutlined />,
       label: <Link to="/allocation">Allocation</Link>,
     },
+    hasPermission("customers.allocate") && {
+      key: "/reallocation-requests",
+      icon: <FileSyncOutlined />,
+      label: <Link to="/reallocation-requests">Reallocation Requests</Link>,
+    },
     hasPermission("dispositions.manage") && {
       key: "/dispositions",
       icon: <AuditOutlined />,
@@ -142,7 +148,15 @@ export default function AppLayout() {
           </Space>
         </Header>
         <Content style={{ margin: 24 }}>
-          <Outlet />
+          <Suspense
+            fallback={
+              <div style={{ display: "grid", placeItems: "center", height: 320 }}>
+                <Spin size="large" />
+              </div>
+            }
+          >
+            <Outlet />
+          </Suspense>
         </Content>
       </Layout>
     </Layout>

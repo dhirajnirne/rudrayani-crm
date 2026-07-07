@@ -1,0 +1,42 @@
+databases:
+  - name: rudrayani-db
+    plan: free
+    databaseName: rudrayani_crm
+    user: rudrayani
+
+services:
+  - type: web
+    name: rudrayani-backend
+    runtime: node
+    plan: free
+    rootDir: backend
+    healthCheckPath: /api/health
+    buildCommand: npm install && npm run build && npm run migrate:up
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: rudrayani-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 8h
+      # Fill these in manually from Cloudflare R2 (Dashboard > R2 > Manage API
+      # Tokens) once the bucket exists -- until all four are set the app
+      # falls back to local disk, which Render does not persist across
+      # deploys/restarts on the free plan.
+      - key: R2_ENDPOINT
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET
+        sync: false
+      # Fill in once an SMS provider (MSG91/Twilio/etc) is chosen -- until
+      # then OTP/credentials messages are only logged, not actually sent.
+      - key: SMS_PROVIDER_API_KEY
+        sync: false
