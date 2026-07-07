@@ -917,9 +917,21 @@ export interface RecallReportRow {
   recalled_amount: number;
 }
 
+export interface RecalledCustomerRow {
+  customer_id: string;
+  loan_number: string;
+  customer_name: string;
+  company_name: string;
+  recalled_at: string;
+  last_bucket: string | null;
+  last_due_amount: number | null;
+  last_agent_name: string | null;
+}
+
 export interface RecallReport {
   month: string;
   by_company: RecallReportRow[];
+  customers: RecalledCustomerRow[];
   total_recalled_count: number;
   total_recalled_amount: number;
   lifetime_recalled_count: number;
@@ -965,10 +977,36 @@ export async function recallReport(
       WHERE co.agency_id = $1 AND c.status = 'recalled' ${lifetimeCompanyClause}`,
     lifetimeParams,
   );
+
+  // Detailed downloadable list, same month window as by_company above -- its
+  // own independent param array, same reason as lifetimeParams.
+  const detailParams: unknown[] = [agencyId, month];
+  let detailCompanyClause = "";
+  if (companyId) {
+    detailParams.push(companyId);
+    detailCompanyClause = `AND c.company_id = $${detailParams.length}`;
+  }
+  const customerRows = await pool.query(
+    `SELECT c.id AS customer_id, c.loan_number, c.customer_name, co.name AS company_name,
+            c.recalled_at, c.bucket AS last_bucket, c.due_amount::float AS last_due_amount,
+            (SELECT u.full_name FROM allocation_logs al
+               JOIN users u ON u.id = al.to_agent_id
+              WHERE al.customer_id = c.id
+              ORDER BY al.created_at DESC LIMIT 1) AS last_agent_name
+       FROM customers c
+       JOIN companies co ON co.id = c.company_id
+      WHERE co.agency_id = $1 AND c.status = 'recalled'
+        AND c.recalled_at >= $2::date AND c.recalled_at < ($2::date + interval '1 month')
+        ${detailCompanyClause}
+      ORDER BY c.recalled_at DESC`,
+    detailParams,
+  );
+
   const rows = byCompany.rows as RecallReportRow[];
   return {
     month: month.slice(0, 7),
     by_company: rows,
+    customers: customerRows.rows as RecalledCustomerRow[],
     total_recalled_count: rows.reduce((s, r) => s + r.recalled_count, 0),
     total_recalled_amount: rows.reduce((s, r) => s + r.recalled_amount, 0),
     lifetime_recalled_count: lifetime.rows[0].n,

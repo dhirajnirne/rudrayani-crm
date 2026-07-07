@@ -576,6 +576,14 @@ describe("recall report", () => {
     expect(res.body.total_recalled_amount).toBe(25000);
     expect(res.body.lifetime_recalled_count).toBe(1);
     expect(res.body.by_company[0]).toMatchObject({ company_name: "Reports NBFC", recalled_count: 1 });
+    expect(res.body.customers).toHaveLength(1);
+    expect(res.body.customers[0]).toMatchObject({
+      loan_number: "RPT-RECALL-1",
+      customer_name: "Recalled Customer",
+      company_name: "Reports NBFC",
+      last_due_amount: 25000,
+      last_agent_name: null, // never allocated to anyone in this fixture
+    });
 
     // A different month has nothing to show -- recalled_at is May, not June.
     const juneRes = await request(app)
@@ -600,6 +608,33 @@ describe("recall report", () => {
       .set("Authorization", `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body.allocated.count).toBe(0); // recalled customer has no May snapshot
+  });
+
+  it("the detailed customer list resolves the last assigned agent from allocation_logs, since the assignment itself is cleared on recall", async () => {
+    const cust = await pool.query(
+      `INSERT INTO customers (company_id, loan_number, customer_name, bucket, due_amount, status, recalled_at)
+       VALUES ($1, 'RPT-RECALL-AGENT', 'Recalled With Agent History', '30', 40000, 'recalled', '2026-05-20')
+       RETURNING id`,
+      [companyId],
+    );
+    await pool.query(
+      `INSERT INTO allocation_logs (customer_id, from_agent_id, to_agent_id, allocated_by, reason)
+       VALUES ($1, NULL, $2, $2, 'Assigned by import')`,
+      [cust.rows[0].id, agentId],
+    );
+
+    const res = await request(app)
+      .get("/api/reports/recalls?month=2026-05")
+      .set("Authorization", `Bearer ${adminToken}`);
+    const row = res.body.customers.find(
+      (r: { loan_number: string }) => r.loan_number === "RPT-RECALL-AGENT",
+    );
+    expect(row).toBeDefined();
+    expect(row.last_agent_name).toBe("Reports Agent One");
+    expect(row.last_bucket).toBe("30");
+
+    await pool.query(`DELETE FROM allocation_logs WHERE customer_id = $1`, [cust.rows[0].id]);
+    await pool.query(`DELETE FROM customers WHERE id = $1`, [cust.rows[0].id]);
   });
 });
 

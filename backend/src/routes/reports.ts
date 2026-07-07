@@ -336,6 +336,30 @@ router.get(
     }
     recallsSheet.getColumn(1).width = 24;
 
+    const recalledCustomersSheet = wb.addWorksheet("Recalled Customers");
+    recalledCustomersSheet.addRow([
+      "Loan Number",
+      "Customer",
+      "Company",
+      "Recalled At",
+      "Last Bucket",
+      "Last Due Amount",
+      "Last Assigned Agent",
+    ]);
+    recalledCustomersSheet.getRow(1).font = { bold: true };
+    for (const r of recalls.customers) {
+      recalledCustomersSheet.addRow([
+        r.loan_number,
+        r.customer_name,
+        r.company_name,
+        r.recalled_at,
+        r.last_bucket,
+        r.last_due_amount,
+        r.last_agent_name,
+      ]);
+    }
+    recalledCustomersSheet.getColumn(1).width = 24;
+
     const movements = await bucketMovementReport(req.user!.agency_id, filters.month, filters.company_id);
     const movementsSheet = wb.addWorksheet("Bucket Movements");
     movementsSheet.addRow(["Company", "Bucket", "Payment-Detected", "Allocation-Confirmed", "Detected Not Confirmed"]);
