@@ -315,6 +315,14 @@ class _CustomerCard extends StatelessWidget {
                 'PTP: ${_rupee.format(customer.ptpAmount)} on ${DateFormat('dd MMM').format(customer.ptpDate!)}',
                 style: TextStyle(fontSize: 11, color: ptpDue ? Colors.orange : Colors.green),
               ),
+            if (customer.normalizedPending)
+              const Padding(
+                padding: EdgeInsets.only(top: 2),
+                child: Text(
+                  'Normalized this month (pending lender confirmation)',
+                  style: TextStyle(fontSize: 10, color: Colors.blue, fontWeight: FontWeight.w600),
+                ),
+              ),
           ],
         ),
         trailing: const Icon(Icons.chevron_right),

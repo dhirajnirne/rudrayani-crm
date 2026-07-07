@@ -14,6 +14,12 @@ class Customer {
   final String? lastResultCode;
   final double? ptpAmount;
   final DateTime? ptpDate;
+  // Phase 7: worklist already filters to status='active' server-side, so
+  // these mostly matter for forward-compatibility (e.g. a future screen that
+  // lists customers regardless of status) and for the normalized badge.
+  final String status;
+  final DateTime? recalledAt;
+  final bool normalizedPending;
 
   const Customer({
     required this.id,
@@ -31,6 +37,9 @@ class Customer {
     this.lastResultCode,
     this.ptpAmount,
     this.ptpDate,
+    this.status = 'active',
+    this.recalledAt,
+    this.normalizedPending = false,
   });
 
   factory Customer.fromJson(Map<String, dynamic> j) => Customer(
@@ -49,5 +58,8 @@ class Customer {
         lastResultCode: j['last_result_code'] as String?,
         ptpAmount: (j['ptp_amount'] as num?)?.toDouble(),
         ptpDate: j['ptp_date'] != null ? DateTime.parse(j['ptp_date'] as String) : null,
+        status: j['status'] as String? ?? 'active',
+        recalledAt: j['recalled_at'] != null ? DateTime.parse(j['recalled_at'] as String) : null,
+        normalizedPending: j['normalized_pending'] as bool? ?? false,
       );
 }

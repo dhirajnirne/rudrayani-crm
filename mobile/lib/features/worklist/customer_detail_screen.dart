@@ -217,6 +217,28 @@ class CustomerDetailScreen extends ConsumerWidget {
               ],
             ),
             const SizedBox(height: 16),
+            if (customer.normalizedPending)
+              Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.info_outline, size: 16, color: Colors.blue),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Normalized this month, pending lender confirmation. The lender\'s bucket stays authoritative until their next file confirms it.',
+                        style: TextStyle(fontSize: 12, color: Colors.blue),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             // Loan details card
             _SectionCard(title: 'Loan Details', children: [
               _Row('Loan Number', customer.loanNumber),
