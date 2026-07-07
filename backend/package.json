@@ -20,7 +20,8 @@
     "purge:pings": "tsx src/jobs/purge_old_location_pings.ts",
     "seed:admin": "tsx src/migrations/seed_admin.ts",
     "seed:demo": "tsx src/migrations/seed_demo.ts",
-    "seed:payments": "tsx src/migrations/seed_payments.ts"
+    "seed:payments": "tsx src/migrations/seed_payments.ts",
+    "seed:activity": "tsx src/migrations/seed_hero_activity.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -32,7 +33,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       if (mounted) context.go('/home');
     } catch (e) {
       String msg = 'Login failed. Check your credentials.';
-      if (e.toString().contains('locked')) msg = 'Account locked. Contact your manager.';
+      if (e is DioException) {
+        if (e.type == DioExceptionType.connectionError ||
+            e.type == DioExceptionType.connectionTimeout) {
+          msg = 'Cannot reach the server. Check the API URL and that the backend is running.';
+        } else if (e.response?.statusCode == 423) {
+          msg = 'Account locked. Contact your manager.';
+        } else if (e.response?.data is Map && (e.response!.data['error'] as String?) != null) {
+          msg = e.response!.data['error'] as String;
+        }
+      }
       setState(() => _error = msg);
     } finally {
       if (mounted) setState(() => _loading = false);
