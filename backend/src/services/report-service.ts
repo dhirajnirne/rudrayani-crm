@@ -1021,6 +1021,59 @@ export async function bucketMovementReport(
   return { month: month.slice(0, 7), rows: rows as BucketMovementReportRow[] };
 }
 
+export interface BucketMismatchRow {
+  customer_id: string;
+  loan_number: string;
+  customer_name: string;
+  company_name: string;
+  lender_bucket: string;
+  lender_canonical: number;
+  due_date: string;
+  dpd: number;
+  computed_canonical: number;
+}
+
+/**
+ * DPD cross-check (Phase 7 correction): buckets are 100% lender-supplied
+ * with no independent aging calculation -- standard collection-agency
+ * practice also tracks the EMI due date and computes DPD independently, to
+ * catch cases where the two disagree. This NEVER overrides `customers.bucket`
+ * -- the lender's bucket stays authoritative for billing/reporting; a
+ * mismatch here just means "worth a second look," using the standard
+ * 30-day-increment convention (0-29 days = canonical 0/current, 30-59 = 1,
+ * 60-89 = 2, ...). Only customers with BOTH a due_date (the source column
+ * was mapped) and a canonically-mapped lender bucket can be checked at all;
+ * everyone else is silently excluded, not flagged as a false mismatch.
+ */
+export async function bucketMismatchReport(
+  agencyId: string,
+  companyId?: string,
+): Promise<{ rows: BucketMismatchRow[] }> {
+  const params: unknown[] = [agencyId];
+  let companyClause = "";
+  if (companyId) {
+    params.push(companyId);
+    companyClause = `AND c.company_id = $${params.length}`;
+  }
+  const { rows } = await pool.query(
+    `SELECT c.id AS customer_id, c.loan_number, c.customer_name, co.name AS company_name,
+            c.bucket AS lender_bucket, b.canonical_bucket AS lender_canonical,
+            c.due_date,
+            GREATEST(CURRENT_DATE - c.due_date, 0)::int AS dpd,
+            GREATEST(FLOOR(GREATEST(CURRENT_DATE - c.due_date, 0) / 30.0), 0)::int AS computed_canonical
+       FROM customers c
+       JOIN companies co ON co.id = c.company_id
+       JOIN buckets b ON b.company_id = c.company_id AND lower(b.label) = lower(c.bucket)
+      WHERE co.agency_id = $1 AND c.status = 'active'
+        AND c.due_date IS NOT NULL AND b.canonical_bucket IS NOT NULL
+        AND FLOOR(GREATEST(CURRENT_DATE - c.due_date, 0) / 30.0) <> b.canonical_bucket
+        ${companyClause}
+      ORDER BY dpd DESC`,
+    params,
+  );
+  return { rows: rows as BucketMismatchRow[] };
+}
+
 /** Products + buckets available under the current scope (dashboard filter options). */
 export async function filterOptions(
   agencyId: string,

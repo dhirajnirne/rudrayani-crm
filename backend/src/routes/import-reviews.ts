@@ -29,6 +29,7 @@ interface ReviewPayload {
   bucket?: string | null;
   due_amount?: number | null;
   emi?: number | null;
+  emi_due_date?: string | null;
   agent_phone?: string | null;
   custom_fields?: Record<string, string>;
 }
@@ -171,8 +172,8 @@ async function approveAddition(
   const inserted = await client.query(
     `INSERT INTO customers
        (company_id, loan_number, customer_name, mobile_number, product, bucket,
-        due_amount, emi, custom_fields, assigned_agent_id, assigned_team_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        due_amount, emi, due_date, custom_fields, assigned_agent_id, assigned_team_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
      ON CONFLICT (company_id, loan_number) DO NOTHING
      RETURNING id`,
     [
@@ -184,6 +185,7 @@ async function approveAddition(
       payload.bucket ?? null,
       payload.due_amount ?? null,
       payload.emi ?? null,
+      payload.emi_due_date ?? null,
       JSON.stringify(payload.custom_fields ?? {}),
       agent?.id ?? null,
       agent?.team_id ?? null,
@@ -259,9 +261,10 @@ async function approveReactivation(
             bucket = COALESCE($5, bucket),
             due_amount = COALESCE($6, due_amount),
             emi = COALESCE($7, emi),
-            custom_fields = custom_fields || $8::jsonb,
-            assigned_agent_id = COALESCE($9, assigned_agent_id),
-            assigned_team_id = COALESCE($10, assigned_team_id)
+            due_date = COALESCE($8, due_date),
+            custom_fields = custom_fields || $9::jsonb,
+            assigned_agent_id = COALESCE($10, assigned_agent_id),
+            assigned_team_id = COALESCE($11, assigned_team_id)
       WHERE id = $1`,
     [
       item.customer_id,
@@ -271,6 +274,7 @@ async function approveReactivation(
       payload.bucket ?? null,
       payload.due_amount ?? null,
       payload.emi ?? null,
+      payload.emi_due_date ?? null,
       JSON.stringify(payload.custom_fields ?? {}),
       agent?.id ?? null,
       agent?.team_id ?? null,

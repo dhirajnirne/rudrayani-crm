@@ -8,6 +8,7 @@ import { capabilitiesHavePermission } from "../services/permission-service";
 import { capabilitiesOf } from "../types/user";
 import {
   agentBreakdown,
+  bucketMismatchReport,
   bucketMovementReport,
   dashboard,
   dimensionBreakdown,
@@ -155,6 +156,16 @@ router.get(
       })
       .parse(req.query);
     const result = await bucketMovementReport(req.user!.agency_id, `${q.month}-01`, q.company_id);
+    res.json(result);
+  }),
+);
+
+/** DPD cross-check: live (as-of-today), not month-scoped -- a mismatch is a right-now fact, not a historical one. */
+router.get(
+  "/bucket-mismatches",
+  asyncHandler(async (req, res) => {
+    const q = z.object({ company_id: z.string().uuid().optional() }).parse(req.query);
+    const result = await bucketMismatchReport(req.user!.agency_id, q.company_id);
     res.json(result);
   }),
 );
@@ -333,6 +344,31 @@ router.get(
       movementsSheet.addRow([r.company_name, r.bucket, r.payment_detected, r.allocation_confirmed, r.detected_not_confirmed]);
     }
     movementsSheet.getColumn(1).width = 24;
+
+    const mismatches = await bucketMismatchReport(req.user!.agency_id, filters.company_id);
+    const mismatchSheet = wb.addWorksheet("Bucket Mismatches");
+    mismatchSheet.addRow([
+      "Loan Number",
+      "Customer",
+      "Lender Bucket",
+      "Lender Canonical",
+      "Due Date",
+      "DPD",
+      "DPD-Implied Canonical",
+    ]);
+    mismatchSheet.getRow(1).font = { bold: true };
+    for (const r of mismatches.rows) {
+      mismatchSheet.addRow([
+        r.loan_number,
+        r.customer_name,
+        r.lender_bucket,
+        r.lender_canonical,
+        r.due_date,
+        r.dpd,
+        r.computed_canonical,
+      ]);
+    }
+    mismatchSheet.getColumn(1).width = 24;
 
     res.setHeader(
       "Content-Type",

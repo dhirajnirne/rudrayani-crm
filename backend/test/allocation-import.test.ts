@@ -422,4 +422,82 @@ describe("monthly allocation import", () => {
     expect(cust.rows[0].bucket).toBe("60");
     expect(cust.rows[0].loan_number).toBe("CI-001"); // original casing preserved, not overwritten
   });
+
+  it("maps an EMI due date column (DD-MM-YYYY) through to customers.due_date, for the DPD cross-check", async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Allocation");
+    ws.addRow(["Loan", "Name", "Bucket", "POS", "EMI", "DueDate"]);
+    ws.addRow(["DUE-001", "Due Date Guy", "1", 10000, 500, "08-07-2026"]);
+    const buffer = Buffer.from(await wb.xlsx.writeBuffer());
+
+    const up = await request(app)
+      .post("/api/imports/upload")
+      .set("Authorization", `Bearer ${token}`)
+      .attach("file", buffer, "duedate.xlsx");
+    const res = await request(app)
+      .post("/api/imports/commit")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        upload_key: up.body.upload_key,
+        company_id: companyId,
+        column_mapping: {
+          Loan: "loan_number",
+          Name: "customer_name",
+          Bucket: "bucket",
+          POS: "due_amount",
+          EMI: "emi",
+          DueDate: "emi_due_date",
+        },
+        mode: "allocation",
+        allocation_month: "2027-01-01", // fresh month, unused elsewhere in this file
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.inserted_rows).toBe(1);
+
+    const cust = await pool.query(
+      `SELECT due_date FROM customers WHERE company_id = $1 AND loan_number = 'DUE-001'`,
+      [companyId],
+    );
+    expect(cust.rows[0].due_date).toBe("2026-07-08"); // raw 'YYYY-MM-DD' string (see db.ts DATE type parser)
+
+    const snap = await pool.query(
+      `SELECT s.due_date FROM customer_month_snapshots s
+         JOIN customers c ON c.id = s.customer_id
+        WHERE c.company_id = $1 AND c.loan_number = 'DUE-001' AND s.month = '2027-01-01'`,
+      [companyId],
+    );
+    expect(snap.rows[0].due_date).toBe("2026-07-08");
+  });
+
+  it("rejects an unparseable EMI due date instead of silently dropping it", async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Allocation");
+    ws.addRow(["Loan", "Name", "Bucket", "POS", "EMI", "DueDate"]);
+    ws.addRow(["DUE-BAD", "Bad Date Guy", "1", 10000, 500, "not-a-date"]);
+    const buffer = Buffer.from(await wb.xlsx.writeBuffer());
+
+    const up = await request(app)
+      .post("/api/imports/upload")
+      .set("Authorization", `Bearer ${token}`)
+      .attach("file", buffer, "baddate.xlsx");
+    const res = await request(app)
+      .post("/api/imports/preview")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        upload_key: up.body.upload_key,
+        company_id: companyId,
+        column_mapping: {
+          Loan: "loan_number",
+          Name: "customer_name",
+          Bucket: "bucket",
+          POS: "due_amount",
+          EMI: "emi",
+          DueDate: "emi_due_date",
+        },
+        mode: "new",
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.error_rows).toBe(1);
+    expect(res.body.errors[0].problems[0]).toMatch(/unrecognized date/);
+  });
 });

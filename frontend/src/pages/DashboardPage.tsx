@@ -19,6 +19,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, errorMessage } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import BreakdownTable from "../components/dashboard/BreakdownTable";
+import BucketMismatchCard from "../components/dashboard/BucketMismatchCard";
 import BucketMovementCard from "../components/dashboard/BucketMovementCard";
 import MetricPanel from "../components/dashboard/MetricPanel";
 import MetricTabsCard from "../components/dashboard/MetricTabsCard";
@@ -393,6 +394,9 @@ export default function DashboardPage() {
               <BucketMovementCard filters={filters} />
             </Col>
           </Row>
+
+          {/* DPD cross-check (Phase 7 correction) */}
+          <BucketMismatchCard filters={filters} />
 
           {/* Dimension breakdown ("product wise view" and every other cut) */}
           <BreakdownTable filters={filters} />

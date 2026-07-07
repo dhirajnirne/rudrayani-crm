@@ -1,6 +1,17 @@
-import { Pool } from "pg";
+import { Pool, types } from "pg";
 import { env } from "./env";
 import { logger } from "./logger";
+
+// node-postgres's default DATE (oid 1082) parser builds a JS Date at LOCAL
+// midnight for the given y-m-d. Serializing that Date (res.json(), Array,
+// JSON.stringify -- anything that calls .toISOString()) converts to UTC,
+// which silently rolls the date back a day in any timezone ahead of UTC
+// (IST included) -- e.g. a due_date of 2026-07-08 comes back as
+// "2026-07-07T18:30:00.000Z" and API consumers read it as the 7th. DATE
+// columns here are pure calendar dates (due_date, allocation_month, month,
+// promised_date) with no time-of-day meaning, so keep them as the raw
+// 'YYYY-MM-DD' string Postgres sends instead of ever constructing a Date.
+types.setTypeParser(1082, (value) => value);
 
 // Single shared connection pool for the app.
 export const pool = new Pool({

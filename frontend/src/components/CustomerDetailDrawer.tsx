@@ -13,6 +13,7 @@ interface CustomerDetail {
     bucket: string | null;
     due_amount: string | null;
     emi: string | null;
+    due_date: string | null;
     status: "active" | "closed" | "recalled";
     recalled_at: string | null;
     custom_fields: Record<string, string>;
@@ -123,6 +124,14 @@ export default function CustomerDetailDrawer({
               <Descriptions.Item label="Bucket">{orDash(detail.customer.bucket)}</Descriptions.Item>
               <Descriptions.Item label="Due Amount">{fmtAmount(detail.customer.due_amount)}</Descriptions.Item>
               <Descriptions.Item label="EMI">{fmtAmount(detail.customer.emi)}</Descriptions.Item>
+              <Descriptions.Item label="EMI Due Date">
+                {detail.customer.due_date ? dayjs(detail.customer.due_date).format("DD MMM YYYY") : "-"}
+              </Descriptions.Item>
+              <Descriptions.Item label="DPD (from due date)">
+                {detail.customer.due_date
+                  ? Math.max(dayjs().diff(dayjs(detail.customer.due_date), "day"), 0)
+                  : "-"}
+              </Descriptions.Item>
             </Descriptions>
           </div>
 

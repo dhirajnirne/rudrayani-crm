@@ -43,6 +43,7 @@ const SYSTEM_FIELDS = [
   { value: "bucket", label: "Bucket" },
   { value: "due_amount", label: "Due Amount / POS" },
   { value: "emi", label: "EMI Amount" },
+  { value: "emi_due_date", label: "EMI Due Date (for the DPD cross-check)" },
   { value: "agent_phone", label: "Agent Phone (assigns the loan)" },
 ];
 

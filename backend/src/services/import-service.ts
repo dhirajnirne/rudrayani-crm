@@ -13,11 +13,13 @@ export const SYSTEM_FIELDS = [
   "bucket",
   "due_amount",
   "emi",
+  "emi_due_date", // this cycle's EMI due date -- drives the independent DPD cross-check (Phase 7)
   "agent_phone", // assigns the loan to the agent with this phone (optional)
 ] as const;
 export type SystemField = (typeof SYSTEM_FIELDS)[number];
 const REQUIRED_FIELDS: SystemField[] = ["loan_number", "customer_name"];
 const NUMERIC_FIELDS: SystemField[] = ["due_amount", "emi"];
+const DATE_FIELDS: SystemField[] = ["emi_due_date"];
 
 /** {"Excel Column Header": "system_field"} — unmapped headers go to custom_fields. */
 export type ColumnMapping = Record<string, SystemField>;
@@ -41,6 +43,7 @@ export interface MappedRow {
   bucket: string | null;
   due_amount: number | null;
   emi: number | null;
+  emi_due_date: string | null; // 'YYYY-MM-DD'
   agent_phone: string | null;
   custom_fields: Record<string, string>;
 }
@@ -104,6 +107,28 @@ function parseAmount(raw: string): number | null | "invalid" {
   return Number(cleaned);
 }
 
+/**
+ * EMI due dates arrive from lenders in whatever format their own sheet uses.
+ * Genuine Excel date cells are already normalized to 'YYYY-MM-DD' by
+ * cellToString(); this also accepts the common DD-MM-YYYY / DD/MM/YYYY text
+ * forms (EMI due dates are conventionally day-of-month driven -- 8th, 15th,
+ * 22nd -- so DD-first parsing matches lender convention, not MM-first).
+ */
+function parseDueDate(raw: string): string | null | "invalid" {
+  if (!raw) return null;
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return raw;
+  const dmy = raw.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  if (dmy) {
+    const [, d, m, y] = dmy;
+    const day = Number(d);
+    const month = Number(m);
+    if (month < 1 || month > 12 || day < 1 || day > 31) return "invalid";
+    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  }
+  return "invalid";
+}
+
 export interface ValidationResult {
   validRows: MappedRow[];
   errors: RowProblem[];
@@ -154,6 +179,13 @@ export async function validateRows(
           problems.push(`"${column}" has a non-numeric value: "${raw}"`);
         } else {
           mapped[field] = amount as never;
+        }
+      } else if (DATE_FIELDS.includes(field)) {
+        const date = parseDueDate(raw);
+        if (date === "invalid") {
+          problems.push(`"${column}" has an unrecognized date value: "${raw}"`);
+        } else {
+          mapped[field] = date as never;
         }
       } else {
         mapped[field] = (raw || null) as never;
@@ -378,6 +410,7 @@ function rowToReviewPayload(row: MappedRow): Record<string, unknown> {
     bucket: row.bucket,
     due_amount: row.due_amount,
     emi: row.emi,
+    emi_due_date: row.emi_due_date,
     agent_phone: row.agent_phone,
     custom_fields: row.custom_fields,
   };
@@ -516,8 +549,8 @@ export async function commitImport(params: {
       const inserted = await client.query(
         `INSERT INTO customers
            (company_id, loan_number, customer_name, mobile_number, product, bucket,
-            due_amount, emi, custom_fields, assigned_agent_id, assigned_team_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+            due_amount, emi, due_date, custom_fields, assigned_agent_id, assigned_team_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
          ON CONFLICT (company_id, loan_number) DO NOTHING
          RETURNING id`,
         [
@@ -529,6 +562,7 @@ export async function commitImport(params: {
           row.bucket,
           row.due_amount,
           row.emi,
+          row.emi_due_date,
           JSON.stringify(row.custom_fields),
           agent?.id ?? null,
           agent?.team_id ?? null,
@@ -564,9 +598,10 @@ export async function commitImport(params: {
                 bucket          = COALESCE($5, bucket),
                 due_amount      = COALESCE($6, due_amount),
                 emi             = COALESCE($7, emi),
-                custom_fields   = custom_fields || $8::jsonb,
-                assigned_agent_id = COALESCE($9, assigned_agent_id),
-                assigned_team_id  = COALESCE($10, assigned_team_id)
+                due_date        = COALESCE($8, due_date),
+                custom_fields   = custom_fields || $9::jsonb,
+                assigned_agent_id = COALESCE($10, assigned_agent_id),
+                assigned_team_id  = COALESCE($11, assigned_team_id)
           WHERE id = $1`,
         [
           cust.id,
@@ -576,6 +611,7 @@ export async function commitImport(params: {
           row.bucket,
           row.due_amount,
           row.emi,
+          row.emi_due_date,
           JSON.stringify(row.custom_fields),
           agent?.id ?? null,
           agent?.team_id ?? null,
@@ -596,15 +632,16 @@ export async function commitImport(params: {
       for (const customerId of snapshotIds) {
         await client.query(
           `INSERT INTO customer_month_snapshots
-             (customer_id, company_id, month, bucket, due_amount, emi, product,
+             (customer_id, company_id, month, bucket, due_amount, emi, due_date, product,
               assigned_team_id, assigned_agent_id, import_run_id)
-           SELECT c.id, c.company_id, $2, c.bucket, c.due_amount, c.emi, c.product,
+           SELECT c.id, c.company_id, $2, c.bucket, c.due_amount, c.emi, c.due_date, c.product,
                   c.assigned_team_id, c.assigned_agent_id, $3
              FROM customers c WHERE c.id = $1
            ON CONFLICT (customer_id, month) DO UPDATE
              SET bucket = EXCLUDED.bucket,
                  due_amount = EXCLUDED.due_amount,
                  emi = EXCLUDED.emi,
+                 due_date = EXCLUDED.due_date,
                  product = EXCLUDED.product,
                  assigned_team_id = EXCLUDED.assigned_team_id,
                  assigned_agent_id = EXCLUDED.assigned_agent_id,
