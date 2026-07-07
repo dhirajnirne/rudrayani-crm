@@ -65,21 +65,6 @@ router.post(
   }),
 );
 
-/** Buckets come straight from the imported data — distinct values, no master. */
-router.get(
-  "/buckets",
-  authenticate,
-  asyncHandler(async (req, res) => {
-    const companyId = z.string().uuid().parse(req.query.company_id);
-    await assertCompanyInAgency(companyId, req.user!.agency_id);
-    const { rows } = await pool.query(
-      `SELECT DISTINCT bucket FROM customers
-        WHERE company_id = $1 AND bucket IS NOT NULL
-        ORDER BY bucket`,
-      [companyId],
-    );
-    res.json({ buckets: rows.map((r) => r.bucket as string) });
-  }),
-);
+// Buckets moved to routes/buckets.ts (Phase 5 buckets master).
 
 export default router;

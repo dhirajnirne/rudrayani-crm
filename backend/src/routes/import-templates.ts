@@ -15,6 +15,9 @@ const createSchema = z.object({
   company_id: z.string().uuid(),
   name: z.string().trim().min(1).max(200),
   column_mapping: mappingSchema,
+  // Source columns (mapped or not) to keep as "customer detail" fields shown
+  // in the customer 360 view (Phase 7). Empty values there render as "-".
+  detail_fields: z.array(z.string().min(1)).max(100).default([]),
 });
 
 router.get(
@@ -22,7 +25,8 @@ router.get(
   asyncHandler(async (req, res) => {
     const companyId = z.string().uuid().parse(req.query.company_id);
     const { rows } = await pool.query(
-      `SELECT t.id, t.name, t.version, t.is_active, t.column_mapping, t.created_at, t.updated_at
+      `SELECT t.id, t.name, t.version, t.is_active, t.column_mapping, t.detail_fields,
+              t.created_at, t.updated_at
          FROM import_templates t
          JOIN companies c ON c.id = t.company_id
         WHERE t.company_id = $1 AND c.agency_id = $2
@@ -66,10 +70,17 @@ router.post(
       );
       const version = prev.rows.length > 0 ? prev.rows[0].version + 1 : 1;
       const { rows } = await client.query(
-        `INSERT INTO import_templates (company_id, name, column_mapping, version, created_by)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING id, name, version, is_active, column_mapping, created_at`,
-        [body.company_id, body.name, JSON.stringify(body.column_mapping), version, req.user!.id],
+        `INSERT INTO import_templates (company_id, name, column_mapping, detail_fields, version, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, name, version, is_active, column_mapping, detail_fields, created_at`,
+        [
+          body.company_id,
+          body.name,
+          JSON.stringify(body.column_mapping),
+          JSON.stringify(body.detail_fields),
+          version,
+          req.user!.id,
+        ],
       );
       await client.query("COMMIT");
       res.status(201).json({ template: rows[0] });

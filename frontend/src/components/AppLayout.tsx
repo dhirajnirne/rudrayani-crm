@@ -1,16 +1,26 @@
 import { Layout, Menu, Typography, Space, Tag, Button } from "antd";
 import {
   ApartmentOutlined,
+  AuditOutlined,
   BankOutlined,
   DashboardOutlined,
+  AimOutlined,
+  EnvironmentOutlined,
+  FilterOutlined,
+  WalletOutlined,
+  FileSearchOutlined,
+  FileSyncOutlined,
   LogoutOutlined,
   ShopOutlined,
   TeamOutlined,
+  UnorderedListOutlined,
+  UploadOutlined,
   UserOutlined,
 } from "@ant-design/icons";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { CAPABILITY_LABELS } from "../types";
+import AlertsBell from "./AlertsBell";
 
 const { Sider, Header, Content } = Layout;
 
@@ -42,6 +52,51 @@ export default function AppLayout() {
       icon: <ShopOutlined />,
       label: <Link to="/companies">Companies</Link>,
     },
+    hasPermission("companies.manage") && {
+      key: "/buckets",
+      icon: <FilterOutlined />,
+      label: <Link to="/buckets">Buckets</Link>,
+    },
+    hasPermission("imports.manage") && {
+      key: "/import",
+      icon: <UploadOutlined />,
+      label: <Link to="/import">Import</Link>,
+    },
+    hasPermission("imports.review") && {
+      key: "/import-reviews",
+      icon: <FileSyncOutlined />,
+      label: <Link to="/import-reviews">Import Review</Link>,
+    },
+    hasPermission("customers.view") && {
+      key: "/customers",
+      icon: <UnorderedListOutlined />,
+      label: <Link to="/customers">Customers</Link>,
+    },
+    hasPermission("customers.allocate") && {
+      key: "/allocation",
+      icon: <FileSearchOutlined />,
+      label: <Link to="/allocation">Allocation</Link>,
+    },
+    hasPermission("dispositions.manage") && {
+      key: "/dispositions",
+      icon: <AuditOutlined />,
+      label: <Link to="/dispositions">Dispositions</Link>,
+    },
+    hasPermission("tracking.view") && {
+      key: "/tracking",
+      icon: <EnvironmentOutlined />,
+      label: <Link to="/tracking">Tracking</Link>,
+    },
+    hasPermission("targets.manage") && {
+      key: "/targets",
+      icon: <AimOutlined />,
+      label: <Link to="/targets">Targets</Link>,
+    },
+    hasPermission("payments.deposit") && {
+      key: "/deposits",
+      icon: <WalletOutlined />,
+      label: <Link to="/deposits">Deposits</Link>,
+    },
   ].filter(Boolean) as { key: string }[];
 
   return (
@@ -69,6 +124,7 @@ export default function AppLayout() {
         >
           <Typography.Text strong>{user?.full_name}</Typography.Text>
           <Space>
+            <AlertsBell />
             {user?.capabilities.map((c) => (
               <Tag color="blue" key={c}>
                 {CAPABILITY_LABELS[c]}

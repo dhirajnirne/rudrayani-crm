@@ -1,0 +1,21 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/api/api_client.dart';
+import '../../core/models/customer.dart';
+
+final worklistProvider = FutureProvider<List<Customer>>((ref) async {
+  final api = ref.watch(apiClientProvider);
+  final res = await api.get<Map<String, dynamic>>('/worklist');
+  final data = res.data!;
+  final list = (data['customers'] as List).cast<Map<String, dynamic>>();
+  return list.map(Customer.fromJson).toList();
+});
+
+final dispositionCodesProvider = FutureProvider((ref) async {
+  final api = ref.watch(apiClientProvider);
+  final res = await api.get<Map<String, dynamic>>('/dispositions');
+  // Backend responds with { disposition_codes: [...] } (backend/src/routes/dispositions.ts) --
+  // this was reading the wrong key and throwing a cast error at runtime,
+  // which silently broke the call-log disposition dropdown for every agent.
+  final list = (res.data!['disposition_codes'] as List).cast<Map<String, dynamic>>();
+  return list;
+});

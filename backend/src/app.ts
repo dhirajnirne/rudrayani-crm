@@ -4,15 +4,31 @@ import helmet from "helmet";
 import pinoHttp from "pino-http";
 import { logger } from "./config/logger";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler";
+import allocationRoutes from "./routes/allocations";
+import attendanceRoutes from "./routes/attendance";
 import authRoutes from "./routes/auth";
 import branchRoutes from "./routes/branches";
+import bucketRoutes from "./routes/buckets";
+import callLogRoutes from "./routes/call-logs";
 import catalogRoutes from "./routes/catalog";
 import companyRoutes from "./routes/companies";
+import customerRoutes from "./routes/customers";
+import dispositionRoutes from "./routes/dispositions";
 import employeeRoutes from "./routes/employees";
+import fieldVisitRoutes from "./routes/field-visits";
 import healthRoutes from "./routes/health";
+import importReviewRoutes from "./routes/import-reviews";
 import importTemplateRoutes from "./routes/import-templates";
 import importRoutes from "./routes/imports";
+import locationRoutes from "./routes/location";
+import paymentRoutes from "./routes/payments";
+import ptpRoutes from "./routes/ptps";
+import reallocationRequestRoutes from "./routes/reallocation-requests";
+import reportRoutes from "./routes/reports";
+import targetRoutes from "./routes/targets";
 import teamRoutes from "./routes/teams";
+import trackingRoutes from "./routes/tracking";
+import worklistRoutes from "./routes/worklist";
 
 export function createApp() {
   const app = express();
@@ -35,10 +51,23 @@ export function createApp() {
   app.use("/api/employees", employeeRoutes);
   app.use("/api/imports", importRoutes);
   app.use("/api/import-templates", importTemplateRoutes);
+  app.use("/api/import-reviews", importReviewRoutes);
+  app.use("/api/dispositions", dispositionRoutes);
+  app.use("/api/customers", customerRoutes);
+  app.use("/api/allocations", allocationRoutes);
+  app.use("/api/call-logs", callLogRoutes);
+  app.use("/api/worklist", worklistRoutes);
+  app.use("/api/ptps", ptpRoutes);
+  app.use("/api/payments", paymentRoutes);
+  app.use("/api/attendance", attendanceRoutes);
+  app.use("/api/location", locationRoutes);
+  app.use("/api/tracking", trackingRoutes);
+  app.use("/api/field-visits", fieldVisitRoutes);
+  app.use("/api/reallocation-requests", reallocationRequestRoutes);
+  app.use("/api/buckets", bucketRoutes);
+  app.use("/api/targets", targetRoutes);
+  app.use("/api/reports", reportRoutes);
   app.use("/api", catalogRoutes);
-  // TODO (Phase 2): import-template + excel-import routes
-  // TODO (Phase 3): allocation, calling, disposition, payment routes
-  // TODO (Phase 4): location-ping ingestion route (Section 9 of the build brief)
 
   app.use(notFoundHandler);
   app.use(errorHandler);

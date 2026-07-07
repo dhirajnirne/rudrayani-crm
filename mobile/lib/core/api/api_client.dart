@@ -1,0 +1,97 @@
+import 'package:dio/dio.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+// 10.0.2.2 = Android emulator -> host loopback; backend listens on 4000.
+const _baseUrl = String.fromEnvironment('API_URL', defaultValue: 'http://10.0.2.2:4000');
+
+final _storage = FlutterSecureStorage(
+  aOptions: const AndroidOptions(encryptedSharedPreferences: true),
+);
+
+// Keys used in secure storage
+const _kAccessToken = 'access_token';
+const _kRefreshToken = 'refresh_token';
+
+class ApiClient {
+  final Dio _dio;
+
+  ApiClient(this._dio);
+
+  Future<Response<T>> get<T>(String path, {Map<String, dynamic>? query}) =>
+      _dio.get<T>(path, queryParameters: query);
+
+  Future<Response<T>> post<T>(String path, {dynamic data, Map<String, dynamic>? query}) =>
+      _dio.post<T>(path, data: data, queryParameters: query);
+
+  Future<Response<T>> postForm<T>(String path, FormData data) =>
+      _dio.post<T>(path, data: data);
+}
+
+/// Also used by the background tracking isolate (tracking_task.dart), which
+/// can't reach Riverpod providers — tokens come from secure storage either way.
+Dio buildDio() {
+  final dio = Dio(BaseOptions(
+    baseUrl: '$_baseUrl/api',
+    connectTimeout: const Duration(seconds: 10),
+    receiveTimeout: const Duration(seconds: 30),
+  ));
+
+  // Attach access token to every request
+  dio.interceptors.add(
+    InterceptorsWrapper(
+      onRequest: (options, handler) async {
+        final token = await _storage.read(key: _kAccessToken);
+        if (token != null) options.headers['Authorization'] = 'Bearer $token';
+        handler.next(options);
+      },
+      onError: (error, handler) async {
+        // 401 → try refreshing once
+        if (error.response?.statusCode == 401) {
+          final refreshToken = await _storage.read(key: _kRefreshToken);
+          if (refreshToken != null) {
+            try {
+              final refreshDio = Dio(BaseOptions(baseUrl: '$_baseUrl/api'));
+              final res = await refreshDio.post('/auth/refresh', data: {'refresh_token': refreshToken});
+              final newAccess = res.data['access_token'] as String;
+              final newRefresh = res.data['refresh_token'] as String?;
+              await _storage.write(key: _kAccessToken, value: newAccess);
+              if (newRefresh != null) await _storage.write(key: _kRefreshToken, value: newRefresh);
+              // Retry original request
+              final opts = error.requestOptions;
+              opts.headers['Authorization'] = 'Bearer $newAccess';
+              final retried = await dio.fetch(opts);
+              return handler.resolve(retried);
+            } catch (_) {
+              await clearTokens();
+            }
+          }
+        }
+        handler.next(error);
+      },
+    ),
+  );
+
+  return dio;
+}
+
+final apiClientProvider = Provider<ApiClient>((ref) => ApiClient(buildDio()));
+
+Future<void> saveTokens(String access, String refresh) async {
+  await Future.wait([
+    _storage.write(key: _kAccessToken, value: access),
+    _storage.write(key: _kRefreshToken, value: refresh),
+  ]);
+}
+
+Future<void> clearTokens() async {
+  await Future.wait([
+    _storage.delete(key: _kAccessToken),
+    _storage.delete(key: _kRefreshToken),
+  ]);
+}
+
+Future<bool> hasTokens() async {
+  final token = await _storage.read(key: _kAccessToken);
+  return token != null;
+}
