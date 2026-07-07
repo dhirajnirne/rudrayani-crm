@@ -303,9 +303,10 @@ export interface AllocationDiff {
 
 /**
  * Diffs a validated allocation file against the company's current book so
- * mid-month refreshes (Phase 7) can be reviewed instead of applied blind:
- * additions/reactivations/removals all need a human decision; only updates
- * to already-active loans apply straight through, same as before this phase.
+ * repeat/refresh imports (Phase 7 -- allocation files can arrive at any
+ * point in the month, not just once) can be reviewed instead of applied
+ * blind: additions/reactivations/removals all need a human decision; only
+ * updates to already-active loans apply straight through, same as before.
  */
 export async function computeAllocationDiff(
   companyId: string,
@@ -349,8 +350,17 @@ export async function computeAllocationDiff(
   return { additions, updates, reactivations, removals };
 }
 
-/** Has this company already had a committed allocation run for this month? Decides addition routing. */
-export async function isMidMonthImport(companyId: string, allocationMonth: string): Promise<boolean> {
+/**
+ * Has this company already had a committed allocation run for this month?
+ * Decides addition routing. Allocation files can arrive at any point in the
+ * month (day 2, day 28 -- there is no calendar-day check here at all); what
+ * matters is purely whether a PRIOR file for this exact allocation_month was
+ * already committed, i.e. whether this is a repeat/refresh import.
+ */
+export async function hasExistingAllocationForMonth(
+  companyId: string,
+  allocationMonth: string,
+): Promise<boolean> {
   const { rows } = await pool.query(
     `SELECT EXISTS(
        SELECT 1 FROM import_runs WHERE company_id = $1 AND mode = 'allocation' AND allocation_month = $2
@@ -387,8 +397,8 @@ export interface CommitResult {
   removal_flagged: number;
   new_buckets: string[];
   new_products: string[];
-  /** True when this company already had a committed allocation run for this month. */
-  is_mid_month: boolean;
+  /** True when a prior allocation import already exists for this month (a repeat/refresh, not the first). */
+  is_repeat_import: boolean;
 }
 
 /** phone -> {id, team_id} for the agency's active users named in the file. */
@@ -427,26 +437,27 @@ export async function commitImport(params: {
   const validation = await validateRows(params.companyId, params.sheet, params.mapping);
 
   let diff: AllocationDiff | null = null;
-  let isMidMonth = false;
+  let isRepeatImport = false;
   if (mode === "allocation") {
-    isMidMonth = await isMidMonthImport(params.companyId, params.allocationMonth!);
+    isRepeatImport = await hasExistingAllocationForMonth(params.companyId, params.allocationMonth!);
     diff = await computeAllocationDiff(params.companyId, validation.validRows);
   }
 
   const dbDupes = new Set(validation.duplicatesInDb);
   // mode='new': unchanged -- straight insert, DB dupes rejected.
   // mode='allocation', first import of the month: additions are the expected new
-  // book, so they insert directly. Mid-month refresh: additions wait for review,
+  // book, so they insert directly. A repeat/refresh import for the same month
+  // (whenever in the month it arrives) routes additions to review instead,
   // same as reactivations and removals always do (a lender pull-back or a
   // recalled/closed loan reappearing needs a human decision either way).
   const toInsert: MappedRow[] =
     mode === "new"
       ? validation.validRows.filter((r) => !dbDupes.has(r.loan_number))
-      : isMidMonth
+      : isRepeatImport
         ? []
         : diff!.additions.map((a) => a.row);
   const toUpdate: { row: MappedRow; customerId: string }[] = mode === "allocation" ? diff!.updates : [];
-  const reviewAdditions = mode === "allocation" && isMidMonth ? diff!.additions : [];
+  const reviewAdditions = mode === "allocation" && isRepeatImport ? diff!.additions : [];
   const reviewReactivations = mode === "allocation" ? diff!.reactivations : [];
   const reviewRemovals = mode === "allocation" ? diff!.removals : [];
 
@@ -676,7 +687,7 @@ export async function commitImport(params: {
       removal_flagged: reviewRemovals.length,
       new_buckets: newBuckets,
       new_products: newProducts,
-      is_mid_month: isMidMonth,
+      is_repeat_import: isRepeatImport,
     };
   } catch (err) {
     await client.query("ROLLBACK");

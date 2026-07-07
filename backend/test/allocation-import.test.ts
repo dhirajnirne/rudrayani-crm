@@ -225,7 +225,7 @@ describe("monthly allocation import", () => {
         allocation_month: "2026-08-01",
       });
     expect(res.status).toBe(200);
-    expect(res.body.is_mid_month).toBe(false); // first import for 2026-08-01
+    expect(res.body.is_repeat_import).toBe(false); // first import for 2026-08-01
     expect(res.body.will_update).toBe(1);
     expect(res.body.additions.count).toBe(0);
     expect(res.body.removals.count).toBe(3); // AL-002/003/004 active but absent
@@ -241,16 +241,16 @@ describe("monthly allocation import", () => {
     expect(res.status).toBe(400);
   });
 
-  it("mid-month addition (brand-new loan number) is routed to review, not inserted directly", async () => {
+  it("repeat-import addition (brand-new loan number) is routed to review, not inserted directly", async () => {
     // 2026-07-01 already had two allocation runs (month 2 + the re-upload above),
-    // so this is a mid-month refresh: a new loan number must wait for review.
+    // so this is a repeat/refresh import: a new loan number must wait for review.
     const res = await uploadAndCommit(
       await buildSheet([["AL-010", "Ghost Agent", "30", 60000, 3000, "7000000000"]]),
       "allocation",
       "2026-07-01",
     );
     expect(res.status).toBe(201);
-    expect(res.body.is_mid_month).toBe(true);
+    expect(res.body.is_repeat_import).toBe(true);
     expect(res.body.inserted_rows).toBe(0);
     expect(res.body.pending_review).toBeGreaterThanOrEqual(1);
     // Not written to customers at all -- payload lives on the review item.
@@ -277,7 +277,7 @@ describe("monthly allocation import", () => {
       "2026-09-01", // never imported before -> first-of-month, additions insert directly
     );
     expect(res.status).toBe(201);
-    expect(res.body.is_mid_month).toBe(false);
+    expect(res.body.is_repeat_import).toBe(false);
     expect(res.body.inserted_rows).toBe(1);
     expect(res.body.unknown_agent_phones).toEqual(["7000000001"]);
     const cust = await pool.query(
@@ -368,10 +368,10 @@ describe("monthly allocation import", () => {
         ["AL-SUP-NEW", "Newcomer", "30", 20000, 1000, ""],
       ]),
       "allocation",
-      "2026-11-01", // same month again -> mid-month refresh
+      "2026-11-01", // same month again -> repeat/refresh import
     );
     expect(second.status).toBe(201);
-    expect(second.body.is_mid_month).toBe(true);
+    expect(second.body.is_repeat_import).toBe(true);
     expect(second.body.pending_review).toBeGreaterThanOrEqual(1);
 
     // AL-SUP-NEW's addition item from the second commit is fresh and pending.

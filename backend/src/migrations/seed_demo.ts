@@ -2,8 +2,8 @@
  * Dev-only: creates one test user per role so every flow can be exercised
  * (mobile + web) with the credentials in TEST_CREDENTIALS.md, plus a demo
  * company/book that exercises the Phase 7 allocation lifecycle end-to-end:
- * a first-of-month import, a mid-month refresh that leaves additions/
- * removals pending review, canonical bucket mappings, a payment-driven
+ * a first-of-month import, a repeat/refresh import for the same month that
+ * leaves additions/removals pending review, canonical bucket mappings, a payment-driven
  * bucket movement event, and one already-recalled customer. Idempotent —
  * upserts by phone/loan number, safe to re-run.
  *
@@ -165,7 +165,7 @@ async function run(): Promise<void> {
       allocationMonth: month,
     });
 
-    // Mid-month refresh: DEMO-004 drops off (-> pending removal), DEMO-006 is
+    // Repeat/refresh import for the same month: DEMO-004 drops off (-> pending removal), DEMO-006 is
     // brand new (-> pending addition). Left PENDING on purpose so the Import
     // Review page has something to demonstrate.
     await commitImport({

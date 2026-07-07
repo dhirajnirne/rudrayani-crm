@@ -181,7 +181,7 @@ describe("import review queue: addition approval", () => {
         ["REV-ADD-BASE", "Base Row", "30", 10000, 500, ""],
         ["REV-ADD-NEW", "New Arrival", "60", 20000, 1000, ""],
       ]),
-      "2026-01-01", // mid-month: REV-ADD-NEW is a brand-new loan -> addition item
+      "2026-01-01", // repeat import for this month: REV-ADD-NEW is a brand-new loan -> addition item
     );
     expect(second.status).toBe(201);
     expect(second.body.pending_review).toBeGreaterThanOrEqual(1);
@@ -241,7 +241,7 @@ describe("import review queue: removal approval and rejection", () => {
 
     const second = await uploadAndCommit(
       await buildSheet([["REV-RM-FILLER", "Filler", "30", 5000, 250, ""]]),
-      "2026-02-01", // mid-month: both prior loans are now missing -> removal items
+      "2026-02-01", // repeat import for this month: both prior loans are now missing -> removal items
     );
     expect(second.status).toBe(201);
     expect(second.body.removal_flagged).toBeGreaterThanOrEqual(2);
@@ -323,7 +323,7 @@ describe("import review queue: supersede and bulk decisions", () => {
         ["REV-SUP-BASE", "Base", "30", 10000, 500, ""],
         ["REV-SUP-GONE", "Ephemeral Addition", "30", 8000, 400, ""],
       ]),
-      "2026-04-01", // mid-month: REV-SUP-GONE becomes a pending addition item
+      "2026-04-01", // repeat import for this month: REV-SUP-GONE becomes a pending addition item
     );
     expect(first.status).toBe(201);
     const staleItem = await findItem("REV-SUP-GONE", "addition");

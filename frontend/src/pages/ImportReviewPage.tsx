@@ -42,7 +42,8 @@ interface ItemDetail {
 
 /**
  * Discrepancy review queue (Phase 7): additions/removals/reactivations
- * detected by a mid-month allocation refresh wait here for an agency
+ * detected by a repeat/refresh allocation import (allocation files can
+ * arrive at any point in the month, not just once) wait here for an agency
  * admin/operations manager to decide -- nothing applies without a decision.
  */
 export default function ImportReviewPage() {
@@ -152,7 +153,8 @@ export default function ImportReviewPage() {
         <Badge count={pendingCount} showZero={false} style={{ backgroundColor: "#d77a00" }} />
       </Typography.Title>
       <Typography.Paragraph type="secondary">
-        Mid-month allocation refreshes are diffed against the active book. New loans, loans that
+        A repeat allocation import for a month you've already loaded (allocation files can arrive at
+        any time, not just once a month) is diffed against the active book. New loans, loans that
         reappear after being recalled/closed, and active loans missing from the file all wait here
         for a decision -- nothing changes until you approve or reject it.
       </Typography.Paragraph>

@@ -9,7 +9,7 @@ import {
   SYSTEM_FIELDS,
   commitImport,
   computeAllocationDiff,
-  isMidMonthImport,
+  hasExistingAllocationForMonth,
   parseWorkbook,
   previewNewLabels,
   validateRows,
@@ -133,7 +133,7 @@ router.post(
 
     // Allocation mode: show the actual diff against the active book, not just
     // a dupes/missing count, so the reviewer knows what will need a decision.
-    const isMidMonth = await isMidMonthImport(body.company_id, body.allocation_month!);
+    const isRepeatImport = await hasExistingAllocationForMonth(body.company_id, body.allocation_month!);
     const diff = await computeAllocationDiff(body.company_id, result.validRows);
     const labels = await previewNewLabels(body.company_id, result.validRows);
 
@@ -152,7 +152,7 @@ router.post(
       mode: "allocation",
       total_rows: sheet.rows.length,
       error_rows: result.errors.length,
-      is_mid_month: isMidMonth,
+      is_repeat_import: isRepeatImport,
       will_update: diff.updates.length,
       additions: {
         count: diff.additions.length,

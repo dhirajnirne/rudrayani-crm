@@ -66,7 +66,7 @@ interface PreviewResult {
   duplicates_in_db?: number;
   duplicate_loan_numbers?: string[];
   // mode = "allocation" (Phase 7 diff engine)
-  is_mid_month?: boolean;
+  is_repeat_import?: boolean;
   will_update?: number;
   additions?: { count: number; sample: DiffSample[] };
   removals?: { count: number; sample: DiffSample[] };
@@ -85,7 +85,7 @@ interface CommitResult {
   removal_flagged: number;
   new_buckets: string[];
   new_products: string[];
-  is_mid_month: boolean;
+  is_repeat_import: boolean;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -579,9 +579,9 @@ function ImportWizard() {
           <Col xs={12} sm={6}>
             <Card size="small">
               <Statistic
-                title={preview.is_mid_month ? "New loans (needs review)" : "New loans (will insert)"}
+                title={preview.is_repeat_import ? "New loans (needs review)" : "New loans (will insert)"}
                 value={additions.count}
-                valueStyle={{ color: preview.is_mid_month ? "#d77a00" : "#2c694e" }}
+                valueStyle={{ color: preview.is_repeat_import ? "#d77a00" : "#2c694e" }}
               />
             </Card>
           </Col>
@@ -602,11 +602,11 @@ function ImportWizard() {
         </Row>
 
         <Alert
-          type={preview.is_mid_month ? "warning" : "info"}
+          type={preview.is_repeat_import ? "warning" : "info"}
           showIcon
           message={
-            preview.is_mid_month
-              ? `This is a mid-month refresh for this company. New loans, reappearing recalled/closed loans, and missing loans all wait in the Import Review queue for an agency admin or operations manager to decide — nothing is applied automatically.`
+            preview.is_repeat_import
+              ? `This company already has an allocation on file for this month — this is a repeat/refresh import (allocation files can arrive at any time, not just once a month). New loans, reappearing recalled/closed loans, and missing loans all wait in the Import Review queue for an agency admin or operations manager to decide — nothing is applied automatically.`
               : `First allocation import for this month: new loans insert directly. Any active loan missing from the file still needs review before it can be marked recalled.`
           }
         />
