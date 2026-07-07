@@ -17,6 +17,7 @@ import dispositionRoutes from "./routes/dispositions";
 import employeeRoutes from "./routes/employees";
 import fieldVisitRoutes from "./routes/field-visits";
 import healthRoutes from "./routes/health";
+import importReviewRoutes from "./routes/import-reviews";
 import importTemplateRoutes from "./routes/import-templates";
 import importRoutes from "./routes/imports";
 import locationRoutes from "./routes/location";
@@ -50,6 +51,7 @@ export function createApp() {
   app.use("/api/employees", employeeRoutes);
   app.use("/api/imports", importRoutes);
   app.use("/api/import-templates", importTemplateRoutes);
+  app.use("/api/import-reviews", importReviewRoutes);
   app.use("/api/dispositions", dispositionRoutes);
   app.use("/api/customers", customerRoutes);
   app.use("/api/allocations", allocationRoutes);

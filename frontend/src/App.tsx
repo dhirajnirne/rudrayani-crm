@@ -16,6 +16,7 @@ import DispositionsPage from "./pages/DispositionsPage";
 import EmployeesPage from "./pages/EmployeesPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ImportPage from "./pages/ImportPage";
+import ImportReviewPage from "./pages/ImportReviewPage";
 import LoginPage from "./pages/LoginPage";
 import TargetsPage from "./pages/TargetsPage";
 import TeamsPage from "./pages/TeamsPage";
@@ -67,6 +68,7 @@ export default function App() {
         <Route path="companies" element={<CompaniesPage />} />
         <Route path="buckets" element={<BucketsPage />} />
         <Route path="import" element={<ImportPage />} />
+        <Route path="import-reviews" element={<ImportReviewPage />} />
         <Route path="customers" element={<CustomersPage />} />
         <Route path="allocation" element={<AllocationPage />} />
         <Route path="dispositions" element={<DispositionsPage />} />

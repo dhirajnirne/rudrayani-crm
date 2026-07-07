@@ -9,6 +9,7 @@ import {
   FilterOutlined,
   WalletOutlined,
   FileSearchOutlined,
+  FileSyncOutlined,
   LogoutOutlined,
   ShopOutlined,
   TeamOutlined,
@@ -60,6 +61,11 @@ export default function AppLayout() {
       key: "/import",
       icon: <UploadOutlined />,
       label: <Link to="/import">Import</Link>,
+    },
+    hasPermission("imports.review") && {
+      key: "/import-reviews",
+      icon: <FileSyncOutlined />,
+      label: <Link to="/import-reviews">Import Review</Link>,
     },
     hasPermission("customers.view") && {
       key: "/customers",

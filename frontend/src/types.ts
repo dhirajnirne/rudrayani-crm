@@ -88,7 +88,7 @@ export interface Customer {
   bucket: string | null;
   due_amount: string | null;
   emi: string | null;
-  status: "active" | "closed";
+  status: "active" | "closed" | "recalled";
   assigned_agent_id: string | null;
   assigned_agent_name: string | null;
   custom_fields: Record<string, unknown>;
@@ -104,6 +104,37 @@ export interface AllocationLog {
   from_agent_name: string | null;
   to_agent_name: string;
   allocated_by_name: string;
+}
+
+export type ReviewItemType = "addition" | "removal" | "reactivation";
+export type ReviewItemStatus = "pending" | "approved" | "rejected" | "superseded";
+
+export interface ReviewItem {
+  id: string;
+  item_type: ReviewItemType;
+  loan_number: string;
+  status: ReviewItemStatus;
+  payload: {
+    customer_name?: string | null;
+    mobile_number?: string | null;
+    product?: string | null;
+    bucket?: string | null;
+    due_amount?: number | null;
+    emi?: number | null;
+    agent_phone?: string | null;
+    custom_fields?: Record<string, string>;
+  };
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  review_note: string | null;
+  created_at: string;
+  file_name: string | null;
+  allocation_month: string | null;
+  current_customer_name: string | null;
+  current_bucket: string | null;
+  current_due_amount: string | null;
+  current_status: string | null;
+  current_agent_name: string | null;
 }
 
 export const CAPABILITY_LABELS: Record<Capability, string> = {

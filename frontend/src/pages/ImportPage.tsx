@@ -45,17 +45,33 @@ const SYSTEM_FIELDS = [
   { value: "agent_phone", label: "Agent Phone (assigns the loan)" },
 ];
 
+interface DiffSample {
+  loan_number: string;
+  customer_name: string | null;
+  bucket: string | null;
+  due_amount: number | null;
+  agent_name?: string | null;
+  previous_status?: string;
+}
+
 interface PreviewResult {
   mode: "new" | "allocation";
   total_rows: number;
-  valid_rows: number;
   error_rows: number;
-  duplicates_in_db: number;
-  updates_in_db: number;
-  missing_from_file: number;
   unmapped_columns: string[];
   errors: { row: number; problems: string[] }[];
-  duplicate_loan_numbers: string[];
+  // mode = "new"
+  valid_rows?: number;
+  duplicates_in_db?: number;
+  duplicate_loan_numbers?: string[];
+  // mode = "allocation" (Phase 7 diff engine)
+  is_mid_month?: boolean;
+  will_update?: number;
+  additions?: { count: number; sample: DiffSample[] };
+  removals?: { count: number; sample: DiffSample[] };
+  reactivations?: { count: number; sample: DiffSample[] };
+  new_buckets?: string[];
+  new_products?: string[];
 }
 
 interface CommitResult {
@@ -64,6 +80,11 @@ interface CommitResult {
   duplicate_rows: number;
   error_rows: number;
   unknown_agent_phones: string[];
+  pending_review: number;
+  removal_flagged: number;
+  new_buckets: string[];
+  new_products: string[];
+  is_mid_month: boolean;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -410,10 +431,118 @@ function ImportWizard() {
     </Space>
   );
 
+  const diffSampleColumns = [
+    { title: "Loan Number", dataIndex: "loan_number" },
+    { title: "Customer", dataIndex: "customer_name" },
+    { title: "Bucket", dataIndex: "bucket", render: (v: string | null) => v ?? "-" },
+    {
+      title: "Due Amount",
+      dataIndex: "due_amount",
+      render: (v: number | null) => (v == null ? "-" : v.toLocaleString("en-IN")),
+    },
+  ];
+
   const renderStep2 = () => {
     if (!preview) return null;
     const isAllocation = preview.mode === "allocation";
-    const canCommit = preview.valid_rows > 0 || (isAllocation && preview.updates_in_db > 0);
+
+    if (!isAllocation) {
+      const canCommit = (preview.valid_rows ?? 0) > 0;
+      return (
+        <Space direction="vertical" style={{ width: "100%" }} size="large">
+          <Row gutter={16}>
+            <Col xs={12} sm={6}>
+              <Card size="small">
+                <Statistic title="Total rows" value={preview.total_rows} />
+              </Card>
+            </Col>
+            <Col xs={12} sm={6}>
+              <Card size="small">
+                <Statistic
+                  title="Valid (will insert)"
+                  value={preview.valid_rows}
+                  valueStyle={{ color: "#2c694e" }}
+                />
+              </Card>
+            </Col>
+            <Col xs={12} sm={6}>
+              <Card size="small">
+                <Statistic
+                  title="Errors (will skip)"
+                  value={preview.error_rows}
+                  valueStyle={preview.error_rows > 0 ? { color: "#ba1a1a" } : {}}
+                />
+              </Card>
+            </Col>
+            <Col xs={12} sm={6}>
+              <Card size="small">
+                <Statistic
+                  title="Already in DB"
+                  value={preview.duplicates_in_db}
+                  valueStyle={(preview.duplicates_in_db ?? 0) > 0 ? { color: "#d77a00" } : {}}
+                />
+              </Card>
+            </Col>
+          </Row>
+
+          {preview.unmapped_columns.length > 0 && (
+            <Alert
+              type="info"
+              showIcon
+              message={`${preview.unmapped_columns.length} unmapped column(s) will be saved as custom fields: ${preview.unmapped_columns.join(", ")}`}
+            />
+          )}
+
+          {preview.errors.length > 0 && (
+            <div>
+              <Typography.Text strong>Row errors (first 50):</Typography.Text>
+              <Table
+                rowKey="row"
+                size="small"
+                style={{ marginTop: 8 }}
+                pagination={false}
+                dataSource={preview.errors}
+                columns={[
+                  { title: "Row", dataIndex: "row", width: 70 },
+                  { title: "Problems", dataIndex: "problems", render: (ps: string[]) => ps.join("; ") },
+                ]}
+              />
+            </div>
+          )}
+
+          {!canCommit && (
+            <Alert
+              type="warning"
+              message="No valid rows to insert — check your column mapping or the file data."
+              showIcon
+            />
+          )}
+
+          <Space>
+            <Button onClick={() => setStep(1)}>Back to mapping</Button>
+            <Button
+              type="primary"
+              size="large"
+              disabled={!canCommit}
+              onClick={handleCommit}
+              loading={loading}
+              style={canCommit ? { height: 48, paddingInline: 32 } : { height: 48 }}
+            >
+              Commit Import ({preview.valid_rows} rows)
+            </Button>
+          </Space>
+        </Space>
+      );
+    }
+
+    // Allocation mode: show the actual diff, since additions/removals/
+    // reactivations may need review rather than applying immediately.
+    const additions = preview.additions ?? { count: 0, sample: [] };
+    const removals = preview.removals ?? { count: 0, sample: [] };
+    const reactivations = preview.reactivations ?? { count: 0, sample: [] };
+    const willUpdate = preview.will_update ?? 0;
+    const canCommit = preview.total_rows > preview.error_rows || removals.count > 0;
+
     return (
       <Space direction="vertical" style={{ width: "100%" }} size="large">
         <Row gutter={16}>
@@ -425,44 +554,96 @@ function ImportWizard() {
           <Col xs={12} sm={6}>
             <Card size="small">
               <Statistic
-                title={isAllocation ? "New loans (will insert)" : "Valid (will insert)"}
-                value={preview.valid_rows}
-                valueStyle={{ color: "#2c694e" }}
+                title={preview.is_mid_month ? "New loans (needs review)" : "New loans (will insert)"}
+                value={additions.count}
+                valueStyle={{ color: preview.is_mid_month ? "#d77a00" : "#2c694e" }}
               />
             </Card>
           </Col>
           <Col xs={12} sm={6}>
             <Card size="small">
-              <Statistic
-                title="Errors (will skip)"
-                value={preview.error_rows}
-                valueStyle={preview.error_rows > 0 ? { color: "#ba1a1a" } : {}}
-              />
+              <Statistic title="Existing loans (will update)" value={willUpdate} valueStyle={{ color: "#2c694e" }} />
             </Card>
           </Col>
           <Col xs={12} sm={6}>
             <Card size="small">
               <Statistic
-                title={isAllocation ? "Existing loans (will update)" : "Already in DB"}
-                value={isAllocation ? preview.updates_in_db : preview.duplicates_in_db}
-                valueStyle={
-                  isAllocation
-                    ? { color: "#2c694e" }
-                    : preview.duplicates_in_db > 0
-                      ? { color: "#d77a00" }
-                      : {}
-                }
+                title="Missing from file (needs review)"
+                value={removals.count}
+                valueStyle={removals.count > 0 ? { color: "#ba1a1a" } : {}}
               />
             </Card>
           </Col>
         </Row>
 
-        {isAllocation && preview.missing_from_file > 0 && (
+        <Alert
+          type={preview.is_mid_month ? "warning" : "info"}
+          showIcon
+          message={
+            preview.is_mid_month
+              ? `This is a mid-month refresh for this company. New loans, reappearing recalled/closed loans, and missing loans all wait in the Import Review queue for an agency admin or operations manager to decide — nothing is applied automatically.`
+              : `First allocation import for this month: new loans insert directly. Any active loan missing from the file still needs review before it can be marked recalled.`
+          }
+        />
+
+        {reactivations.count > 0 && (
           <Alert
             type="warning"
             showIcon
-            message={`${preview.missing_from_file} active loan(s) are not in this month's file — they will have no allocation for this month.`}
+            message={`${reactivations.count} loan(s) reappearing that were previously recalled/closed — flagged for review as reactivations, not silently reinstated.`}
           />
+        )}
+
+        {(preview.new_buckets?.length || preview.new_products?.length) ? (
+          <Space direction="vertical" size={4}>
+            {preview.new_buckets && preview.new_buckets.length > 0 && (
+              <div>
+                <Typography.Text type="secondary">New buckets discovered: </Typography.Text>
+                {preview.new_buckets.map((b) => (
+                  <Tag key={b}>{b}</Tag>
+                ))}
+              </div>
+            )}
+            {preview.new_products && preview.new_products.length > 0 && (
+              <div>
+                <Typography.Text type="secondary">New products discovered: </Typography.Text>
+                {preview.new_products.map((p) => (
+                  <Tag key={p}>{p}</Tag>
+                ))}
+              </div>
+            )}
+          </Space>
+        ) : null}
+
+        {additions.sample.length > 0 && (
+          <div>
+            <Typography.Text strong>New loans (first {additions.sample.length}):</Typography.Text>
+            <Table
+              rowKey="loan_number"
+              size="small"
+              style={{ marginTop: 8 }}
+              pagination={false}
+              dataSource={additions.sample}
+              columns={diffSampleColumns}
+            />
+          </div>
+        )}
+
+        {removals.sample.length > 0 && (
+          <div>
+            <Typography.Text strong>Missing from file (first {removals.sample.length}):</Typography.Text>
+            <Table
+              rowKey="loan_number"
+              size="small"
+              style={{ marginTop: 8 }}
+              pagination={false}
+              dataSource={removals.sample}
+              columns={[
+                ...diffSampleColumns,
+                { title: "Agent", dataIndex: "agent_name", render: (v: string | null) => v ?? "-" },
+              ]}
+            />
+          </div>
         )}
 
         {preview.unmapped_columns.length > 0 && (
@@ -484,11 +665,7 @@ function ImportWizard() {
               dataSource={preview.errors}
               columns={[
                 { title: "Row", dataIndex: "row", width: 70 },
-                {
-                  title: "Problems",
-                  dataIndex: "problems",
-                  render: (ps: string[]) => ps.join("; "),
-                },
+                { title: "Problems", dataIndex: "problems", render: (ps: string[]) => ps.join("; ") },
               ]}
             />
           </div>
@@ -497,7 +674,7 @@ function ImportWizard() {
         {!canCommit && (
           <Alert
             type="warning"
-            message="No valid rows to insert — check your column mapping or the file data."
+            message="No valid rows to insert or review — check your column mapping or the file data."
             showIcon
           />
         )}
@@ -512,8 +689,8 @@ function ImportWizard() {
             loading={loading}
             style={canCommit ? { height: 48, paddingInline: 32 } : { height: 48 }}
           >
-            Commit Import (
-            {isAllocation ? preview.valid_rows + preview.updates_in_db : preview.valid_rows} rows)
+            Commit Import ({willUpdate + additions.count} rows, {removals.count + reactivations.count} for
+            review)
           </Button>
         </Space>
       </Space>
@@ -522,6 +699,7 @@ function ImportWizard() {
 
   const renderStep3 = () => {
     if (!result) return null;
+    const pendingTotal = result.pending_review + result.removal_flagged;
     return (
       <Space direction="vertical" style={{ width: "100%" }} size="large" align="center">
         <CheckCircleOutlined style={{ fontSize: 64, color: "#2c694e" }} />
@@ -548,6 +726,43 @@ function ImportWizard() {
             <span className="money">{result.error_rows}</span>
           </Descriptions.Item>
         </Descriptions>
+
+        {pendingTotal > 0 && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ width: "100%", maxWidth: 560 }}
+            message={`${pendingTotal} entr${pendingTotal === 1 ? "y" : "ies"} flagged for review`}
+            description="New/reappearing loans and loans missing from this file are waiting on an agency admin or operations manager decision before they take effect."
+            action={
+              <Button size="small" type="primary" onClick={() => navigate("/import-reviews")}>
+                Review now
+              </Button>
+            }
+          />
+        )}
+
+        {(result.new_buckets.length > 0 || result.new_products.length > 0) && (
+          <Space direction="vertical" size={4} style={{ width: "100%", maxWidth: 560 }}>
+            {result.new_buckets.length > 0 && (
+              <div>
+                <Typography.Text type="secondary">New buckets registered: </Typography.Text>
+                {result.new_buckets.map((b) => (
+                  <Tag key={b}>{b}</Tag>
+                ))}
+              </div>
+            )}
+            {result.new_products.length > 0 && (
+              <div>
+                <Typography.Text type="secondary">New products registered: </Typography.Text>
+                {result.new_products.map((p) => (
+                  <Tag key={p}>{p}</Tag>
+                ))}
+              </div>
+            )}
+          </Space>
+        )}
+
         {result.unknown_agent_phones?.length > 0 && (
           <Alert
             type="warning"
