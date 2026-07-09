@@ -128,8 +128,17 @@ router.get(
       throw new HttpError(404, "Customer not found");
     }
 
-    const [detailFields, trail, ptps, payments, bucketMovements, allocationHistory, snapshots] =
-      await Promise.all([
+    const [
+      detailFields,
+      trail,
+      ptps,
+      payments,
+      bucketMovements,
+      allocationHistory,
+      snapshots,
+      fieldVisits,
+      attachments,
+    ] = await Promise.all([
         // "Latest" = most recently touched active template for this company.
         // Version is scoped per template NAME, so it can't be used to compare
         // across different named templates -- updated_at can.
@@ -181,6 +190,25 @@ router.get(
              FROM customer_month_snapshots WHERE customer_id = $1 ORDER BY month DESC`,
           [id],
         ),
+        pool.query(
+          `SELECT fv.id, fv.remark, fv.created_at,
+                  (fv.photo_url IS NOT NULL) AS has_photo,
+                  u.full_name AS agent_name
+             FROM field_visits fv
+             JOIN users u ON u.id = fv.agent_id
+            WHERE fv.customer_id = $1
+            ORDER BY fv.created_at DESC LIMIT 50`,
+          [id],
+        ),
+        pool.query(
+          `SELECT a.id, a.kind, a.file_name, a.mime_type, a.size_bytes, a.note, a.created_at,
+                  u.full_name AS uploaded_by_name
+             FROM attachments a
+             JOIN users u ON u.id = a.uploaded_by
+            WHERE a.customer_id = $1
+            ORDER BY a.created_at DESC LIMIT 50`,
+          [id],
+        ),
       ]);
 
     res.json({
@@ -193,6 +221,8 @@ router.get(
       bucket_movements: bucketMovements.rows,
       allocation_history: allocationHistory.rows,
       snapshots: snapshots.rows,
+      field_visits: fieldVisits.rows,
+      attachments: attachments.rows,
     });
   }),
 );

@@ -2,8 +2,9 @@ import { Router } from "express";
 import { z } from "zod";
 import { pool } from "../config/db";
 import { asyncHandler } from "../middleware/async-handler";
-import { HttpError } from "../middleware/error-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
+import { HttpError } from "../middleware/error-handler";
+import { scopeFilter } from "../services/scope";
 
 const router = Router();
 router.use(authenticate, requirePermission("tracking.view"));
@@ -18,26 +19,6 @@ const STATIONARY_RADIUS_M_DEFAULT = 100;
 const NO_SIGNAL_MINUTES = 10;
 
 const IST = "Asia/Kolkata";
-
-/**
- * Visibility scope (brief Section 3): Agency Admin / Ops Manager see the
- * whole agency; a Team Leader sees their own team. Returns SQL filter parts.
- */
-function scopeFilter(user: {
-  is_agency_admin: boolean;
-  is_operations_manager: boolean;
-  is_team_leader: boolean;
-  team_id: string | null;
-}): { clause: string; param: string | null } {
-  if (user.is_agency_admin || user.is_operations_manager) {
-    return { clause: "", param: null };
-  }
-  if (user.is_team_leader) {
-    // TL without a team assigned sees nothing rather than everything.
-    return { clause: "AND u.team_id = $SCOPE", param: user.team_id ?? "00000000-0000-0000-0000-000000000000" };
-  }
-  throw new HttpError(403, "Only managers and team leaders can view tracking");
-}
 
 async function agencyThresholds(agencyId: string): Promise<{ minutes: number; radius: number }> {
   const { rows } = await pool.query(

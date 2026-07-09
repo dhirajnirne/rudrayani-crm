@@ -16,7 +16,8 @@ import '../api/api_client.dart';
 /// half-synced queue can always be flushed again safely.
 class QueuedAction {
   final String clientKey;
-  final String type; // 'call_log' | 'payment' | 'field_visit'
+  final String
+  type; // 'call_log' | 'payment' | 'field_visit' | 'reminder' | 'attachment'
   final Map<String, dynamic> payload;
   final String? photoPath; // durable copy for queued payments/visits
   final DateTime createdAt;
@@ -30,22 +31,22 @@ class QueuedAction {
   });
 
   Map<String, dynamic> toJson() => {
-        'client_key': clientKey,
-        'type': type,
-        'payload': payload,
-        'photo_path': photoPath,
-        'created_at': createdAt.toIso8601String(),
-      };
+    'client_key': clientKey,
+    'type': type,
+    'payload': payload,
+    'photo_path': photoPath,
+    'created_at': createdAt.toIso8601String(),
+  };
 
   // Items queued before 2026-07-06 may still carry a 'signature_path' key
   // (signature capture removed) — it is simply ignored here.
   factory QueuedAction.fromJson(Map<String, dynamic> j) => QueuedAction(
-        clientKey: j['client_key'] as String,
-        type: j['type'] as String,
-        payload: Map<String, dynamic>.from(j['payload'] as Map),
-        photoPath: j['photo_path'] as String?,
-        createdAt: DateTime.parse(j['created_at'] as String),
-      );
+    clientKey: j['client_key'] as String,
+    type: j['type'] as String,
+    payload: Map<String, dynamic>.from(j['payload'] as Map),
+    photoPath: j['photo_path'] as String?,
+    createdAt: DateTime.parse(j['created_at'] as String),
+  );
 }
 
 class OfflineQueueState {
@@ -53,14 +54,21 @@ class OfflineQueueState {
   final bool syncing;
   final String? lastError; // last permanent rejection, shown once to the agent
 
-  const OfflineQueueState({this.pending = 0, this.syncing = false, this.lastError});
+  const OfflineQueueState({
+    this.pending = 0,
+    this.syncing = false,
+    this.lastError,
+  });
 
-  OfflineQueueState copyWith({int? pending, bool? syncing, String? lastError}) =>
-      OfflineQueueState(
-        pending: pending ?? this.pending,
-        syncing: syncing ?? this.syncing,
-        lastError: lastError,
-      );
+  OfflineQueueState copyWith({
+    int? pending,
+    bool? syncing,
+    String? lastError,
+  }) => OfflineQueueState(
+    pending: pending ?? this.pending,
+    syncing: syncing ?? this.syncing,
+    lastError: lastError,
+  );
 }
 
 class OfflineQueueNotifier extends StateNotifier<OfflineQueueState> {
@@ -110,10 +118,15 @@ class OfflineQueueNotifier extends StateNotifier<OfflineQueueState> {
     final api = ref.read(apiClientProvider);
 
     try {
-      final items = box.values
-          .map((s) => QueuedAction.fromJson(jsonDecode(s) as Map<String, dynamic>))
-          .toList()
-        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      final items =
+          box.values
+              .map(
+                (s) => QueuedAction.fromJson(
+                  jsonDecode(s) as Map<String, dynamic>,
+                ),
+              )
+              .toList()
+            ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
 
       String? rejection;
       for (final item in items) {
@@ -124,23 +137,48 @@ class OfflineQueueNotifier extends StateNotifier<OfflineQueueState> {
             final form = FormData.fromMap({
               ...item.payload,
               if (item.photoPath != null && File(item.photoPath!).existsSync())
-                'photo': await MultipartFile.fromFile(item.photoPath!, filename: 'proof.jpg'),
+                'photo': await MultipartFile.fromFile(
+                  item.photoPath!,
+                  filename: 'proof.jpg',
+                ),
             });
             await api.postForm('/payments', form);
           } else if (item.type == 'field_visit') {
             final form = FormData.fromMap({
               ...item.payload,
               if (item.photoPath != null && File(item.photoPath!).existsSync())
-                'photo': await MultipartFile.fromFile(item.photoPath!, filename: 'visit.jpg'),
+                'photo': await MultipartFile.fromFile(
+                  item.photoPath!,
+                  filename: 'visit.jpg',
+                ),
             });
             await api.postForm('/field-visits', form);
+          } else if (item.type == 'reminder') {
+            await api.post('/reminders', data: item.payload);
+          } else if (item.type == 'attachment') {
+            final form = FormData.fromMap({
+              ...item.payload,
+              if (item.photoPath != null && File(item.photoPath!).existsSync())
+                'file': await MultipartFile.fromFile(
+                  item.photoPath!,
+                  filename: 'photo.jpg',
+                ),
+            });
+            await api.postForm('/attachments', form);
           }
         } on DioException catch (e) {
           if (_isOffline(e)) return; // still offline — keep the rest queued
           // Permanent rejection (validation, closed customer, retired code):
           // drop it so the queue keeps moving, but tell the agent why.
+          final label = switch (item.type) {
+            'payment' => 'Payment',
+            'field_visit' => 'Field visit',
+            'reminder' => 'Reminder',
+            'attachment' => 'Document',
+            _ => 'Call log',
+          };
           rejection =
-              '${item.type == 'payment' ? 'Payment' : 'Call log'} could not sync: '
+              '$label could not sync: '
               '${e.response?.data?['error'] ?? e.response?.statusCode ?? e.message}';
         }
         await _remove(item);
@@ -177,9 +215,10 @@ class OfflineQueueNotifier extends StateNotifier<OfflineQueueState> {
       (e.type == DioExceptionType.unknown && e.error is SocketException);
 }
 
-final offlineQueueProvider = StateNotifierProvider<OfflineQueueNotifier, OfflineQueueState>(
-  (ref) => OfflineQueueNotifier(ref),
-);
+final offlineQueueProvider =
+    StateNotifierProvider<OfflineQueueNotifier, OfflineQueueState>(
+      (ref) => OfflineQueueNotifier(ref),
+    );
 
 /// True when this Dio failure means "no connectivity" — the caller should
 /// queue the action instead of showing an error.

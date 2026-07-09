@@ -19,7 +19,9 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
   @override
   Widget build(BuildContext context) {
-    final isTL = ref.watch(authProvider.select((s) => s.user?['is_team_leader'] == true));
+    final isTL = ref.watch(
+      authProvider.select((s) => s.capabilities.contains('team_leader')),
+    );
 
     final screens = [
       const WorklistScreen(),
@@ -27,9 +29,16 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       const PerformanceScreen(),
     ];
     final destinations = [
-      const NavigationDestination(icon: Icon(Icons.list_alt), label: 'My Worklist'),
-      if (isTL) const NavigationDestination(icon: Icon(Icons.groups), label: 'My Team'),
-      const NavigationDestination(icon: Icon(Icons.insights), label: 'My Performance'),
+      const NavigationDestination(
+        icon: Icon(Icons.list_alt),
+        label: 'My Worklist',
+      ),
+      if (isTL)
+        const NavigationDestination(icon: Icon(Icons.groups), label: 'My Team'),
+      const NavigationDestination(
+        icon: Icon(Icons.insights),
+        label: 'My Performance',
+      ),
     ];
 
     return Scaffold(

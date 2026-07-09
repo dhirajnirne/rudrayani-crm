@@ -10,6 +10,60 @@ const router = Router();
 router.use(authenticate, requirePermission("calls.log"));
 
 /**
+ * PTP list, filterable by customer/status. Agents see their own PTPs plus the
+ * full PTP history of customers currently assigned to them (the mobile PTP
+ * screen shows a customer's history); customers.allocate (TL and up) sees the
+ * whole agency's.
+ */
+router.get(
+  "/",
+  asyncHandler(async (req, res) => {
+    const q = z
+      .object({
+        customer_id: z.string().uuid().optional(),
+        status: z.enum(["pending", "kept", "broken"]).optional(),
+      })
+      .parse(req.query);
+
+    const seesAll = await capabilitiesHavePermission(
+      capabilitiesOf(req.user!),
+      "customers.allocate",
+    );
+
+    const params: unknown[] = [req.user!.agency_id];
+    const filters: string[] = [];
+    if (q.customer_id) {
+      params.push(q.customer_id);
+      filters.push(`p.customer_id = $${params.length}`);
+    }
+    if (q.status) {
+      params.push(q.status);
+      filters.push(`p.status = $${params.length}`);
+    }
+    if (!seesAll) {
+      params.push(req.user!.id);
+      filters.push(`(p.agent_id = $${params.length} OR c.assigned_agent_id = $${params.length})`);
+    }
+
+    const { rows } = await pool.query(
+      `SELECT p.id, p.amount, p.promised_date, p.mode, p.status, p.created_at,
+              c.id AS customer_id, c.loan_number, c.customer_name,
+              p.agent_id, u.full_name AS agent_name
+         FROM ptps p
+         JOIN customers c ON c.id = p.customer_id
+         JOIN companies co ON co.id = c.company_id
+         JOIN users u ON u.id = p.agent_id
+        WHERE co.agency_id = $1
+          ${filters.map((f) => `AND ${f}`).join("\n          ")}
+        ORDER BY p.created_at DESC
+        LIMIT 100`,
+      params,
+    );
+    res.json({ ptps: rows, total: rows.length });
+  }),
+);
+
+/**
  * PTP reminders due (build brief Section 6: PTP → Reminder). Agents see their
  * own promises; anyone with customers.allocate (TL and up) sees the whole
  * agency's so they can chase the team.
