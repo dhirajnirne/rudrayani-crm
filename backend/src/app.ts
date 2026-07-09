@@ -5,6 +5,7 @@ import pinoHttp from "pino-http";
 import { logger } from "./config/logger";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler";
 import allocationRoutes from "./routes/allocations";
+import attachmentRoutes from "./routes/attachments";
 import attendanceRoutes from "./routes/attendance";
 import authRoutes from "./routes/auth";
 import branchRoutes from "./routes/branches";
@@ -66,6 +67,7 @@ export function createApp() {
   app.use("/api/tracking", trackingRoutes);
   app.use("/api/day-plan", dayPlanRoutes);
   app.use("/api/field-visits", fieldVisitRoutes);
+  app.use("/api/attachments", attachmentRoutes);
   app.use("/api/reallocation-requests", reallocationRequestRoutes);
   app.use("/api/reminders", reminderRoutes);
   app.use("/api/buckets", bucketRoutes);
