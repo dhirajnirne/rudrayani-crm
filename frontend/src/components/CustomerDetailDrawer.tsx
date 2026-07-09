@@ -1,7 +1,33 @@
-import { Descriptions, Drawer, Empty, Space, Spin, Table, Tag, Timeline, Typography, message } from "antd";
+import {
+  Button,
+  Descriptions,
+  Drawer,
+  Empty,
+  Space,
+  Spin,
+  Table,
+  Tag,
+  Timeline,
+  Typography,
+  Upload,
+  message,
+} from "antd";
+import { DownloadOutlined, FilePdfOutlined, FileImageOutlined, UploadOutlined } from "@ant-design/icons";
+import type { UploadProps } from "antd";
 import dayjs from "dayjs";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api/client";
+
+interface Attachment {
+  id: string;
+  kind: "photo" | "document";
+  file_name: string;
+  mime_type: string;
+  size_bytes: number;
+  note: string | null;
+  created_at: string;
+  uploaded_by_name: string;
+}
 
 interface CustomerDetail {
   customer: {
@@ -71,6 +97,8 @@ export default function CustomerDetailDrawer({
 }) {
   const [detail, setDetail] = useState<CustomerDetail | null>(null);
   const [loading, setLoading] = useState(false);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [attachmentsLoading, setAttachmentsLoading] = useState(false);
 
   useEffect(() => {
     if (!open || !customerId) return;
@@ -82,6 +110,63 @@ export default function CustomerDetailDrawer({
       .catch((err) => message.error(errorMessage(err)))
       .finally(() => setLoading(false));
   }, [open, customerId]);
+
+  const loadAttachments = useCallback(() => {
+    if (!customerId) return;
+    setAttachmentsLoading(true);
+    api
+      .get("/attachments", { params: { customer_id: customerId } })
+      .then((res) => setAttachments(res.data.attachments))
+      .catch((err) => message.error(errorMessage(err)))
+      .finally(() => setAttachmentsLoading(false));
+  }, [customerId]);
+
+  useEffect(() => {
+    if (!open) return;
+    loadAttachments();
+  }, [open, loadAttachments]);
+
+  const downloadAttachment = async (a: Attachment) => {
+    try {
+      const res = await api.get(`/attachments/${a.id}/file`, { responseType: "blob" });
+      const url = URL.createObjectURL(res.data as Blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = a.file_name;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      message.error(errorMessage(err));
+    }
+  };
+
+  const uploadProps: UploadProps = {
+    accept: "image/jpeg,image/png,image/webp,application/pdf",
+    showUploadList: false,
+    customRequest: async ({ file, onSuccess, onError }) => {
+      const form = new FormData();
+      form.append("customer_id", customerId ?? "");
+      form.append("file", file as File);
+      try {
+        await api.post("/attachments", form, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
+        message.success("Document uploaded");
+        loadAttachments();
+        onSuccess?.({});
+      } catch (err) {
+        message.error(errorMessage(err));
+        onError?.(err as Error);
+      }
+    },
+    beforeUpload: (file) => {
+      if (file.size > 10 * 1024 * 1024) {
+        message.error("File must be under 10 MB");
+        return Upload.LIST_IGNORE;
+      }
+      return true;
+    },
+  };
 
   const currentMonth = dayjs().format("YYYY-MM-01");
   const normalizedPending =
@@ -268,6 +353,56 @@ export default function CustomerDetailDrawer({
                 }))}
               />
             )}
+          </div>
+
+          <div>
+            <Space style={{ width: "100%", justifyContent: "space-between", marginBottom: 8 }}>
+              <Typography.Title level={5} style={{ margin: 0 }}>
+                Documents
+              </Typography.Title>
+              <Upload {...uploadProps}>
+                <Button icon={<UploadOutlined />} size="small">
+                  Upload
+                </Button>
+              </Upload>
+            </Space>
+            <Table
+              size="small"
+              rowKey="id"
+              loading={attachmentsLoading}
+              pagination={false}
+              dataSource={attachments}
+              locale={{ emptyText: "No supporting documents uploaded" }}
+              columns={[
+                {
+                  title: "File",
+                  dataIndex: "file_name",
+                  render: (v: string, row: Attachment) => (
+                    <>
+                      {row.kind === "document" ? <FilePdfOutlined /> : <FileImageOutlined />} {v}
+                    </>
+                  ),
+                },
+                { title: "Note", dataIndex: "note", render: orDash },
+                { title: "Uploaded By", dataIndex: "uploaded_by_name" },
+                {
+                  title: "Date",
+                  dataIndex: "created_at",
+                  render: (v: string) => dayjs(v).format("DD MMM YYYY"),
+                },
+                {
+                  title: "",
+                  key: "actions",
+                  render: (_: unknown, row: Attachment) => (
+                    <Button
+                      size="small"
+                      icon={<DownloadOutlined />}
+                      onClick={() => downloadAttachment(row)}
+                    />
+                  ),
+                },
+              ]}
+            />
           </div>
 
           <div>
