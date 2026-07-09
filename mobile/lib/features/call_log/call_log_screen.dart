@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
+import '../../../core/theme/app_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -165,7 +166,7 @@ class _CallLogScreenState extends ConsumerState<CallLogScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: const Color(0xFF00535B),
+        backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         title: Text('Log Call — ${widget.customer.customerName}'),
       ),
@@ -324,7 +325,7 @@ class _CallLogScreenState extends ConsumerState<CallLogScreen> {
                 label: Text(_loading ? 'Saving…' : 'Save Call Log'),
                 onPressed: _loading ? null : _submit,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF00535B),
+                  backgroundColor: AppColors.primary,
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),

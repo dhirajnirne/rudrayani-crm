@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
+import '../../../core/theme/app_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'customer_detail_provider.dart';
@@ -101,7 +102,7 @@ List<_HistoryEntry> _merge(Map<String, dynamic> detail) {
       _HistoryEntry(
         at: DateTime.parse(m['created_at'] as String),
         icon: m['kind'] == 'document' ? Icons.picture_as_pdf : Icons.image,
-        color: const Color(0xFF00535B),
+        color: AppColors.primary,
         title: 'Document: ${m['file_name']}',
         subtitle: m['uploaded_by_name'] as String?,
       ),
@@ -139,7 +140,7 @@ class HistoryTimeline extends ConsumerWidget {
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 14,
-                    color: Color(0xFF00535B),
+                    color: AppColors.primary,
                   ),
                 ),
                 IconButton(

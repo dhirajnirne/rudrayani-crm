@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
+import '../../../core/theme/app_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/models/customer.dart';
@@ -140,7 +141,7 @@ class _ReminderSheetState extends ConsumerState<_ReminderSheet> {
             child: ElevatedButton(
               onPressed: _saving ? null : _save,
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF00535B),
+                backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
               ),
               child: _saving

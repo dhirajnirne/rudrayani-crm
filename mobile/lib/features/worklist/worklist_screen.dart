@@ -1,13 +1,13 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../../core/auth/auth_provider.dart';
 import '../../core/models/customer.dart';
 import '../../core/offline/offline_queue.dart';
+import '../../core/theme/app_theme.dart';
 import '../../core/tracking/attendance_provider.dart';
 import '../../core/tracking/tracking_service.dart';
-import '../reminders/today_section.dart';
 import 'worklist_provider.dart';
 
 final _rupee = NumberFormat.currency(
@@ -42,8 +42,6 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: const Color(0xFF00535B),
-        foregroundColor: Colors.white,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -72,7 +70,6 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
         children: [
           const _DutyBanner(),
           const _SyncBanner(),
-          const TodaySection(),
           Padding(
             padding: const EdgeInsets.all(12),
             child: TextField(
@@ -190,8 +187,8 @@ class _SyncBanner extends ConsumerWidget {
     return Container(
       width: double.infinity,
       color: q.lastError != null
-          ? const Color(0xFFFDECEA)
-          : const Color(0xFFFFF7E6),
+          ? AppColors.errorContainer
+          : AppColors.warningContainer,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       child: Row(
         children: [
@@ -308,7 +305,7 @@ class _DutyBanner extends ConsumerWidget {
                         style: ElevatedButton.styleFrom(
                           backgroundColor: onDuty
                               ? Colors.red.shade700
-                              : const Color(0xFF00535B),
+                              : AppColors.primary,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(horizontal: 16),
                         ),
@@ -348,7 +345,7 @@ class _CustomerCard extends StatelessWidget {
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         leading: CircleAvatar(
-          backgroundColor: ptpDue ? Colors.orange : const Color(0xFF00535B),
+          backgroundColor: ptpDue ? Colors.orange : AppColors.primary,
           child: Icon(
             ptpDue ? Icons.schedule : Icons.person,
             color: Colors.white,

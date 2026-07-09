@@ -1,5 +1,6 @@
-import 'package:dio/dio.dart';
+﻿import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import '../../../core/theme/app_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -128,7 +129,7 @@ class CustomerDetailScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: const Color(0xFF00535B),
+        backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         title: Text(customer.customerName),
         actions: [
@@ -377,7 +378,7 @@ class _SectionCard extends StatelessWidget {
             style: const TextStyle(
               fontWeight: FontWeight.bold,
               fontSize: 14,
-              color: Color(0xFF00535B),
+              color: AppColors.primary,
             ),
           ),
           const Divider(),

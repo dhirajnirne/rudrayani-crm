@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
+import '../../../core/theme/app_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
@@ -41,7 +42,7 @@ class TeamScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: const Color(0xFF00535B),
+        backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         title: const Text('My Team'),
         actions: [
@@ -64,7 +65,7 @@ class TeamScreen extends ConsumerWidget {
               padding: EdgeInsets.symmetric(vertical: 8),
               child: Text('Team Today',
                   style: TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF00535B))),
+                      fontWeight: FontWeight.bold, fontSize: 14, color: AppColors.primary)),
             ),
             day.when(
               loading: () => const Center(
@@ -237,7 +238,7 @@ class _ApprovalsSection extends ConsumerWidget {
       children: [
         Text('Reallocation Approvals (${requests.length})',
             style: const TextStyle(
-                fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF00535B))),
+                fontWeight: FontWeight.bold, fontSize: 14, color: AppColors.primary)),
         const SizedBox(height: 8),
         for (final r in requests)
           Card(
@@ -262,7 +263,7 @@ class _ApprovalsSection extends ConsumerWidget {
                         child: ElevatedButton(
                           onPressed: () => _decide(context, ref, r, true),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF00535B),
+                            backgroundColor: AppColors.primary,
                             foregroundColor: Colors.white,
                           ),
                           child: const Text('Approve'),

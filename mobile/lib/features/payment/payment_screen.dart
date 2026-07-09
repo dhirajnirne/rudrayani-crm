@@ -1,6 +1,7 @@
-import 'dart:io';
+﻿import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import '../../../core/theme/app_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
@@ -121,7 +122,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: const Color(0xFF00535B),
+        backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         title: Text('Record Payment — ${widget.customer.customerName}'),
       ),
@@ -210,7 +211,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
               subtitle: const Text('Clears assignment and sets status to closed', style: TextStyle(fontSize: 12)),
               value: _closeCustomer,
               onChanged: (v) => setState(() => _closeCustomer = v),
-              activeThumbColor: const Color(0xFF00535B),
+              activeThumbColor: AppColors.primary,
             ),
             if (_error != null)
               Padding(
@@ -227,7 +228,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
                 label: Text(_loading ? 'Saving…' : 'Record Payment'),
                 onPressed: _loading ? null : _submit,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF00535B),
+                  backgroundColor: AppColors.primary,
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
