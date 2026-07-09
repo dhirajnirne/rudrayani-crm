@@ -1,0 +1,209 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
+import 'customer_detail_provider.dart';
+
+final _rupee = NumberFormat.currency(
+  locale: 'en_IN',
+  symbol: '₹',
+  decimalDigits: 0,
+);
+final _dateTime = DateFormat('dd MMM yyyy, HH:mm');
+
+class _HistoryEntry {
+  final DateTime at;
+  final IconData icon;
+  final Color color;
+  final String title;
+  final String? subtitle;
+  const _HistoryEntry({
+    required this.at,
+    required this.icon,
+    required this.color,
+    required this.title,
+    this.subtitle,
+  });
+}
+
+List<_HistoryEntry> _merge(Map<String, dynamic> detail) {
+  final entries = <_HistoryEntry>[];
+
+  for (final t in (detail['trail'] as List? ?? [])) {
+    final m = t as Map<String, dynamic>;
+    entries.add(
+      _HistoryEntry(
+        at: DateTime.parse(m['created_at'] as String),
+        icon: Icons.phone_in_talk,
+        color: Colors.blue,
+        title:
+            [
+              m['result_code'],
+              m['action_code'],
+            ].where((v) => v != null).join(' · ').isEmpty
+            ? 'Call logged'
+            : [
+                m['result_code'],
+                m['action_code'],
+              ].where((v) => v != null).join(' · '),
+        subtitle: [
+          m['agent_name'],
+          m['remark'],
+        ].whereType<String>().where((v) => v.isNotEmpty).join(' — '),
+      ),
+    );
+  }
+  for (final p in (detail['payments'] as List? ?? [])) {
+    final m = p as Map<String, dynamic>;
+    entries.add(
+      _HistoryEntry(
+        at: DateTime.parse(m['paid_at'] as String),
+        icon: Icons.currency_rupee,
+        color: Colors.green,
+        title: 'Payment: ${_rupee.format((m['amount'] as num).toDouble())}',
+        subtitle: m['mode'] as String?,
+      ),
+    );
+  }
+  for (final v in (detail['field_visits'] as List? ?? [])) {
+    final m = v as Map<String, dynamic>;
+    entries.add(
+      _HistoryEntry(
+        at: DateTime.parse(m['created_at'] as String),
+        icon: Icons.location_on,
+        color: Colors.orange,
+        title: 'Field visit${m['has_photo'] == true ? ' (photo)' : ''}',
+        subtitle: [
+          m['agent_name'],
+          m['remark'],
+        ].whereType<String>().where((v) => v.isNotEmpty).join(' — '),
+      ),
+    );
+  }
+  for (final p in (detail['ptps'] as List? ?? [])) {
+    final m = p as Map<String, dynamic>;
+    entries.add(
+      _HistoryEntry(
+        at: DateTime.parse(m['created_at'] as String),
+        icon: Icons.calendar_today,
+        color: Colors.purple,
+        title:
+            'PTP: ${_rupee.format((m['amount'] as num).toDouble())} '
+            '(${m['status']})',
+        subtitle: m['promised_date'] != null
+            ? 'Promised ${DateFormat('dd MMM yyyy').format(DateTime.parse(m['promised_date'] as String))}'
+            : null,
+      ),
+    );
+  }
+  for (final a in (detail['attachments'] as List? ?? [])) {
+    final m = a as Map<String, dynamic>;
+    entries.add(
+      _HistoryEntry(
+        at: DateTime.parse(m['created_at'] as String),
+        icon: m['kind'] == 'document' ? Icons.picture_as_pdf : Icons.image,
+        color: const Color(0xFF00535B),
+        title: 'Document: ${m['file_name']}',
+        subtitle: m['uploaded_by_name'] as String?,
+      ),
+    );
+  }
+
+  entries.sort((a, b) => b.at.compareTo(a.at));
+  return entries.take(50).toList();
+}
+
+/// Full customer-360 timeline (calls, payments, field visits, PTPs,
+/// documents) merged and sorted newest-first. Degrades gracefully offline —
+/// the caller's other cards (loan details, last disposition, active PTP)
+/// read from the worklist payload and keep rendering regardless.
+class HistoryTimeline extends ConsumerWidget {
+  final String customerId;
+  const HistoryTimeline({super.key, required this.customerId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final detail = ref.watch(customerDetailProvider(customerId));
+
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'History',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                    color: Color(0xFF00535B),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.refresh, size: 18),
+                  onPressed: () =>
+                      ref.invalidate(customerDetailProvider(customerId)),
+                ),
+              ],
+            ),
+            const Divider(),
+            detail.when(
+              loading: () => const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: LinearProgressIndicator(),
+              ),
+              error: (e, _) => const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: Text(
+                  'History unavailable offline',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+              ),
+              data: (d) {
+                final entries = _merge(d);
+                if (entries.isEmpty) {
+                  return const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8),
+                    child: Text(
+                      'No history yet',
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                  );
+                }
+                return Column(
+                  children: entries
+                      .map(
+                        (e) => ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(e.icon, size: 18, color: e.color),
+                          title: Text(
+                            e.title,
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                          subtitle: Text(
+                            [
+                              _dateTime.format(e.at.toLocal()),
+                              if (e.subtitle != null && e.subtitle!.isNotEmpty)
+                                e.subtitle,
+                            ].join(' — '),
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey,
+                            ),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

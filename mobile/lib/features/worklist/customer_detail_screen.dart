@@ -8,6 +8,8 @@ import '../../core/api/api_client.dart';
 import '../../core/models/customer.dart';
 import '../attachments/attachments_section.dart';
 import '../reminders/reminder_sheet.dart';
+import 'customer_detail_provider.dart';
+import 'history_timeline.dart';
 
 final _rupee = NumberFormat.currency(
   locale: 'en_IN',
@@ -147,199 +149,210 @@ class CustomerDetailScreen extends ConsumerWidget {
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Call & action buttons
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.call),
-                    label: Text(customer.mobileNumber),
-                    onPressed: () => _dial(context),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
-                      minimumSize: const Size(0, 48),
+      body: RefreshIndicator(
+        onRefresh: () async =>
+            ref.invalidate(customerDetailProvider(customer.id)),
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Call & action buttons
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.call),
+                      label: Text(customer.mobileNumber),
+                      onPressed: () => _dial(context),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(0, 48),
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    icon: const Icon(Icons.note_add),
-                    label: const Text('Log Call'),
-                    onPressed: () => context.push('/call-log', extra: customer),
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(0, 48),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.note_add),
+                      label: const Text('Log Call'),
+                      onPressed: () =>
+                          context.push('/call-log', extra: customer),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(0, 48),
+                      ),
                     ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    icon: const Icon(Icons.payment),
-                    label: const Text('Record Payment'),
-                    onPressed: () => context.push('/payment', extra: customer),
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(0, 48),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.payment),
+                      label: const Text('Record Payment'),
+                      onPressed: () =>
+                          context.push('/payment', extra: customer),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(0, 48),
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    icon: const Icon(Icons.calendar_today),
-                    label: const Text('View PTPs'),
-                    onPressed: () => context.push('/ptps', extra: customer),
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(0, 48),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.calendar_today),
+                      label: const Text('View PTPs'),
+                      onPressed: () => context.push('/ptps', extra: customer),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(0, 48),
+                      ),
                     ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    icon: const Icon(Icons.assignment_turned_in),
-                    label: const Text('Field Visit'),
-                    onPressed: () =>
-                        context.push('/field-visit', extra: customer),
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(0, 48),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.assignment_turned_in),
+                      label: const Text('Field Visit'),
+                      onPressed: () =>
+                          context.push('/field-visit', extra: customer),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(0, 48),
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    icon: const Icon(Icons.directions),
-                    label: const Text('Navigate'),
-                    onPressed: () => _navigate(context),
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(0, 48),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.directions),
+                      label: const Text('Navigate'),
+                      onPressed: () => _navigate(context),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(0, 48),
+                      ),
                     ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    icon: const Icon(Icons.notifications_active_outlined),
-                    label: const Text('Set Reminder'),
-                    onPressed: () =>
-                        showReminderSheet(context, ref, customer: customer),
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(0, 48),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.notifications_active_outlined),
+                      label: const Text('Set Reminder'),
+                      onPressed: () =>
+                          showReminderSheet(context, ref, customer: customer),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(0, 48),
+                      ),
                     ),
                   ),
+                  const SizedBox(width: 8),
+                  const Expanded(child: SizedBox()),
+                ],
+              ),
+              const SizedBox(height: 16),
+              if (customer.normalizedPending)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: Colors.blue.withValues(alpha: 0.3),
+                    ),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.info_outline, size: 16, color: Colors.blue),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Normalized this month, pending lender confirmation. The lender\'s bucket stays authoritative until their next file confirms it.',
+                          style: TextStyle(fontSize: 12, color: Colors.blue),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(width: 8),
-                const Expanded(child: SizedBox()),
-              ],
-            ),
-            const SizedBox(height: 16),
-            if (customer.normalizedPending)
-              Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.blue.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
-                ),
-                child: const Row(
+              // Loan details card
+              _SectionCard(
+                title: 'Loan Details',
+                children: [
+                  _Row('Loan Number', customer.loanNumber),
+                  _Row('Company', customer.companyName),
+                  if (customer.product != null)
+                    _Row('Product', customer.product!),
+                  if (customer.bucket != null) _Row('Bucket', customer.bucket!),
+                  if (customer.dueAmount != null)
+                    _Row('Due Amount', _rupee.format(customer.dueAmount)),
+                  if (customer.emi != null)
+                    _Row('EMI', _rupee.format(customer.emi)),
+                ],
+              ),
+              const SizedBox(height: 12),
+              // Last disposition
+              if (customer.lastRemark != null)
+                _SectionCard(
+                  title: 'Last Disposition',
                   children: [
-                    Icon(Icons.info_outline, size: 16, color: Colors.blue),
-                    SizedBox(width: 8),
-                    Expanded(
+                    if (customer.lastResultCode != null)
+                      _Row('Result', customer.lastResultCode!),
+                    if (customer.lastCallAt != null)
+                      _Row(
+                        'When',
+                        DateFormat(
+                          'dd MMM yyyy HH:mm',
+                        ).format(customer.lastCallAt!.toLocal()),
+                      ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
                       child: Text(
-                        'Normalized this month, pending lender confirmation. The lender\'s bucket stays authoritative until their next file confirms it.',
-                        style: TextStyle(fontSize: 12, color: Colors.blue),
+                        customer.lastRemark!,
+                        style: const TextStyle(fontSize: 13),
                       ),
                     ),
                   ],
                 ),
-              ),
-            // Loan details card
-            _SectionCard(
-              title: 'Loan Details',
-              children: [
-                _Row('Loan Number', customer.loanNumber),
-                _Row('Company', customer.companyName),
-                if (customer.product != null)
-                  _Row('Product', customer.product!),
-                if (customer.bucket != null) _Row('Bucket', customer.bucket!),
-                if (customer.dueAmount != null)
-                  _Row('Due Amount', _rupee.format(customer.dueAmount)),
-                if (customer.emi != null)
-                  _Row('EMI', _rupee.format(customer.emi)),
-              ],
-            ),
-            const SizedBox(height: 12),
-            // Last disposition
-            if (customer.lastRemark != null)
-              _SectionCard(
-                title: 'Last Disposition',
-                children: [
-                  if (customer.lastResultCode != null)
-                    _Row('Result', customer.lastResultCode!),
-                  if (customer.lastCallAt != null)
+              // PTP reminder
+              if (customer.ptpDate != null)
+                _SectionCard(
+                  title: 'Active PTP',
+                  children: [
+                    _Row('Amount', _rupee.format(customer.ptpAmount)),
                     _Row(
-                      'When',
-                      DateFormat(
-                        'dd MMM yyyy HH:mm',
-                      ).format(customer.lastCallAt!.toLocal()),
+                      'Promised Date',
+                      DateFormat('dd MMM yyyy').format(customer.ptpDate!),
                     ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Text(
-                      customer.lastRemark!,
-                      style: const TextStyle(fontSize: 13),
-                    ),
-                  ),
-                ],
-              ),
-            // PTP reminder
-            if (customer.ptpDate != null)
-              _SectionCard(
-                title: 'Active PTP',
-                children: [
-                  _Row('Amount', _rupee.format(customer.ptpAmount)),
-                  _Row(
-                    'Promised Date',
-                    DateFormat('dd MMM yyyy').format(customer.ptpDate!),
-                  ),
-                ],
-              ),
-            // Custom fields
-            if (customer.customFields.isNotEmpty)
-              _SectionCard(
-                title: 'Additional Fields',
-                children: [
-                  for (final e in customer.customFields.entries)
-                    _Row(e.key, e.value?.toString() ?? '—'),
-                ],
-              ),
-            const SizedBox(height: 12),
-            AttachmentsSection(customerId: customer.id),
-          ],
+                  ],
+                ),
+              // Custom fields
+              if (customer.customFields.isNotEmpty)
+                _SectionCard(
+                  title: 'Additional Fields',
+                  children: [
+                    for (final e in customer.customFields.entries)
+                      _Row(e.key, e.value?.toString() ?? '—'),
+                  ],
+                ),
+              const SizedBox(height: 12),
+              AttachmentsSection(customerId: customer.id),
+              const SizedBox(height: 12),
+              HistoryTimeline(customerId: customer.id),
+            ],
+          ),
         ),
       ),
     );
