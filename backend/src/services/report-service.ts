@@ -445,6 +445,32 @@ export interface DepositTotals {
   pending: number;
 }
 
+export async function depositsByRange(
+  agencyId: string,
+  from: string,
+  to: string,
+  filters: Omit<ReportFilters, "month">,
+): Promise<DepositTotals> {
+  const params: unknown[] = [agencyId, from, to];
+  const conditions = paymentConditions({ ...filters, month: from } as ReportFilters, params);
+  const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
+  const { rows } = await pool.query(
+    `SELECT COALESCE(SUM(p.amount), 0)::float AS collected,
+            COALESCE(SUM(p.amount) FILTER (WHERE p.deposited_at IS NOT NULL), 0)::float AS deposited
+       FROM payments p
+       JOIN customers c ON c.id = p.customer_id
+       JOIN companies co ON co.id = c.company_id AND co.agency_id = $1
+       JOIN users cu ON cu.id = p.collected_by_user_id
+      WHERE p.paid_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Kolkata')
+        AND p.paid_at < (($3::date + interval '1 day')::timestamp AT TIME ZONE 'Asia/Kolkata')
+        ${where}`,
+    params,
+  );
+  const collected = rows[0].collected as number;
+  const deposited = rows[0].deposited as number;
+  return { collected, deposited, pending: collected - deposited };
+}
+
 async function depositTotals(agencyId: string, filters: ReportFilters): Promise<DepositTotals> {
   const params: unknown[] = [agencyId, filters.month];
   const conditions = paymentConditions(filters, params);

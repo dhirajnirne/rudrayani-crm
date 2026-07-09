@@ -23,6 +23,7 @@ import BucketMismatchCard from "../components/dashboard/BucketMismatchCard";
 import BucketMovementCard from "../components/dashboard/BucketMovementCard";
 import MetricPanel from "../components/dashboard/MetricPanel";
 import MetricTabsCard from "../components/dashboard/MetricTabsCard";
+import DepositsRangeCard from "../components/dashboard/DepositsRangeCard";
 import OverviewChart from "../components/dashboard/OverviewChart";
 import RecalledStatTile from "../components/dashboard/RecalledStatTile";
 import TrailAnalyticsCard from "../components/dashboard/TrailAnalyticsCard";
@@ -36,15 +37,33 @@ import {
 
 const ALL = "__all__";
 
-function SummaryStat({ label, value }: { label: string; value: string }) {
+function SummaryStat({
+  label,
+  value,
+  accent,
+  sub,
+}: {
+  label: string;
+  value: string;
+  accent?: string;
+  sub?: string;
+}) {
   return (
-    <div style={{ background: "#f7f8f7", borderRadius: 8, padding: "10px 14px" }}>
-      <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+    <div
+      style={{
+        background: "var(--stat-bg, #f0f7f6)",
+        borderRadius: 8,
+        padding: "12px 16px",
+        borderLeft: `3px solid ${accent ?? "#00535b"}`,
+      }}
+    >
+      <Typography.Text type="secondary" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.04em" }}>
         {label}
       </Typography.Text>
-      <div className="money" style={{ fontSize: 20, fontWeight: 700 }}>
+      <div className="money" style={{ fontSize: 22, fontWeight: 700, color: "#00535b", lineHeight: 1.2, marginTop: 2 }}>
         {value}
       </div>
+      {sub && <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{sub}</div>}
     </div>
   );
 }
@@ -203,8 +222,18 @@ export default function DashboardPage() {
         </Space>
       </div>
 
-      {/* Filter bar — hidden pieces the server would clamp anyway */}
+      {/* Filter bar — Company first, then month, then scope narrowers */}
       <Space wrap style={{ marginBottom: 16 }}>
+        {isManager && (
+          <Select
+            style={{ width: 200 }}
+            placeholder="All companies"
+            allowClear
+            value={companyId}
+            onChange={(v) => setCompanyId(v ?? undefined)}
+            options={companies.map((c) => ({ value: c.id, label: c.name }))}
+          />
+        )}
         <DatePicker
           picker="month"
           allowClear={false}
@@ -233,14 +262,6 @@ export default function DashboardPage() {
         />
         {isManager && (
           <>
-            <Select
-              style={{ width: 190 }}
-              placeholder="All companies"
-              allowClear
-              value={companyId}
-              onChange={(v) => setCompanyId(v ?? undefined)}
-              options={companies.map((c) => ({ value: c.id, label: c.name }))}
-            />
             {data?.scope.clamped_to === "agency" && (
               <>
                 <Select
@@ -288,25 +309,50 @@ export default function DashboardPage() {
         </div>
       ) : (
         <Space direction="vertical" size={16} style={{ width: "100%", display: "flex" }}>
-          {/* Collection strip: MTD vs target */}
-          <Card size="small">
+          {/* Collection hero strip */}
+          <Card
+            size="small"
+            style={{ borderTop: "3px solid #00535b", borderRadius: 8 }}
+            bodyStyle={{ padding: "12px 16px" }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#00535b", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                Collection
+              </span>
+              <Tag color="cyan" style={{ fontSize: 11 }}>{data.days.elapsed}d elapsed · {data.days.left}d left</Tag>
+            </div>
             <Row gutter={[12, 12]}>
               <Col xs={12} md={6}>
-                <SummaryStat label="Collection MTD" value={lakh(data.collection.mtd_amount)} />
+                <SummaryStat
+                  label="Collection MTD"
+                  value={lakh(data.collection.mtd_amount)}
+                  accent="#00535b"
+                  sub={`Run rate: ${data.collection.run_rate_current != null ? lakh(data.collection.run_rate_current) + "/day" : "—"}`}
+                />
               </Col>
               <Col xs={12} md={6}>
                 <SummaryStat
                   label="Collection Target"
                   value={data.collection.target_amount != null ? lakh(data.collection.target_amount) : "—"}
+                  accent="#1677ff"
                 />
               </Col>
               <Col xs={12} md={6}>
-                <SummaryStat label="Target Achieved" value={pctText(data.collection.target_pct)} />
+                <SummaryStat
+                  label="Target Achieved"
+                  value={pctText(data.collection.target_pct)}
+                  accent={
+                    data.collection.target_pct != null && data.collection.target_pct >= 80
+                      ? "#52c41a"
+                      : "#faad14"
+                  }
+                />
               </Col>
               <Col xs={12} md={6}>
                 <SummaryStat
-                  label="Required / day"
-                  value={data.collection.run_rate_required != null ? lakh(data.collection.run_rate_required) : "NA"}
+                  label="Required / Day"
+                  value={data.collection.run_rate_required != null ? lakh(data.collection.run_rate_required) : "On target"}
+                  accent="#ff7a45"
                 />
               </Col>
             </Row>
@@ -347,38 +393,43 @@ export default function DashboardPage() {
 
           {/* Deposited + Trail */}
           <Row gutter={[16, 16]}>
-            <Col xs={24} md={12}>
-              <Card size="small" title="Deposited Metrics" style={{ height: "100%" }}>
+            <Col xs={24} md={8}>
+              <Card size="small" title="Deposits (This Month)" style={{ height: "100%" }}>
                 <Row gutter={[10, 10]}>
                   <Col span={8}>
-                    <SummaryStat label="Total collected" value={lakh(data.deposits.collected)} />
+                    <SummaryStat label="Collected" value={lakh(data.deposits.collected)} accent="#00535b" />
                   </Col>
                   <Col span={8}>
-                    <SummaryStat label="Total Deposited" value={lakh(data.deposits.deposited)} />
+                    <SummaryStat label="Deposited" value={lakh(data.deposits.deposited)} accent="#1677ff" />
                   </Col>
                   <Col span={8}>
-                    <SummaryStat label="Total Pending" value={lakh(data.deposits.pending)} />
+                    <SummaryStat label="Pending" value={lakh(data.deposits.pending)} accent="#faad14" />
                   </Col>
                 </Row>
               </Card>
             </Col>
-            <Col xs={24} md={12}>
-              <Card size="small" title="Trail Uploaded Metrics" style={{ height: "100%" }}>
+            <Col xs={24} md={8}>
+              <DepositsRangeCard filters={filters} />
+            </Col>
+            <Col xs={24} md={8}>
+              <Card size="small" title="Trail Activity" style={{ height: "100%" }}>
                 <Row gutter={[10, 10]}>
                   <Col span={8}>
                     <SummaryStat
-                      label="Allocated Count"
+                      label="Allocated"
                       value={compactCount(data.trail.allocated_count)}
+                      accent="#722ed1"
                     />
                   </Col>
                   <Col span={8}>
                     <SummaryStat
-                      label="Trail Upload Count"
+                      label="Trailed"
                       value={compactCount(data.trail.uploaded_count)}
+                      accent="#13c2c2"
                     />
                   </Col>
                   <Col span={8}>
-                    <SummaryStat label="Trail Upload (%)" value={pctText(data.trail.pct)} />
+                    <SummaryStat label="Trail %" value={pctText(data.trail.pct)} accent="#eb2f96" />
                   </Col>
                 </Row>
               </Card>

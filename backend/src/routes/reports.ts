@@ -11,6 +11,7 @@ import {
   bucketMismatchReport,
   bucketMovementReport,
   dashboard,
+  depositsByRange,
   dimensionBreakdown,
   filterOptions,
   overview,
@@ -110,6 +111,26 @@ const dateRangeSchema = z.object({
   product: z.string().trim().min(1).max(200).optional(),
   bucket: z.string().trim().min(1).max(200).optional(),
 });
+
+/** Deposits collected/deposited in a free date range (event-level, range-compatible). */
+router.get(
+  "/deposits-range",
+  asyncHandler(async (req, res) => {
+    const { from, to, ...filters } = dateRangeSchema.parse(req.query);
+    const full = await hasFullView(req);
+    let scope: Omit<ReportFilters, "month">;
+    if (full) {
+      scope = filters;
+    } else {
+      if (filters.agent_id && filters.agent_id !== req.user!.id) {
+        throw new HttpError(403, "You can only view your own deposits");
+      }
+      scope = { ...filters, agent_id: req.user!.id, team_id: undefined };
+    }
+    const result = await depositsByRange(req.user!.agency_id, from, to, scope);
+    res.json(result);
+  }),
+);
 
 /** Trail/disposition analytics: event-level data, so a free date range fits better than month-at-a-time. */
 router.get(
