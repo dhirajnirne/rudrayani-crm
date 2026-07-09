@@ -7,9 +7,14 @@ import '../../core/models/customer.dart';
 import '../../core/offline/offline_queue.dart';
 import '../../core/tracking/attendance_provider.dart';
 import '../../core/tracking/tracking_service.dart';
+import '../reminders/today_section.dart';
 import 'worklist_provider.dart';
 
-final _rupee = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
+final _rupee = NumberFormat.currency(
+  locale: 'en_IN',
+  symbol: '₹',
+  decimalDigits: 0,
+);
 
 class WorklistScreen extends ConsumerStatefulWidget {
   const WorklistScreen({super.key});
@@ -42,8 +47,14 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Today\'s Worklist', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            Text(userName, style: const TextStyle(fontSize: 12, color: Colors.white70)),
+            const Text(
+              'Today\'s Worklist',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            Text(
+              userName,
+              style: const TextStyle(fontSize: 12, color: Colors.white70),
+            ),
           ],
         ),
         actions: [
@@ -61,14 +72,20 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
         children: [
           const _DutyBanner(),
           const _SyncBanner(),
+          const TodaySection(),
           Padding(
             padding: const EdgeInsets.all(12),
             child: TextField(
               decoration: InputDecoration(
                 hintText: 'Search by name, loan number or mobile…',
                 prefixIcon: const Icon(Icons.search),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 12),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  vertical: 0,
+                  horizontal: 12,
+                ),
               ),
               onChanged: (v) => setState(() => _search = v.toLowerCase()),
             ),
@@ -80,7 +97,11 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.error_outline, size: 48, color: Colors.red),
+                    const Icon(
+                      Icons.error_outline,
+                      size: 48,
+                      color: Colors.red,
+                    ),
                     const SizedBox(height: 8),
                     Text('Error: $e'),
                     const SizedBox(height: 8),
@@ -94,13 +115,21 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
               data: (customers) {
                 final filtered = _search.isEmpty
                     ? customers
-                    : customers.where((c) =>
-                        c.customerName.toLowerCase().contains(_search) ||
-                        c.loanNumber.toLowerCase().contains(_search) ||
-                        c.mobileNumber.contains(_search)).toList();
+                    : customers
+                          .where(
+                            (c) =>
+                                c.customerName.toLowerCase().contains(
+                                  _search,
+                                ) ||
+                                c.loanNumber.toLowerCase().contains(_search) ||
+                                c.mobileNumber.contains(_search),
+                          )
+                          .toList();
 
                 if (filtered.isEmpty) {
-                  return const Center(child: Text('No customers assigned today.'));
+                  return const Center(
+                    child: Text('No customers assigned today.'),
+                  );
                 }
 
                 return RefreshIndicator(
@@ -108,7 +137,8 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
                   child: ListView.builder(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     itemCount: filtered.length,
-                    itemBuilder: (ctx, i) => _CustomerCard(customer: filtered[i]),
+                    itemBuilder: (ctx, i) =>
+                        _CustomerCard(customer: filtered[i]),
                   ),
                 );
               },
@@ -125,8 +155,14 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('Log out?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Log out')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Log out'),
+          ),
         ],
       ),
     );
@@ -153,14 +189,20 @@ class _SyncBanner extends ConsumerWidget {
 
     return Container(
       width: double.infinity,
-      color: q.lastError != null ? const Color(0xFFFDECEA) : const Color(0xFFFFF7E6),
+      color: q.lastError != null
+          ? const Color(0xFFFDECEA)
+          : const Color(0xFFFFF7E6),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       child: Row(
         children: [
           Icon(
-            q.lastError != null ? Icons.error_outline : Icons.cloud_upload_outlined,
+            q.lastError != null
+                ? Icons.error_outline
+                : Icons.cloud_upload_outlined,
             size: 16,
-            color: q.lastError != null ? Colors.red.shade700 : Colors.orange.shade800,
+            color: q.lastError != null
+                ? Colors.red.shade700
+                : Colors.orange.shade800,
           ),
           const SizedBox(width: 8),
           Expanded(
@@ -171,13 +213,16 @@ class _SyncBanner extends ConsumerWidget {
                       : '${q.pending} action(s) waiting to sync'),
               style: TextStyle(
                 fontSize: 12,
-                color: q.lastError != null ? Colors.red.shade700 : Colors.orange.shade900,
+                color: q.lastError != null
+                    ? Colors.red.shade700
+                    : Colors.orange.shade900,
               ),
             ),
           ),
           if (q.lastError != null)
             TextButton(
-              onPressed: () => ref.read(offlineQueueProvider.notifier).clearError(),
+              onPressed: () =>
+                  ref.read(offlineQueueProvider.notifier).clearError(),
               child: const Text('Dismiss', style: TextStyle(fontSize: 12)),
             )
           else if (!q.syncing)
@@ -223,17 +268,24 @@ class _DutyBanner extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      onDuty ? 'On duty — location tracking active' : 'Off duty',
+                      onDuty
+                          ? 'On duty — location tracking active'
+                          : 'Off duty',
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.bold,
-                        color: onDuty ? Colors.green.shade800 : Colors.grey.shade800,
+                        color: onDuty
+                            ? Colors.green.shade800
+                            : Colors.grey.shade800,
                       ),
                     ),
                     if (onDuty && att.punchInAt != null)
                       Text(
                         'Punched in at ${DateFormat('HH:mm').format(att.punchInAt!.toLocal())}',
-                        style: TextStyle(fontSize: 11, color: Colors.green.shade700),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.green.shade700,
+                        ),
                       ),
                   ],
                 ),
@@ -244,15 +296,19 @@ class _DutyBanner extends ConsumerWidget {
                     ? const Padding(
                         padding: EdgeInsets.symmetric(horizontal: 16),
                         child: SizedBox(
-                          width: 18, height: 18,
+                          width: 18,
+                          height: 18,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         ),
                       )
                     : ElevatedButton(
-                        onPressed: onDuty ? notifier.punchOut : notifier.punchIn,
+                        onPressed: onDuty
+                            ? notifier.punchOut
+                            : notifier.punchIn,
                         style: ElevatedButton.styleFrom(
-                          backgroundColor:
-                              onDuty ? Colors.red.shade700 : const Color(0xFF00535B),
+                          backgroundColor: onDuty
+                              ? Colors.red.shade700
+                              : const Color(0xFF00535B),
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(horizontal: 16),
                         ),
@@ -264,8 +320,10 @@ class _DutyBanner extends ConsumerWidget {
           if (att.error != null)
             Padding(
               padding: const EdgeInsets.only(top: 4),
-              child: Text(att.error!,
-                  style: const TextStyle(fontSize: 12, color: Colors.red)),
+              child: Text(
+                att.error!,
+                style: const TextStyle(fontSize: 12, color: Colors.red),
+              ),
             ),
         ],
       ),
@@ -280,7 +338,9 @@ class _CustomerCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasPtp = customer.ptpDate != null;
-    final ptpDue = hasPtp && customer.ptpDate!.isBefore(DateTime.now().add(const Duration(days: 1)));
+    final ptpDue =
+        hasPtp &&
+        customer.ptpDate!.isBefore(DateTime.now().add(const Duration(days: 1)));
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
@@ -302,25 +362,41 @@ class _CustomerCard extends StatelessWidget {
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('${customer.loanNumber} · ${customer.companyName}', style: const TextStyle(fontSize: 12)),
+            Text(
+              '${customer.loanNumber} · ${customer.companyName}',
+              style: const TextStyle(fontSize: 12),
+            ),
             if (customer.dueAmount != null)
               Text(
                 'Due: ${_rupee.format(customer.dueAmount)}',
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             if (customer.lastResultCode != null)
-              Text('Last: ${customer.lastResultCode}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+              Text(
+                'Last: ${customer.lastResultCode}',
+                style: const TextStyle(fontSize: 11, color: Colors.grey),
+              ),
             if (hasPtp)
               Text(
                 'PTP: ${_rupee.format(customer.ptpAmount)} on ${DateFormat('dd MMM').format(customer.ptpDate!)}',
-                style: TextStyle(fontSize: 11, color: ptpDue ? Colors.orange : Colors.green),
+                style: TextStyle(
+                  fontSize: 11,
+                  color: ptpDue ? Colors.orange : Colors.green,
+                ),
               ),
             if (customer.normalizedPending)
               const Padding(
                 padding: EdgeInsets.only(top: 2),
                 child: Text(
                   'Normalized this month (pending lender confirmation)',
-                  style: TextStyle(fontSize: 10, color: Colors.blue, fontWeight: FontWeight.w600),
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: Colors.blue,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
           ],

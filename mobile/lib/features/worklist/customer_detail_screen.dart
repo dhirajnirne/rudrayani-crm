@@ -6,8 +6,13 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/api/api_client.dart';
 import '../../core/models/customer.dart';
+import '../reminders/reminder_sheet.dart';
 
-final _rupee = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
+final _rupee = NumberFormat.currency(
+  locale: 'en_IN',
+  symbol: '₹',
+  decimalDigits: 0,
+);
 
 class CustomerDetailScreen extends ConsumerWidget {
   final Customer customer;
@@ -20,9 +25,9 @@ class CustomerDetailScreen extends ConsumerWidget {
       await launchUrl(uri);
     } else {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Cannot open dialer')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Cannot open dialer')));
       }
     }
   }
@@ -53,9 +58,9 @@ class CustomerDetailScreen extends ConsumerWidget {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     } catch (_) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No maps app available')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('No maps app available')));
       }
     }
   }
@@ -76,7 +81,10 @@ class CustomerDetailScreen extends ConsumerWidget {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, reasonCtrl.text.trim()),
             child: const Text('Submit'),
@@ -87,10 +95,12 @@ class CustomerDetailScreen extends ConsumerWidget {
     if (reason == null || reason.length < 3) return;
 
     try {
-      await ref.read(apiClientProvider).post('/reallocation-requests', data: {
-        'customer_id': customer.id,
-        'reason': reason,
-      });
+      await ref
+          .read(apiClientProvider)
+          .post(
+            '/reallocation-requests',
+            data: {'customer_id': customer.id, 'reason': reason},
+          );
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -104,8 +114,9 @@ class CustomerDetailScreen extends ConsumerWidget {
         final msg = e.response?.statusCode == 409
             ? 'A request is already pending for this customer'
             : 'Could not send the request — check your connection';
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(msg), backgroundColor: Colors.red),
+        );
       }
     }
   }
@@ -201,8 +212,11 @@ class CustomerDetailScreen extends ConsumerWidget {
                   child: OutlinedButton.icon(
                     icon: const Icon(Icons.assignment_turned_in),
                     label: const Text('Field Visit'),
-                    onPressed: () => context.push('/field-visit', extra: customer),
-                    style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
+                    onPressed: () =>
+                        context.push('/field-visit', extra: customer),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(0, 48),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -211,16 +225,39 @@ class CustomerDetailScreen extends ConsumerWidget {
                     icon: const Icon(Icons.directions),
                     label: const Text('Navigate'),
                     onPressed: () => _navigate(context),
-                    style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(0, 48),
+                    ),
                   ),
                 ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.notifications_active_outlined),
+                    label: const Text('Set Reminder'),
+                    onPressed: () =>
+                        showReminderSheet(context, ref, customer: customer),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(0, 48),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Expanded(child: SizedBox()),
               ],
             ),
             const SizedBox(height: 16),
             if (customer.normalizedPending)
               Container(
                 margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.blue.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(8),
@@ -240,32 +277,56 @@ class CustomerDetailScreen extends ConsumerWidget {
                 ),
               ),
             // Loan details card
-            _SectionCard(title: 'Loan Details', children: [
-              _Row('Loan Number', customer.loanNumber),
-              _Row('Company', customer.companyName),
-              if (customer.product != null) _Row('Product', customer.product!),
-              if (customer.bucket != null) _Row('Bucket', customer.bucket!),
-              if (customer.dueAmount != null) _Row('Due Amount', _rupee.format(customer.dueAmount)),
-              if (customer.emi != null) _Row('EMI', _rupee.format(customer.emi)),
-            ]),
+            _SectionCard(
+              title: 'Loan Details',
+              children: [
+                _Row('Loan Number', customer.loanNumber),
+                _Row('Company', customer.companyName),
+                if (customer.product != null)
+                  _Row('Product', customer.product!),
+                if (customer.bucket != null) _Row('Bucket', customer.bucket!),
+                if (customer.dueAmount != null)
+                  _Row('Due Amount', _rupee.format(customer.dueAmount)),
+                if (customer.emi != null)
+                  _Row('EMI', _rupee.format(customer.emi)),
+              ],
+            ),
             const SizedBox(height: 12),
             // Last disposition
             if (customer.lastRemark != null)
-              _SectionCard(title: 'Last Disposition', children: [
-                if (customer.lastResultCode != null) _Row('Result', customer.lastResultCode!),
-                if (customer.lastCallAt != null)
-                  _Row('When', DateFormat('dd MMM yyyy HH:mm').format(customer.lastCallAt!.toLocal())),
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Text(customer.lastRemark!, style: const TextStyle(fontSize: 13)),
-                ),
-              ]),
+              _SectionCard(
+                title: 'Last Disposition',
+                children: [
+                  if (customer.lastResultCode != null)
+                    _Row('Result', customer.lastResultCode!),
+                  if (customer.lastCallAt != null)
+                    _Row(
+                      'When',
+                      DateFormat(
+                        'dd MMM yyyy HH:mm',
+                      ).format(customer.lastCallAt!.toLocal()),
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Text(
+                      customer.lastRemark!,
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
             // PTP reminder
             if (customer.ptpDate != null)
-              _SectionCard(title: 'Active PTP', children: [
-                _Row('Amount', _rupee.format(customer.ptpAmount)),
-                _Row('Promised Date', DateFormat('dd MMM yyyy').format(customer.ptpDate!)),
-              ]),
+              _SectionCard(
+                title: 'Active PTP',
+                children: [
+                  _Row('Amount', _rupee.format(customer.ptpAmount)),
+                  _Row(
+                    'Promised Date',
+                    DateFormat('dd MMM yyyy').format(customer.ptpDate!),
+                  ),
+                ],
+              ),
             // Custom fields
             if (customer.customFields.isNotEmpty)
               _SectionCard(
@@ -289,19 +350,26 @@ class _SectionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Card(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF00535B))),
-              const Divider(),
-              ...children,
-            ],
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+    child: Padding(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+              color: Color(0xFF00535B),
+            ),
           ),
-        ),
-      );
+          const Divider(),
+          ...children,
+        ],
+      ),
+    ),
+  );
 }
 
 class _Row extends StatelessWidget {
@@ -311,16 +379,19 @@ class _Row extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 2),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: 120,
-              child: Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)),
-            ),
-            Expanded(child: Text(value, style: const TextStyle(fontSize: 13))),
-          ],
+    padding: const EdgeInsets.symmetric(vertical: 2),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 120,
+          child: Text(
+            label,
+            style: const TextStyle(color: Colors.grey, fontSize: 12),
+          ),
         ),
-      );
+        Expanded(child: Text(value, style: const TextStyle(fontSize: 13))),
+      ],
+    ),
+  );
 }

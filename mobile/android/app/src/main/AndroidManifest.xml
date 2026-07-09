@@ -12,6 +12,14 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
+    <!-- Reminder notifications (Android 13+ requires this runtime grant;
+         requested from NotificationService.requestPermission()). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- flutter_local_notifications: exact alarms are NOT requested (we use
+         inexactAllowWhileIdle), but these two let a scheduled notification
+         survive a reboot / be received at all. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <uses-permission android:name="android.permission.VIBRATE"/>
 
     <application
         android:label="rudrayani_mobile"
