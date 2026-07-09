@@ -122,6 +122,16 @@ beforeAll(async () => {
      VALUES ($1, $2, '2026-07-01', '30', 10000, 500)`,
     [custAssignedId, companyId],
   );
+  await pool.query(
+    `INSERT INTO field_visits (customer_id, agent_id, remark, photo_url)
+     VALUES ($1, $2, 'Visited residence, met spouse', 'visits/fake-key.jpg')`,
+    [custAssignedId, agentId],
+  );
+  await pool.query(
+    `INSERT INTO attachments (agency_id, customer_id, uploaded_by, kind, file_key, file_name, mime_type, size_bytes)
+     VALUES ($1, $2, $3, 'document', 'attachments/fake-key.pdf', 'agreement.pdf', 'application/pdf', 1024)`,
+    [agencyId, custAssignedId, agentId],
+  );
 
   const [adminLogin, tlLogin, agentLogin] = await Promise.all([
     request(app).post("/api/auth/login").send({ phone: ADMIN_PHONE, password: PASSWORD }),
@@ -134,6 +144,14 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await pool.query(
+    `DELETE FROM attachments WHERE customer_id IN (SELECT id FROM customers WHERE company_id = $1)`,
+    [companyId],
+  );
+  await pool.query(
+    `DELETE FROM field_visits WHERE customer_id IN (SELECT id FROM customers WHERE company_id = $1)`,
+    [companyId],
+  );
   await pool.query(`DELETE FROM customer_month_snapshots WHERE company_id = $1`, [companyId]);
   await pool.query(
     `DELETE FROM allocation_logs WHERE customer_id IN (SELECT id FROM customers WHERE company_id = $1)`,
@@ -214,6 +232,16 @@ describe("customer 360 view: shape and history", () => {
     expect(res.body.snapshots[0].bucket).toBe("30");
 
     expect(res.body.bucket_movements).toEqual([]); // none recorded yet (Task 7.5)
+
+    expect(res.body.field_visits).toHaveLength(1);
+    expect(res.body.field_visits[0].remark).toBe("Visited residence, met spouse");
+    expect(res.body.field_visits[0].has_photo).toBe(true);
+    expect(res.body.field_visits[0].agent_name).toBe("Detail Agent");
+
+    expect(res.body.attachments).toHaveLength(1);
+    expect(res.body.attachments[0].file_name).toBe("agreement.pdf");
+    expect(res.body.attachments[0].kind).toBe("document");
+    expect(res.body.attachments[0].uploaded_by_name).toBe("Detail Agent");
   });
 
   it("a customer with no history returns empty arrays, not an error", async () => {
@@ -226,6 +254,8 @@ describe("customer 360 view: shape and history", () => {
     expect(res.body.payments).toEqual([]);
     expect(res.body.allocation_history).toEqual([]);
     expect(res.body.snapshots).toEqual([]);
+    expect(res.body.field_visits).toEqual([]);
+    expect(res.body.attachments).toEqual([]);
   });
 
   it("a nonexistent or cross-agency customer id is a 404", async () => {
