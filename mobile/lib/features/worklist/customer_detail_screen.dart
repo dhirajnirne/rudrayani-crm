@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/api/api_client.dart';
 import '../../core/models/customer.dart';
+import '../attachments/attachments_section.dart';
 import '../reminders/reminder_sheet.dart';
 
 final _rupee = NumberFormat.currency(
@@ -336,6 +337,8 @@ class CustomerDetailScreen extends ConsumerWidget {
                     _Row(e.key, e.value?.toString() ?? '—'),
                 ],
               ),
+            const SizedBox(height: 12),
+            AttachmentsSection(customerId: customer.id),
           ],
         ),
       ),

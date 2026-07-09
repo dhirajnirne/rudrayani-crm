@@ -16,7 +16,8 @@ import '../api/api_client.dart';
 /// half-synced queue can always be flushed again safely.
 class QueuedAction {
   final String clientKey;
-  final String type; // 'call_log' | 'payment' | 'field_visit' | 'reminder'
+  final String
+  type; // 'call_log' | 'payment' | 'field_visit' | 'reminder' | 'attachment'
   final Map<String, dynamic> payload;
   final String? photoPath; // durable copy for queued payments/visits
   final DateTime createdAt;
@@ -154,6 +155,16 @@ class OfflineQueueNotifier extends StateNotifier<OfflineQueueState> {
             await api.postForm('/field-visits', form);
           } else if (item.type == 'reminder') {
             await api.post('/reminders', data: item.payload);
+          } else if (item.type == 'attachment') {
+            final form = FormData.fromMap({
+              ...item.payload,
+              if (item.photoPath != null && File(item.photoPath!).existsSync())
+                'file': await MultipartFile.fromFile(
+                  item.photoPath!,
+                  filename: 'photo.jpg',
+                ),
+            });
+            await api.postForm('/attachments', form);
           }
         } on DioException catch (e) {
           if (_isOffline(e)) return; // still offline — keep the rest queued
@@ -163,6 +174,7 @@ class OfflineQueueNotifier extends StateNotifier<OfflineQueueState> {
             'payment' => 'Payment',
             'field_visit' => 'Field visit',
             'reminder' => 'Reminder',
+            'attachment' => 'Document',
             _ => 'Call log',
           };
           rejection =
