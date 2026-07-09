@@ -13,6 +13,7 @@ import callLogRoutes from "./routes/call-logs";
 import catalogRoutes from "./routes/catalog";
 import companyRoutes from "./routes/companies";
 import customerRoutes from "./routes/customers";
+import dayPlanRoutes from "./routes/day-plan";
 import dispositionRoutes from "./routes/dispositions";
 import employeeRoutes from "./routes/employees";
 import fieldVisitRoutes from "./routes/field-visits";
@@ -63,6 +64,7 @@ export function createApp() {
   app.use("/api/attendance", attendanceRoutes);
   app.use("/api/location", locationRoutes);
   app.use("/api/tracking", trackingRoutes);
+  app.use("/api/day-plan", dayPlanRoutes);
   app.use("/api/field-visits", fieldVisitRoutes);
   app.use("/api/reallocation-requests", reallocationRequestRoutes);
   app.use("/api/reminders", reminderRoutes);
