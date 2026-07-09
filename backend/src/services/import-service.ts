@@ -554,8 +554,8 @@ export async function commitImport(params: {
       const inserted = await client.query(
         `INSERT INTO customers
            (company_id, loan_number, customer_name, mobile_number, product, bucket,
-            due_amount, emi, due_date, custom_fields, assigned_agent_id, assigned_team_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+            due_amount, emi, due_date, custom_fields, assigned_agent_id, assigned_team_id, import_run_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
          ON CONFLICT (company_id, loan_number) DO NOTHING
          RETURNING id`,
         [
@@ -571,6 +571,7 @@ export async function commitImport(params: {
           JSON.stringify(row.custom_fields),
           agent?.id ?? null,
           agent?.team_id ?? null,
+          mode === "new" ? runId : null,
         ],
       );
       if (inserted.rows[0]) {

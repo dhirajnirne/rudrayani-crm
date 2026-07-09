@@ -42,6 +42,10 @@ export default function EmployeesPage() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [filterBranch, setFilterBranch] = useState<string | undefined>();
+  const [filterTeam, setFilterTeam] = useState<string | undefined>();
+  const [filterCapability, setFilterCapability] = useState<string | undefined>();
+  const [filterStatus, setFilterStatus] = useState<"active" | "inactive" | undefined>();
   const [editing, setEditing] = useState<Employee | "new" | null>(null);
   const [resettingFor, setResettingFor] = useState<Employee | null>(null);
   const [form] = Form.useForm<EmployeeFormValues>();
@@ -55,6 +59,17 @@ export default function EmployeesPage() {
         .map((t) => ({ value: t.id, label: `${t.name} (${t.branch_name ?? ""})` })),
     [teams, selectedBranch],
   );
+
+  const filteredEmployees = useMemo(() => {
+    return employees.filter((e) => {
+      if (filterBranch && e.branch_id !== filterBranch) return false;
+      if (filterTeam && e.team_id !== filterTeam) return false;
+      if (filterCapability && !e.capabilities.includes(filterCapability as never)) return false;
+      if (filterStatus === "active" && !e.is_active) return false;
+      if (filterStatus === "inactive" && e.is_active) return false;
+      return true;
+    });
+  }, [employees, filterBranch, filterTeam, filterCapability, filterStatus]);
 
   const load = useCallback(async (q?: string) => {
     setLoading(true);
@@ -155,7 +170,7 @@ export default function EmployeesPage() {
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
         <Typography.Title level={3} style={{ margin: 0 }}>
           Employees
         </Typography.Title>
@@ -176,10 +191,54 @@ export default function EmployeesPage() {
           )}
         </Space>
       </div>
+      <Space wrap style={{ marginBottom: 16 }}>
+        <Select
+          style={{ width: 160 }}
+          placeholder="All branches"
+          allowClear
+          value={filterBranch}
+          onChange={(v) => { setFilterBranch(v ?? undefined); setFilterTeam(undefined); }}
+          options={branches.map((b) => ({ value: b.id, label: b.name }))}
+        />
+        <Select
+          style={{ width: 160 }}
+          placeholder="All teams"
+          allowClear
+          value={filterTeam}
+          onChange={(v) => setFilterTeam(v ?? undefined)}
+          options={teams
+            .filter((t) => !filterBranch || t.branch_id === filterBranch)
+            .map((t) => ({ value: t.id, label: t.name }))}
+        />
+        <Select
+          style={{ width: 160 }}
+          placeholder="All capabilities"
+          allowClear
+          value={filterCapability}
+          onChange={(v) => setFilterCapability(v ?? undefined)}
+          options={[
+            { value: "telecaller", label: "Telecaller" },
+            { value: "field_agent", label: "Field Agent" },
+            { value: "team_leader", label: "Team Leader" },
+            { value: "operations_manager", label: "Ops Manager" },
+          ]}
+        />
+        <Select
+          style={{ width: 140 }}
+          placeholder="All statuses"
+          allowClear
+          value={filterStatus}
+          onChange={(v) => setFilterStatus(v ?? undefined)}
+          options={[
+            { value: "active", label: "Active" },
+            { value: "inactive", label: "Deactivated" },
+          ]}
+        />
+      </Space>
       <Table
         rowKey="id"
         loading={loading}
-        dataSource={employees}
+        dataSource={filteredEmployees}
         columns={[
           { title: "Name", dataIndex: "full_name" },
           { title: "Phone", dataIndex: "phone" },

@@ -8,6 +8,7 @@ import {
   Descriptions,
   Form,
   Input,
+  Popconfirm,
   Radio,
   Row,
   Select,
@@ -17,6 +18,7 @@ import {
   Table,
   Tag,
   Tabs,
+  Tooltip,
   Typography,
   Upload,
   message,
@@ -24,6 +26,7 @@ import {
 import {
   CheckCircleOutlined,
   CloudUploadOutlined,
+  DeleteOutlined,
   FileExcelOutlined,
   HistoryOutlined,
   InboxOutlined,
@@ -33,6 +36,7 @@ import type { Dayjs } from "dayjs";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, errorMessage } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
 import type { Company, ImportRun, ImportTemplate } from "../types";
 
 const SYSTEM_FIELDS = [
@@ -845,10 +849,26 @@ function ImportWizard() {
 // ──────────────────────────────────────────────────────────────────────────────
 
 function ImportHistory() {
+  const { hasPermission } = useAuth();
+  const canDelete = hasPermission("imports.manage");
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [runs, setRuns] = useState<ImportRun[]>([]);
   const [loading, setLoading] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
+
+  const deleteRun = async (runId: string) => {
+    setDeleting(runId);
+    try {
+      await api.delete(`/imports/runs/${runId}`);
+      message.success("Import run deleted");
+      setRuns((prev) => prev.map((r) => r.id === runId ? { ...r, deleted_at: new Date().toISOString() } : r));
+    } catch (err) {
+      message.error(errorMessage(err));
+    } finally {
+      setDeleting(null);
+    }
+  };
 
   useEffect(() => {
     api.get("/companies").then((r) => setCompanies(r.data.companies));
@@ -923,10 +943,42 @@ function ImportHistory() {
             key: "status",
             width: 110,
             render: (_, r: ImportRun) => {
+              if (r.deleted_at) return <Tag color="error">Deleted</Tag>;
               if (r.inserted_rows === 0 && r.error_rows === 0)
                 return <Tag color="default">All dupes</Tag>;
               if (r.error_rows === 0) return <Tag color="success">Clean</Tag>;
               return <Tag color="warning">Partial</Tag>;
+            },
+          },
+          {
+            title: "",
+            key: "actions",
+            width: 80,
+            render: (_, r: ImportRun) => {
+              if (!canDelete || r.deleted_at) return null;
+              if (r.mode !== "new") {
+                return (
+                  <Tooltip title="Only new-mode imports can be deleted">
+                    <Button size="small" danger icon={<DeleteOutlined />} disabled />
+                  </Tooltip>
+                );
+              }
+              return (
+                <Popconfirm
+                  title="Delete this import run?"
+                  description="This will remove all customers from this run that haven't been assigned or worked. This cannot be undone."
+                  onConfirm={() => deleteRun(r.id)}
+                  okText="Delete"
+                  okButtonProps={{ danger: true }}
+                >
+                  <Button
+                    size="small"
+                    danger
+                    icon={<DeleteOutlined />}
+                    loading={deleting === r.id}
+                  />
+                </Popconfirm>
+              );
             },
           },
         ]}

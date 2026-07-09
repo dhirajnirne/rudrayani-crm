@@ -7,6 +7,7 @@ import { errorHandler, notFoundHandler } from "./middleware/error-handler";
 import allocationRoutes from "./routes/allocations";
 import attachmentRoutes from "./routes/attachments";
 import attendanceRoutes from "./routes/attendance";
+import attendanceRecordRoutes from "./routes/attendance-records";
 import authRoutes from "./routes/auth";
 import branchRoutes from "./routes/branches";
 import bucketRoutes from "./routes/buckets";
@@ -63,6 +64,7 @@ export function createApp() {
   app.use("/api/ptps", ptpRoutes);
   app.use("/api/payments", paymentRoutes);
   app.use("/api/attendance", attendanceRoutes);
+  app.use("/api/attendance-records", attendanceRecordRoutes);
   app.use("/api/location", locationRoutes);
   app.use("/api/tracking", trackingRoutes);
   app.use("/api/day-plan", dayPlanRoutes);

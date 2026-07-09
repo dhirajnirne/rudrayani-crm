@@ -13,6 +13,7 @@ import {
   FileSearchOutlined,
   FileSyncOutlined,
   LogoutOutlined,
+  ScheduleOutlined,
   ShopOutlined,
   TeamOutlined,
   UnorderedListOutlined,
@@ -98,6 +99,11 @@ export default function AppLayout() {
       key: "/day-plan",
       icon: <CalendarOutlined />,
       label: <Link to="/day-plan">Day Plan</Link>,
+    },
+    hasPermission("tracking.view") && {
+      key: "/attendance",
+      icon: <ScheduleOutlined />,
+      label: <Link to="/attendance">Attendance</Link>,
     },
     hasPermission("targets.manage") && {
       key: "/targets",

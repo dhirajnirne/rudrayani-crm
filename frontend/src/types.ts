@@ -54,6 +54,7 @@ export interface ImportTemplate {
 export interface ImportRun {
   id: string;
   company_id: string;
+  mode: "new" | "allocation";
   template_id: string | null;
   template_name: string | null;
   file_name: string | null;
@@ -62,6 +63,7 @@ export interface ImportRun {
   duplicate_rows: number;
   error_rows: number;
   created_at: string;
+  deleted_at: string | null;
 }
 
 export interface DispositionCode {
