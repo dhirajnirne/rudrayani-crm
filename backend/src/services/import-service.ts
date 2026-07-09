@@ -15,11 +15,14 @@ export const SYSTEM_FIELDS = [
   "emi",
   "emi_due_date", // this cycle's EMI due date -- drives the independent DPD cross-check (Phase 7)
   "agent_phone", // assigns the loan to the agent with this phone (optional)
+  "address",     // stored in custom_fields.address (no native column)
 ] as const;
 export type SystemField = (typeof SYSTEM_FIELDS)[number];
 const REQUIRED_FIELDS: SystemField[] = ["loan_number", "customer_name"];
 const NUMERIC_FIELDS: SystemField[] = ["due_amount", "emi"];
 const DATE_FIELDS: SystemField[] = ["emi_due_date"];
+// Fields that route into custom_fields rather than a native customers column.
+const CUSTOM_FIELDS_PASSTHROUGH: SystemField[] = ["address"];
 
 /** {"Excel Column Header": "system_field"} — unmapped headers go to custom_fields. */
 export type ColumnMapping = Record<string, SystemField>;
@@ -173,22 +176,24 @@ export async function validateRows(
 
     for (const [column, field] of Object.entries(mapping)) {
       const raw = record[column] ?? "";
-      if (NUMERIC_FIELDS.includes(field)) {
+      if (CUSTOM_FIELDS_PASSTHROUGH.includes(field as SystemField)) {
+        if (raw) mapped.custom_fields[field] = raw;
+      } else if (NUMERIC_FIELDS.includes(field)) {
         const amount = parseAmount(raw);
         if (amount === "invalid") {
           problems.push(`"${column}" has a non-numeric value: "${raw}"`);
         } else {
-          mapped[field] = amount as never;
+          (mapped as Record<string, unknown>)[field] = amount;
         }
       } else if (DATE_FIELDS.includes(field)) {
         const date = parseDueDate(raw);
         if (date === "invalid") {
           problems.push(`"${column}" has an unrecognized date value: "${raw}"`);
         } else {
-          mapped[field] = date as never;
+          (mapped as Record<string, unknown>)[field] = date;
         }
       } else {
-        mapped[field] = (raw || null) as never;
+        (mapped as Record<string, unknown>)[field] = raw || null;
       }
     }
     for (const column of unmappedColumns) {
@@ -196,7 +201,7 @@ export async function validateRows(
     }
 
     for (const required of REQUIRED_FIELDS) {
-      if (!mapped[required]) problems.push(`Missing required field "${required}"`);
+      if (!(mapped as Record<string, unknown>)[required]) problems.push(`Missing required field "${required}"`);
     }
 
     const loanNumber = mapped.loan_number;

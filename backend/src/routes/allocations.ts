@@ -124,9 +124,76 @@ router.post(
       for (const c of custRes.rows) {
         if (c.assigned_agent_id === body.agent_id) continue; // no-op move, don't log
         await client.query(
-          `INSERT INTO allocation_logs (customer_id, from_agent_id, to_agent_id, allocated_by, reason)
-           VALUES ($1, $2, $3, $4, $5)`,
+          `INSERT INTO allocation_logs (customer_id, from_agent_id, to_agent_id, allocated_by, reason, slot)
+           VALUES ($1, $2, $3, $4, $5, 'primary')`,
           [c.id, c.assigned_agent_id, body.agent_id, req.user!.id, body.reason ?? null],
+        );
+      }
+
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    res.json({
+      assigned: body.customer_ids.length,
+      agent_id: body.agent_id,
+      agent_name: agent.full_name,
+    });
+  }),
+);
+
+/** Assign a field agent (secondary slot) to already-allocated customers. */
+router.post(
+  "/assign-field-agent",
+  asyncHandler(async (req, res) => {
+    const body = assignBody.parse(req.body);
+    const agencyId = req.user!.agency_id;
+
+    const agentRes = await pool.query(
+      `SELECT id, team_id, full_name FROM users
+        WHERE id = $1 AND agency_id = $2 AND is_active = true AND is_field_agent = true`,
+      [body.agent_id, agencyId],
+    );
+    const agent = agentRes.rows[0];
+    if (!agent) throw new HttpError(404, "Agent not found (must be an active field agent in this agency)");
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      const custRes = await client.query(
+        `SELECT c.id, c.assigned_field_agent_id FROM customers c
+           JOIN companies co ON co.id = c.company_id
+          WHERE c.id = ANY($1) AND co.agency_id = $2 AND c.status = 'active'
+          FOR UPDATE OF c`,
+        [body.customer_ids, agencyId],
+      );
+      if (custRes.rows.length !== body.customer_ids.length) {
+        throw new HttpError(404, "One or more customers not found (or already closed) in this agency");
+      }
+
+      const reallocations = custRes.rows.filter(
+        (c) => c.assigned_field_agent_id && c.assigned_field_agent_id !== body.agent_id,
+      );
+      if (reallocations.length > 0 && !body.reason) {
+        throw new HttpError(400, `${reallocations.length} customer(s) already have a field agent — provide a reason to reassign`);
+      }
+
+      await client.query(
+        `UPDATE customers SET assigned_field_agent_id = $1 WHERE id = ANY($2)`,
+        [body.agent_id, body.customer_ids],
+      );
+
+      for (const c of custRes.rows) {
+        if (c.assigned_field_agent_id === body.agent_id) continue;
+        await client.query(
+          `INSERT INTO allocation_logs (customer_id, from_agent_id, to_agent_id, allocated_by, reason, slot)
+           VALUES ($1, $2, $3, $4, $5, 'field')`,
+          [c.id, c.assigned_field_agent_id, body.agent_id, req.user!.id, body.reason ?? null],
         );
       }
 
@@ -152,7 +219,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const customerId = z.string().uuid().parse(req.query.customer_id);
     const { rows } = await pool.query(
-      `SELECT al.id, al.reason, al.created_at,
+      `SELECT al.id, al.reason, al.created_at, al.slot,
               f.full_name AS from_agent_name,
               t.full_name AS to_agent_name,
               b.full_name AS allocated_by_name

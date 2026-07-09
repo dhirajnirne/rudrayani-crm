@@ -586,12 +586,16 @@ export async function dashboard(
       ),
     },
     collection: {
-      mtd_amount: agg.collected_amount,
+      // Use deposits.collected (paymentConditions-based) — attributes to whoever
+      // recorded the payment, not to the allocated agent (classifiedCtes bug).
+      mtd_amount: deposits.collected,
       target_amount: collectionTarget.target_amount,
-      target_pct: pct(agg.collected_amount, collectionTarget.target_amount),
-      run_rate_current: days.elapsed > 0 ? agg.collected_amount / days.elapsed : null,
+      target_pct: pct(deposits.collected, collectionTarget.target_amount),
+      run_rate_current: days.elapsed > 0 ? deposits.collected / days.elapsed : null,
       run_rate_required:
-        collectionRemaining != null && days.left > 0 ? collectionRemaining / days.left : null,
+        collectionTarget.target_amount != null
+          ? (Math.max(collectionTarget.target_amount - deposits.collected, 0) / Math.max(days.left, 1))
+          : null,
     },
     deposits,
     trail: {
@@ -674,6 +678,27 @@ export async function agentBreakdown(
     params,
   );
 
+  // Separately query collected amounts by who actually recorded the payment
+  // (paymentConditions uses p.collected_by_user_id, unlike classifiedCtes which uses allocated agent).
+  const payParams: unknown[] = [user.agency_id, filters.month];
+  const payConditions = paymentConditions(filters, payParams);
+  const payWhere = payConditions.length > 0 ? `AND ${payConditions.join(" AND ")}` : "";
+  const { rows: collectedRows } = await pool.query(
+    `SELECT p.collected_by_user_id AS agent_id, SUM(p.amount)::float AS collected_amount
+       FROM payments p
+       JOIN customers c ON c.id = p.customer_id
+       JOIN companies co ON co.id = c.company_id AND co.agency_id = $1
+       JOIN users cu ON cu.id = p.collected_by_user_id
+      WHERE p.paid_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Kolkata')
+        AND p.paid_at < ((($2::date + interval '1 month')::date)::timestamp AT TIME ZONE 'Asia/Kolkata')
+        ${payWhere}
+      GROUP BY 1`,
+    payParams,
+  );
+  const collectedByAgent = new Map<string, number>(
+    collectedRows.map((r) => [r.agent_id as string, r.collected_amount as number]),
+  );
+
   const result: AgentReportRow[] = [];
   for (const row of rows) {
     const { rows: users } = await pool.query(
@@ -685,20 +710,21 @@ export async function agentBreakdown(
       ...filters,
       agent_id: row.agent_id as string,
     });
+    const actualCollected = collectedByAgent.get(row.agent_id as string) ?? 0;
     result.push({
       agent_id: row.agent_id,
       full_name: users[0]?.full_name ?? "—",
       team_name: users[0]?.team_name ?? null,
       allocated_amount: row.allocated_amount,
       allocated_count: row.allocated_count,
-      collected_amount: row.collected_amount,
+      collected_amount: actualCollected,
       resolution_amount: row.resolution_amount,
       rollback_amount: row.rollback_amount,
       normalization_amount: row.normalization_amount,
       recovery_amount: row.recovery_amount,
       trail_count: row.trail_count,
       target_amount: target.target_amount,
-      achievement_pct: pct(row.collected_amount, target.target_amount),
+      achievement_pct: pct(actualCollected, target.target_amount),
     });
   }
   result.sort((a, b) => b.collected_amount - a.collected_amount);
@@ -766,6 +792,38 @@ export async function dimensionBreakdown(
     params,
   );
 
+  // Separately sum collected amounts by who actually recorded the payment,
+  // grouped by the same dimension (org dimensions use the collector's own branch/team,
+  // not the book's allocated team — a deliberate semantic shift for accurate credit).
+  const DIM_PAYMENT_GROUP: Record<BreakdownDimension, string> = {
+    agent:   "p.collected_by_user_id",
+    team:    "cu.team_id",
+    branch:  "cu.branch_id",
+    company: "c.company_id",
+    product: "c.product",
+    bucket:  "c.bucket",
+  };
+  const payParams: unknown[] = [user.agency_id, filters.month];
+  const payConditions = paymentConditions(filters, payParams);
+  const payWhere = payConditions.length > 0 ? `AND ${payConditions.join(" AND ")}` : "";
+  const dimPayGroup = DIM_PAYMENT_GROUP[dimension];
+  const { rows: collectedRows } = await pool.query(
+    `SELECT ${dimPayGroup} AS key, SUM(p.amount)::float AS collected_amount
+       FROM payments p
+       JOIN customers c ON c.id = p.customer_id
+       JOIN companies co ON co.id = c.company_id AND co.agency_id = $1
+       JOIN users cu ON cu.id = p.collected_by_user_id
+      WHERE p.paid_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Kolkata')
+        AND p.paid_at < ((($2::date + interval '1 month')::date)::timestamp AT TIME ZONE 'Asia/Kolkata')
+        AND ${dimPayGroup} IS NOT NULL
+        ${payWhere}
+      GROUP BY 1`,
+    payParams,
+  );
+  const collectedByDim = new Map<string, number>(
+    collectedRows.map((r) => [r.key as string, r.collected_amount as number]),
+  );
+
   const isOrgDimension =
     dimension === "company" || dimension === "branch" || dimension === "team" || dimension === "agent";
   const result: BreakdownRow[] = [];
@@ -779,12 +837,13 @@ export async function dimensionBreakdown(
       if (dimension === "agent") scopeFilter.agent_id = row.key;
       target = await resolveTarget(user.agency_id, "collection", scopeFilter);
     }
+    const actualCollected = collectedByDim.get(row.key as string) ?? 0;
     result.push({
       key: row.key,
       label: row.label ?? "—",
       allocated_amount: row.allocated_amount,
       allocated_count: row.allocated_count,
-      collected_amount: row.collected_amount,
+      collected_amount: actualCollected,
       resolution_amount: row.resolution_amount,
       resolution_pct: pct(row.resolution_amount, row.allocated_amount),
       rollback_amount: row.rollback_amount,
@@ -795,7 +854,7 @@ export async function dimensionBreakdown(
       recovery_pct: pct(row.recovery_amount, row.recovery_allocated_amount),
       trail_pct: pct(row.trail_count, row.allocated_count),
       target_amount: target.target_amount,
-      achievement_pct: pct(row.collected_amount, target.target_amount),
+      achievement_pct: pct(actualCollected, target.target_amount),
     });
   }
   return result;

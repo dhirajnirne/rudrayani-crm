@@ -250,9 +250,9 @@ export default function EmployeesPage() {
           <Form.Item
             name="phone"
             label="Phone (login ID)"
-            rules={[{ required: true, pattern: /^\d{8,15}$/, message: "Digits only, 8–15" }]}
+            rules={[{ required: true, pattern: /^\d{10}$/, message: "Exactly 10 digits" }]}
           >
-            <Input disabled={editing !== "new"} maxLength={15} />
+            <Input disabled={editing !== "new"} addonBefore="+91" maxLength={10} />
           </Form.Item>
           <Form.Item name="email" label="Email (optional)" rules={[{ type: "email" }]}>
             <Input />

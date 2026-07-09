@@ -92,6 +92,8 @@ export interface Customer {
   status: "active" | "closed" | "recalled";
   assigned_agent_id: string | null;
   assigned_agent_name: string | null;
+  assigned_field_agent_id: string | null;
+  assigned_field_agent_name: string | null;
   custom_fields: Record<string, unknown>;
   created_at: string;
   company_name: string;
@@ -102,6 +104,7 @@ export interface AllocationLog {
   id: string;
   reason: string | null;
   created_at: string;
+  slot: "primary" | "field";
   from_agent_name: string | null;
   to_agent_name: string;
   allocated_by_name: string;

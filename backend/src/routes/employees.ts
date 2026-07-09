@@ -22,7 +22,7 @@ const capabilitySchema = z.object({
 
 const createSchema = z.object({
   full_name: z.string().trim().min(1).max(200),
-  phone: z.string().min(8).max(15).regex(/^\d+$/, "Phone must be digits only"),
+  phone: z.string().length(10).regex(/^\d{10}$/, "Phone must be exactly 10 digits"),
   email: z.string().email().optional().nullable(),
   password: z.string().min(8),
   branch_id: z.string().uuid().optional().nullable(),

@@ -38,14 +38,17 @@ import type { Company, ImportRun, ImportTemplate } from "../types";
 const SYSTEM_FIELDS = [
   { value: "loan_number", label: "Loan Number (required)" },
   { value: "customer_name", label: "Customer Name (required)" },
-  { value: "mobile_number", label: "Mobile Number" },
-  { value: "product", label: "Product" },
-  { value: "bucket", label: "Bucket" },
-  { value: "due_amount", label: "Due Amount / POS" },
-  { value: "emi", label: "EMI Amount" },
-  { value: "emi_due_date", label: "EMI Due Date (for the DPD cross-check)" },
-  { value: "agent_phone", label: "Agent Phone (assigns the loan)" },
+  { value: "mobile_number", label: "Mobile Number (recommended)" },
+  { value: "product", label: "Product (recommended)" },
+  { value: "bucket", label: "Bucket (recommended)" },
+  { value: "due_amount", label: "Due Amount / POS (recommended)" },
+  { value: "emi", label: "EMI Amount (recommended)" },
+  { value: "emi_due_date", label: "EMI Due Date (recommended)" },
+  { value: "agent_phone", label: "Agent Phone — assigns the loan (recommended)" },
+  { value: "address", label: "Address" },
 ];
+
+const RECOMMENDED_FIELDS = ["mobile_number", "product", "bucket", "due_amount", "emi", "emi_due_date", "agent_phone"];
 
 interface DiffSample {
   loan_number: string;
@@ -102,7 +105,7 @@ function ImportWizard() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [file, setFile] = useState<RcFile | null>(null);
-  const [mode, setMode] = useState<"new" | "allocation">("new");
+  const [mode, setMode] = useState<"new" | "allocation">("allocation");
   const [allocationMonth, setAllocationMonth] = useState<Dayjs | null>(null);
 
   // Step 1
@@ -345,13 +348,24 @@ function ImportWizard() {
     mapped: mapping[col] ?? "",
   }));
 
-  const renderStep1 = () => (
+  const renderStep1 = () => {
+    const mappedValues = Object.values(mapping);
+    const missingRecommended = RECOMMENDED_FIELDS.filter((f) => !mappedValues.includes(f));
+    return (
     <Space direction="vertical" style={{ width: "100%" }} size="large">
       <Alert
         type="info"
         showIcon
         message={`${fileName} — ${rowCount} data rows, ${detectedColumns.length} columns detected`}
       />
+      {missingRecommended.length > 0 && (
+        <Alert
+          type="warning"
+          showIcon
+          message="Some recommended fields are not mapped"
+          description={`Not mapped: ${missingRecommended.map((f) => SYSTEM_FIELDS.find((s) => s.value === f)?.label?.replace(" (recommended)", "")).join(", ")}. You can still proceed — these will be skipped.`}
+        />
+      )}
 
       {/* Load existing template */}
       {templates.length > 0 && (
@@ -455,7 +469,8 @@ function ImportWizard() {
         </Button>
       </Space>
     </Space>
-  );
+    );
+  };
 
   const diffSampleColumns = [
     { title: "Loan Number", dataIndex: "loan_number" },

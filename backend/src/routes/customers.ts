@@ -111,9 +111,13 @@ router.get(
     const id = z.string().uuid().parse(req.params.id);
 
     const { rows: customerRows } = await pool.query(
-      `SELECT c.*, co.name AS company_name, co.id AS company_id_check
+      `SELECT c.*, co.name AS company_name, co.id AS company_id_check,
+              ua.full_name AS assigned_agent_name,
+              uf.full_name AS assigned_field_agent_name
          FROM customers c
          JOIN companies co ON co.id = c.company_id
+         LEFT JOIN users ua ON ua.id = c.assigned_agent_id
+         LEFT JOIN users uf ON uf.id = c.assigned_field_agent_id
         WHERE c.id = $1 AND co.agency_id = $2`,
       [id, req.user!.agency_id],
     );
@@ -124,7 +128,11 @@ router.get(
       capabilitiesOf(req.user!),
       "customers.allocate",
     );
-    if (!canSeeAnyCustomer && customer.assigned_agent_id !== req.user!.id) {
+    if (
+      !canSeeAnyCustomer &&
+      customer.assigned_agent_id !== req.user!.id &&
+      customer.assigned_field_agent_id !== req.user!.id
+    ) {
       throw new HttpError(404, "Customer not found");
     }
 
@@ -174,7 +182,7 @@ router.get(
           [id],
         ),
         pool.query(
-          `SELECT al.id, al.reason, al.created_at,
+          `SELECT al.id, al.reason, al.created_at, al.slot,
                   fu.full_name AS from_agent_name, tu.full_name AS to_agent_name,
                   bu.full_name AS allocated_by_name
              FROM allocation_logs al
