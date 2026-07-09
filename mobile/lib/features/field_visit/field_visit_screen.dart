@@ -1,7 +1,8 @@
-import 'dart:io';
+﻿import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import '../../../core/theme/app_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
@@ -119,7 +120,7 @@ class _FieldVisitScreenState extends ConsumerState<FieldVisitScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: const Color(0xFF00535B),
+        backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         title: Text('Field Visit — ${widget.customer.customerName}'),
       ),
@@ -190,7 +191,7 @@ class _FieldVisitScreenState extends ConsumerState<FieldVisitScreen> {
                 label: Text(_loading ? 'Saving…' : 'Save Visit'),
                 onPressed: _loading ? null : _submit,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF00535B),
+                  backgroundColor: AppColors.primary,
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),

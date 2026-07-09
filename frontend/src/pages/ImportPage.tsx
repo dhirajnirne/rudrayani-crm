@@ -8,6 +8,7 @@ import {
   Descriptions,
   Form,
   Input,
+  Popconfirm,
   Radio,
   Row,
   Select,
@@ -17,6 +18,7 @@ import {
   Table,
   Tag,
   Tabs,
+  Tooltip,
   Typography,
   Upload,
   message,
@@ -24,6 +26,7 @@ import {
 import {
   CheckCircleOutlined,
   CloudUploadOutlined,
+  DeleteOutlined,
   FileExcelOutlined,
   HistoryOutlined,
   InboxOutlined,
@@ -33,19 +36,23 @@ import type { Dayjs } from "dayjs";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, errorMessage } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
 import type { Company, ImportRun, ImportTemplate } from "../types";
 
 const SYSTEM_FIELDS = [
   { value: "loan_number", label: "Loan Number (required)" },
   { value: "customer_name", label: "Customer Name (required)" },
-  { value: "mobile_number", label: "Mobile Number" },
-  { value: "product", label: "Product" },
-  { value: "bucket", label: "Bucket" },
-  { value: "due_amount", label: "Due Amount / POS" },
-  { value: "emi", label: "EMI Amount" },
-  { value: "emi_due_date", label: "EMI Due Date (for the DPD cross-check)" },
-  { value: "agent_phone", label: "Agent Phone (assigns the loan)" },
+  { value: "mobile_number", label: "Mobile Number (recommended)" },
+  { value: "product", label: "Product (recommended)" },
+  { value: "bucket", label: "Bucket (recommended)" },
+  { value: "due_amount", label: "Due Amount / POS (recommended)" },
+  { value: "emi", label: "EMI Amount (recommended)" },
+  { value: "emi_due_date", label: "EMI Due Date (recommended)" },
+  { value: "agent_phone", label: "Agent Phone — assigns the loan (recommended)" },
+  { value: "address", label: "Address" },
 ];
+
+const RECOMMENDED_FIELDS = ["mobile_number", "product", "bucket", "due_amount", "emi", "emi_due_date", "agent_phone"];
 
 interface DiffSample {
   loan_number: string;
@@ -102,7 +109,7 @@ function ImportWizard() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [file, setFile] = useState<RcFile | null>(null);
-  const [mode, setMode] = useState<"new" | "allocation">("new");
+  const [mode, setMode] = useState<"new" | "allocation">("allocation");
   const [allocationMonth, setAllocationMonth] = useState<Dayjs | null>(null);
 
   // Step 1
@@ -345,13 +352,24 @@ function ImportWizard() {
     mapped: mapping[col] ?? "",
   }));
 
-  const renderStep1 = () => (
+  const renderStep1 = () => {
+    const mappedValues = Object.values(mapping);
+    const missingRecommended = RECOMMENDED_FIELDS.filter((f) => !mappedValues.includes(f));
+    return (
     <Space direction="vertical" style={{ width: "100%" }} size="large">
       <Alert
         type="info"
         showIcon
         message={`${fileName} — ${rowCount} data rows, ${detectedColumns.length} columns detected`}
       />
+      {missingRecommended.length > 0 && (
+        <Alert
+          type="warning"
+          showIcon
+          message="Some recommended fields are not mapped"
+          description={`Not mapped: ${missingRecommended.map((f) => SYSTEM_FIELDS.find((s) => s.value === f)?.label?.replace(" (recommended)", "")).join(", ")}. You can still proceed — these will be skipped.`}
+        />
+      )}
 
       {/* Load existing template */}
       {templates.length > 0 && (
@@ -455,7 +473,8 @@ function ImportWizard() {
         </Button>
       </Space>
     </Space>
-  );
+    );
+  };
 
   const diffSampleColumns = [
     { title: "Loan Number", dataIndex: "loan_number" },
@@ -830,10 +849,26 @@ function ImportWizard() {
 // ──────────────────────────────────────────────────────────────────────────────
 
 function ImportHistory() {
+  const { hasPermission } = useAuth();
+  const canDelete = hasPermission("imports.manage");
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [runs, setRuns] = useState<ImportRun[]>([]);
   const [loading, setLoading] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
+
+  const deleteRun = async (runId: string) => {
+    setDeleting(runId);
+    try {
+      await api.delete(`/imports/runs/${runId}`);
+      message.success("Import run deleted");
+      setRuns((prev) => prev.map((r) => r.id === runId ? { ...r, deleted_at: new Date().toISOString() } : r));
+    } catch (err) {
+      message.error(errorMessage(err));
+    } finally {
+      setDeleting(null);
+    }
+  };
 
   useEffect(() => {
     api.get("/companies").then((r) => setCompanies(r.data.companies));
@@ -908,10 +943,42 @@ function ImportHistory() {
             key: "status",
             width: 110,
             render: (_, r: ImportRun) => {
+              if (r.deleted_at) return <Tag color="error">Deleted</Tag>;
               if (r.inserted_rows === 0 && r.error_rows === 0)
                 return <Tag color="default">All dupes</Tag>;
               if (r.error_rows === 0) return <Tag color="success">Clean</Tag>;
               return <Tag color="warning">Partial</Tag>;
+            },
+          },
+          {
+            title: "",
+            key: "actions",
+            width: 80,
+            render: (_, r: ImportRun) => {
+              if (!canDelete || r.deleted_at) return null;
+              if (r.mode !== "new") {
+                return (
+                  <Tooltip title="Only new-mode imports can be deleted">
+                    <Button size="small" danger icon={<DeleteOutlined />} disabled />
+                  </Tooltip>
+                );
+              }
+              return (
+                <Popconfirm
+                  title="Delete this import run?"
+                  description="This will remove all customers from this run that haven't been assigned or worked. This cannot be undone."
+                  onConfirm={() => deleteRun(r.id)}
+                  okText="Delete"
+                  okButtonProps={{ danger: true }}
+                >
+                  <Button
+                    size="small"
+                    danger
+                    icon={<DeleteOutlined />}
+                    loading={deleting === r.id}
+                  />
+                </Popconfirm>
+              );
             },
           },
         ]}

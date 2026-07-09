@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/api/api_client.dart';
 import '../../core/auth/auth_provider.dart';
+import '../../core/theme/app_theme.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -145,7 +146,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     Container(
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF00535B),
+                        color: AppColors.primary,
                         borderRadius: BorderRadius.circular(16),
                       ),
                       child: const Icon(
@@ -225,7 +226,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 child: ElevatedButton(
                                   onPressed: _loading ? null : _submit,
                                   style: ElevatedButton.styleFrom(
-                                    backgroundColor: const Color(0xFF00535B),
+                                    backgroundColor: AppColors.primary,
                                     foregroundColor: Colors.white,
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(8),

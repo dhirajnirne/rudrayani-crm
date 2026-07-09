@@ -59,11 +59,32 @@ const baseColumns = [
   },
 ];
 
+interface Branch { id: string; name: string }
+interface Team { id: string; name: string; branch_id: string }
+
+function useBranchTeam() {
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [branchId, setBranchId] = useState<string | null>(null);
+  const [teamId, setTeamId] = useState<string | null>(null);
+  useEffect(() => {
+    Promise.all([api.get("/branches"), api.get("/teams")]).then(([br, tm]) => {
+      setBranches(br.data.branches);
+      setTeams(tm.data.teams);
+    });
+  }, []);
+  const teamOptions = teams.filter((t) => !branchId || t.branch_id === branchId);
+  return { branches, teams: teamOptions, branchId, setBranchId, teamId, setTeamId };
+}
+
 /** Agents a TL can allocate to: active users who work customers. */
-function useAssignableAgents() {
+function useAssignableAgents(branchId: string | null, teamId: string | null) {
   const [agents, setAgents] = useState<Employee[]>([]);
   useEffect(() => {
-    api.get("/employees").then((res) => {
+    const params: Record<string, string> = {};
+    if (branchId) params.branch_id = branchId;
+    if (teamId) params.team_id = teamId;
+    api.get("/employees", { params }).then((res) => {
       setAgents(
         (res.data.employees as Employee[]).filter(
           (e) =>
@@ -74,7 +95,7 @@ function useAssignableAgents() {
         ),
       );
     });
-  }, []);
+  }, [branchId, teamId]);
   return agents;
 }
 
@@ -110,46 +131,74 @@ function useCompanyFilters() {
   return { companies, companyId, setCompanyId, products, buckets, product, setProduct, bucket, setBucket };
 }
 
-function FilterRow(props: ReturnType<typeof useCompanyFilters>) {
+function FilterRow({
+  filters,
+  branchTeam,
+  agentPickerLabel,
+}: {
+  filters: ReturnType<typeof useCompanyFilters>;
+  branchTeam: ReturnType<typeof useBranchTeam>;
+  agentPickerLabel?: string;
+}) {
   return (
     <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
-      <Col xs={24} sm={10}>
+      <Col xs={24} sm={8}>
         <Select
           style={{ width: "100%" }}
           placeholder="All companies"
           allowClear
-          value={props.companyId}
+          value={filters.companyId}
           onChange={(v) => {
-            props.setCompanyId(v ?? null);
-            props.setProduct(null);
-            props.setBucket(null);
+            filters.setCompanyId(v ?? null);
+            filters.setProduct(null);
+            filters.setBucket(null);
           }}
-          options={props.companies.map((c) => ({ value: c.id, label: c.name }))}
+          options={filters.companies.map((c) => ({ value: c.id, label: c.name }))}
         />
       </Col>
-      <Col xs={12} sm={7}>
+      <Col xs={12} sm={5}>
         <Select
           style={{ width: "100%" }}
           placeholder="All products"
           allowClear
-          value={props.product}
-          onChange={(v) => props.setProduct(v ?? null)}
-          disabled={!props.companyId}
-          options={props.products.map((p) => ({
+          value={filters.product}
+          onChange={(v) => filters.setProduct(v ?? null)}
+          disabled={!filters.companyId}
+          options={filters.products.map((p) => ({
             value: p.raw_label,
             label: p.canonical_label || p.raw_label,
           }))}
         />
       </Col>
-      <Col xs={12} sm={7}>
+      <Col xs={12} sm={5}>
         <Select
           style={{ width: "100%" }}
           placeholder="All buckets"
           allowClear
-          value={props.bucket}
-          onChange={(v) => props.setBucket(v ?? null)}
-          disabled={!props.companyId}
-          options={props.buckets.map((b) => ({ value: b, label: b }))}
+          value={filters.bucket}
+          onChange={(v) => filters.setBucket(v ?? null)}
+          disabled={!filters.companyId}
+          options={filters.buckets.map((b) => ({ value: b, label: b }))}
+        />
+      </Col>
+      <Col xs={12} sm={3}>
+        <Select
+          style={{ width: "100%" }}
+          placeholder={agentPickerLabel ? "Branch (agent filter)" : "All branches"}
+          allowClear
+          value={branchTeam.branchId}
+          onChange={(v) => { branchTeam.setBranchId(v ?? null); branchTeam.setTeamId(null); }}
+          options={branchTeam.branches.map((b) => ({ value: b.id, label: b.name }))}
+        />
+      </Col>
+      <Col xs={12} sm={3}>
+        <Select
+          style={{ width: "100%" }}
+          placeholder={agentPickerLabel ? "Team (agent filter)" : "All teams"}
+          allowClear
+          value={branchTeam.teamId}
+          onChange={(v) => branchTeam.setTeamId(v ?? null)}
+          options={branchTeam.teams.map((t) => ({ value: t.id, label: t.name }))}
         />
       </Col>
     </Row>
@@ -162,7 +211,8 @@ function FilterRow(props: ReturnType<typeof useCompanyFilters>) {
 
 function UnallocatedQueue() {
   const filters = useCompanyFilters();
-  const agents = useAssignableAgents();
+  const branchTeam = useBranchTeam();
+  const agents = useAssignableAgents(branchTeam.branchId, branchTeam.teamId);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -214,7 +264,10 @@ function UnallocatedQueue() {
 
   return (
     <div>
-      <FilterRow {...filters} />
+      <FilterRow filters={filters} branchTeam={branchTeam} agentPickerLabel="Narrows agent picker" />
+      <Typography.Text type="secondary" style={{ display: "block", marginBottom: 12, fontSize: 12 }}>
+        Branch / Team filters narrow the agent selector below — not the customer table (unallocated customers have no team yet).
+      </Typography.Text>
 
       {selected.length > 0 && (
         <Alert
@@ -276,7 +329,8 @@ function UnallocatedQueue() {
 
 function AllocatedList() {
   const filters = useCompanyFilters();
-  const agents = useAssignableAgents();
+  const branchTeam = useBranchTeam();
+  const agents = useAssignableAgents(null, null);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -306,6 +360,8 @@ function AllocatedList() {
         if (filters.companyId) params.company_id = filters.companyId;
         if (filters.product) params.product = filters.product;
         if (filters.bucket) params.bucket = filters.bucket;
+        if (branchTeam.branchId) params.branch_id = branchTeam.branchId;
+        if (branchTeam.teamId) params.team_id = branchTeam.teamId;
         const res = await api.get("/customers", { params });
         setCustomers(res.data.customers);
         setTotal(res.data.total);
@@ -315,7 +371,7 @@ function AllocatedList() {
         setLoading(false);
       }
     },
-    [filters.companyId, filters.product, filters.bucket],
+    [filters.companyId, filters.product, filters.bucket, branchTeam.branchId, branchTeam.teamId],
   );
 
   useEffect(() => {
@@ -380,7 +436,7 @@ function AllocatedList() {
 
   return (
     <div>
-      <FilterRow {...filters} />
+      <FilterRow filters={filters} branchTeam={branchTeam} />
 
       {selected.length > 0 && (
         <Alert
@@ -474,6 +530,9 @@ function AllocatedList() {
               children: (
                 <div>
                   <div>
+                    <Tag color={log.slot === "field" ? "purple" : "default"}>
+                      {log.slot === "field" ? "Field Agent" : "Telecaller"}
+                    </Tag>
                     {log.from_agent_name ? (
                       <>
                         <Tag>{log.from_agent_name}</Tag>→<Tag color="blue">{log.to_agent_name}</Tag>

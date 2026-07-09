@@ -1,7 +1,8 @@
-import 'dart:io';
+﻿import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import '../../../core/theme/app_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
@@ -119,7 +120,7 @@ class _AttachmentsSectionState extends ConsumerState<AttachmentsSection> {
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 14,
-                    color: Color(0xFF00535B),
+                    color: AppColors.primary,
                   ),
                 ),
                 if (_uploading)
@@ -158,7 +159,7 @@ class _AttachmentsSectionState extends ConsumerState<AttachmentsSection> {
                             isPhoto
                                 ? Icons.image_outlined
                                 : Icons.picture_as_pdf_outlined,
-                            color: const Color(0xFF00535B),
+                            color: AppColors.primary,
                           ),
                           title: Text(
                             a['file_name'] as String,

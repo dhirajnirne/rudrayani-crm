@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/auth/auth_provider.dart';
+import '../../core/theme/app_theme.dart';
 import '../performance/performance_screen.dart';
+import '../reminders/today_section.dart';
 import '../team/team_screen.dart';
 import '../worklist/worklist_screen.dart';
 
@@ -42,11 +44,17 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     ];
 
     return Scaffold(
-      body: IndexedStack(index: _tab, children: screens),
+      body: Column(
+        children: [
+          // "Today's Actions" hero — always visible above the tab content
+          const TodaySection(heroMode: true),
+          Expanded(child: IndexedStack(index: _tab, children: screens)),
+        ],
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
         onDestinationSelected: (i) => setState(() => _tab = i),
-        indicatorColor: const Color(0xFF00535B).withValues(alpha: 0.15),
+        indicatorColor: AppColors.primary.withValues(alpha: 0.15),
         destinations: destinations,
       ),
     );

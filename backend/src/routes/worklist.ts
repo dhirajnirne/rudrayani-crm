@@ -18,6 +18,8 @@ router.get(
       `SELECT c.id, c.loan_number, c.customer_name, c.mobile_number,
               c.product, c.bucket, c.due_amount, c.emi, c.custom_fields,
               co.name AS company_name,
+              (c.assigned_agent_id = $1) AS is_primary_for_me,
+              (c.assigned_field_agent_id = $1) AS is_field_agent_for_me,
               lc.remark AS last_remark,
               lc.created_at AS last_call_at,
               ld.result_code AS last_result_code,
@@ -46,7 +48,7 @@ router.get(
                    AND m.month = date_trunc('month', now())
               ) AS normalized_pending
          ) bm ON true
-        WHERE c.assigned_agent_id = $1 AND c.status = 'active'
+        WHERE (c.assigned_agent_id = $1 OR c.assigned_field_agent_id = $1) AND c.status = 'active'
         ORDER BY pp.promised_date ASC NULLS LAST, c.due_amount DESC NULLS LAST`,
       [req.user!.id],
     );

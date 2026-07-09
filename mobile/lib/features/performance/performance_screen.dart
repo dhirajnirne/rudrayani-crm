@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
+import '../../core/theme/app_theme.dart';
 
 /// "My Performance" (Phase 5): the same /reports/dashboard endpoint as the
 /// web — the server clamps the scope to the signed-in user, so this shows
@@ -40,8 +41,6 @@ class PerformanceScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: const Color(0xFF00535B),
-        foregroundColor: Colors.white,
         title: Text('My Performance (${DateFormat('MMM yyyy').format(DateTime.now())})'),
         actions: [
           IconButton(
@@ -91,8 +90,8 @@ class _PerformanceBody extends StatelessWidget {
       children: [
         // Collection vs target — the headline card
         Card(
-          color: const Color(0xFF00423F),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          color: AppColors.primaryDark,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.xl)),
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -118,7 +117,7 @@ class _PerformanceBody extends StatelessWidget {
                 Text(
                   '₹ ${_lakh(mtd)}',
                   style: const TextStyle(
-                      color: Color(0xFF35D431), fontSize: 32, fontWeight: FontWeight.bold),
+                      color: AppColors.success, fontSize: 32, fontWeight: FontWeight.bold),
                 ),
                 Text(
                   target != null
@@ -134,7 +133,7 @@ class _PerformanceBody extends StatelessWidget {
                       value: progress,
                       minHeight: 10,
                       backgroundColor: Colors.white.withValues(alpha: 0.15),
-                      valueColor: const AlwaysStoppedAnimation(Color(0xFF35D431)),
+                      valueColor: const AlwaysStoppedAnimation(AppColors.success),
                     ),
                   ),
                   const SizedBox(height: 6),
@@ -178,7 +177,7 @@ class _PerformanceBody extends StatelessWidget {
           padding: EdgeInsets.symmetric(vertical: 4),
           child: Text('Metrics',
               style: TextStyle(
-                  fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF00535B))),
+                  fontWeight: FontWeight.bold, fontSize: 14, color: AppColors.primary)),
         ),
         for (final entry in _metricTitles.entries)
           _MetricRow(
@@ -199,16 +198,15 @@ class _StatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(AppSpacing.md),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-            const SizedBox(height: 4),
+            Text(label, style: const TextStyle(fontSize: 12, color: AppColors.textTertiary)),
+            const SizedBox(height: AppSpacing.xs),
             Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            Text(sub, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+            Text(sub, style: const TextStyle(fontSize: 12, color: AppColors.textTertiary)),
           ],
         ),
       ),
@@ -231,10 +229,9 @@ class _MetricRow extends StatelessWidget {
         : null;
 
     return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(AppSpacing.md),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -246,7 +243,7 @@ class _MetricRow extends StatelessWidget {
                     style: const TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.bold,
-                        color: Color(0xFF00535B))),
+                        color: AppColors.primary)),
               ],
             ),
             const SizedBox(height: 4),
@@ -263,8 +260,8 @@ class _MetricRow extends StatelessWidget {
                 child: LinearProgressIndicator(
                   value: progress,
                   minHeight: 6,
-                  backgroundColor: const Color(0xFFE8ECEA),
-                  valueColor: const AlwaysStoppedAnimation(Color(0xFF00535B)),
+                  backgroundColor: AppColors.primarySurface,
+                  valueColor: const AlwaysStoppedAnimation(AppColors.primary),
                 ),
               ),
             ],

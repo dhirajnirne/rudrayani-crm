@@ -255,4 +255,81 @@ router.get(
   }),
 );
 
+/**
+ * Delete a new-mode import run and all the customers it created, provided
+ * none of those customers have been assigned an agent or worked (payments,
+ * call logs, PTPs). Marks the run record as deleted rather than removing it.
+ */
+router.delete(
+  "/runs/:id",
+  asyncHandler(async (req, res) => {
+    const runId = z.string().uuid().parse(req.params.id);
+
+    const runRow = await pool.query(
+      `SELECT r.id, r.mode, r.company_id FROM import_runs r
+        JOIN companies c ON c.id = r.company_id
+       WHERE r.id = $1 AND c.agency_id = $2 AND r.deleted_at IS NULL`,
+      [runId, req.user!.agency_id],
+    );
+    if (!runRow.rows[0]) throw new HttpError(404, "Import run not found");
+    if (runRow.rows[0].mode !== "new") {
+      throw new HttpError(400, "Only new-mode import runs can be deleted");
+    }
+
+    const worked = await pool.query(
+      `SELECT 1 FROM customers c
+        WHERE c.import_run_id = $1
+          AND (c.assigned_agent_id IS NOT NULL
+            OR c.assigned_field_agent_id IS NOT NULL
+            OR EXISTS (SELECT 1 FROM payments p WHERE p.customer_id = c.id)
+            OR EXISTS (SELECT 1 FROM call_logs cl WHERE cl.customer_id = c.id)
+            OR EXISTS (SELECT 1 FROM ptps pt WHERE pt.customer_id = c.id))
+        LIMIT 1`,
+      [runId],
+    );
+    if (worked.rows.length > 0) {
+      throw new HttpError(
+        400,
+        "Cannot delete: some customers from this run have been assigned or worked. Recall them first.",
+      );
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      // delete dependents before customers (FK order)
+      await client.query(
+        `DELETE FROM import_review_items WHERE import_run_id = $1`,
+        [runId],
+      );
+      await client.query(
+        `DELETE FROM customer_month_snapshots WHERE customer_id IN
+           (SELECT id FROM customers WHERE import_run_id = $1)`,
+        [runId],
+      );
+      await client.query(
+        `DELETE FROM allocation_logs WHERE customer_id IN
+           (SELECT id FROM customers WHERE import_run_id = $1)`,
+        [runId],
+      );
+      await client.query(
+        `DELETE FROM customers WHERE import_run_id = $1`,
+        [runId],
+      );
+      await client.query(
+        `UPDATE import_runs SET deleted_at = now() WHERE id = $1`,
+        [runId],
+      );
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    res.status(204).end();
+  }),
+);
+
 export default router;

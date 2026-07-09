@@ -10,6 +10,7 @@ import LoginPage from "./pages/LoginPage";
 // touch a handful of them (role-gated in AppLayout's nav) -- bundling all 15+
 // admin pages into the initial load would bloat the login screen for no reason.
 const AllocationPage = lazy(() => import("./pages/AllocationPage"));
+const AttendancePage = lazy(() => import("./pages/AttendancePage"));
 const BranchesPage = lazy(() => import("./pages/BranchesPage"));
 const BucketsPage = lazy(() => import("./pages/BucketsPage"));
 const CompaniesPage = lazy(() => import("./pages/CompaniesPage"));
@@ -68,6 +69,7 @@ export default function App() {
         <Route path="day-plan" element={<DayPlanPage />} />
         <Route path="targets" element={<TargetsPage />} />
         <Route path="deposits" element={<DepositsPage />} />
+        <Route path="attendance" element={<AttendancePage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

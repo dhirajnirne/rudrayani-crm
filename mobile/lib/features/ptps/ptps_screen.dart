@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
+import '../../../core/theme/app_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
@@ -29,7 +30,7 @@ class PtpsScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: const Color(0xFF00535B),
+        backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         title: Text('PTPs — ${customer.customerName}'),
         actions: [

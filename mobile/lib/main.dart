@@ -4,6 +4,7 @@ import 'core/api/api_client.dart';
 import 'core/auth/auth_provider.dart';
 import 'core/notifications/notification_service.dart';
 import 'core/router.dart';
+import 'core/theme/app_theme.dart';
 import 'core/tracking/tracking_service.dart';
 import 'features/reminders/reminders_provider.dart';
 
@@ -52,16 +53,7 @@ class _RudrayaniAppState extends ConsumerState<RudrayaniApp> {
     return MaterialApp.router(
       title: 'Rudrayani CRM',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF00535B),
-          primary: const Color(0xFF00535B),
-        ),
-        useMaterial3: true,
-        inputDecorationTheme: const InputDecorationTheme(
-          border: OutlineInputBorder(),
-        ),
-      ),
+      theme: buildAppTheme(),
       routerConfig: router,
     );
   }
