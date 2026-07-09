@@ -21,6 +21,9 @@ router.get(
         status: z.enum(["active", "closed", "recalled"]).optional(),
         assigned: z.enum(["true", "false"]).optional(),
         agent_id: z.string().uuid().optional(),
+        field_agent_id: z.string().uuid().optional(),
+        branch_id: z.string().uuid().optional(),
+        team_id: z.string().uuid().optional(),
         q: z.string().optional(),
         page: z.coerce.number().int().min(1).default(1),
         limit: z.coerce.number().int().min(1).max(200).default(50),
@@ -51,6 +54,18 @@ router.get(
     if (q.agent_id) {
       params.push(q.agent_id);
       conditions.push(`c.assigned_agent_id = $${params.length}`);
+    }
+    if (q.field_agent_id) {
+      params.push(q.field_agent_id);
+      conditions.push(`c.assigned_field_agent_id = $${params.length}`);
+    }
+    if (q.team_id) {
+      params.push(q.team_id);
+      conditions.push(`c.assigned_team_id = $${params.length}`);
+    }
+    if (q.branch_id) {
+      params.push(q.branch_id);
+      conditions.push(`EXISTS (SELECT 1 FROM teams tm WHERE tm.id = c.assigned_team_id AND tm.branch_id = $${params.length})`);
     }
     if (q.q) {
       params.push(`%${q.q}%`);

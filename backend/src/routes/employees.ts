@@ -101,13 +101,15 @@ router.get(
   asyncHandler(async (req, res) => {
     const q = (req.query.q as string | undefined)?.trim();
     const branchId = req.query.branch_id as string | undefined;
+    const teamId = req.query.team_id as string | undefined;
     const { rows } = await pool.query<UserRow>(
       `SELECT u.* FROM users u
         WHERE u.agency_id = $1
           AND ($2::uuid IS NULL OR u.branch_id = $2)
-          AND ($3::text IS NULL OR u.full_name ILIKE '%' || $3 || '%' OR u.phone LIKE $3 || '%')
+          AND ($3::uuid IS NULL OR u.team_id = $3)
+          AND ($4::text IS NULL OR u.full_name ILIKE '%' || $4 || '%' OR u.phone LIKE $4 || '%')
         ORDER BY u.full_name`,
-      [req.user!.agency_id, branchId ?? null, q || null],
+      [req.user!.agency_id, branchId ?? null, teamId ?? null, q || null],
     );
     res.json({
       employees: rows.map((u) => ({ ...publicUser(u), is_active: u.is_active })),
