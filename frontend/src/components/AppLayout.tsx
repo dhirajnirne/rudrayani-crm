@@ -4,6 +4,7 @@ import {
   ApartmentOutlined,
   AuditOutlined,
   BankOutlined,
+  CalendarOutlined,
   DashboardOutlined,
   AimOutlined,
   EnvironmentOutlined,
@@ -92,6 +93,11 @@ export default function AppLayout() {
       key: "/tracking",
       icon: <EnvironmentOutlined />,
       label: <Link to="/tracking">Tracking</Link>,
+    },
+    hasPermission("tracking.view") && {
+      key: "/day-plan",
+      icon: <CalendarOutlined />,
+      label: <Link to="/day-plan">Day Plan</Link>,
     },
     hasPermission("targets.manage") && {
       key: "/targets",
