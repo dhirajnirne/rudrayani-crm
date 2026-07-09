@@ -266,6 +266,39 @@ describe("Task 3.2 — worklist, dispositions, PTP", () => {
     expect(res.body.ptps[0].agent_name).toBe("Flow Agent");
   });
 
+  it("GET /ptps lists a customer's PTPs; owning agent and TL can both see it", async () => {
+    const asAgent = await request(app)
+      .get(`/api/ptps?customer_id=${customerIds[0]}`)
+      .set("Authorization", `Bearer ${agentToken}`);
+    expect(asAgent.status).toBe(200);
+    expect(asAgent.body.total).toBe(1);
+    expect(asAgent.body.ptps[0].loan_number).toBe("WF-001");
+    expect(asAgent.body.ptps[0].status).toBe("pending");
+
+    const asTl = await request(app)
+      .get(`/api/ptps?customer_id=${customerIds[0]}`)
+      .set("Authorization", `Bearer ${tlToken}`);
+    expect(asTl.status).toBe(200);
+    expect(asTl.body.total).toBe(1);
+  });
+
+  it("GET /ptps clamps a non-allocate agent to their own/assigned customers", async () => {
+    // customerIds[1] belongs to agent2, not agentToken's user
+    const res = await request(app)
+      .get(`/api/ptps?customer_id=${customerIds[1]}`)
+      .set("Authorization", `Bearer ${agentToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.total).toBe(0);
+  });
+
+  it("GET /ptps?status= filters by status", async () => {
+    const res = await request(app)
+      .get(`/api/ptps?customer_id=${customerIds[0]}&status=kept`)
+      .set("Authorization", `Bearer ${agentToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.total).toBe(0);
+  });
+
   it("call history is visible for the customer", async () => {
     const res = await request(app)
       .get(`/api/call-logs?customer_id=${customerIds[0]}`)

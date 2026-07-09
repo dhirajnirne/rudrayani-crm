@@ -85,13 +85,35 @@ check `seed_admin.ts` for the expected flow, or insert one manually:
 
 ## 5. Mobile app (Android)
 
-The mobile app currently defaults to `http://10.0.2.2:4000` (Android emulator
-loopback) for local dev. Point a release build at production instead:
+The mobile app picks its backend URL with this precedence:
+1. A server-address override saved on the device (tap the gear icon, top
+   right of the login screen) -- lets you point an already-installed build
+   at a different backend without rebuilding.
+2. `--dart-define=API_URL=...` passed at build time.
+3. A build-mode default: debug builds use `http://10.0.2.2:4000` (Android
+   emulator loopback), release builds use the production backend URL baked
+   into `mobile/lib/core/api/api_client.dart` (`_releaseDefaultUrl`).
+
+For a normal release build the default is already correct -- no flags
+needed:
 
 ```bash
 cd mobile
-flutter build apk --release --dart-define=API_URL=https://<your-render-service>.onrender.com
+flutter build apk --release
 ```
+
+Only pass `--dart-define=API_URL=...` if you need a release build to point
+somewhere other than `_releaseDefaultUrl` (e.g. a staging backend) without
+using the in-app override:
+
+```bash
+flutter build apk --release --dart-define=API_URL=https://<your-backend>
+```
+
+If the production backend URL changes (e.g. migrating off Railway), update
+`_releaseDefaultUrl` in `api_client.dart` and cut a new release build --
+existing installs can also be repointed instantly via the in-app override,
+without a rebuild.
 
 Distribute the resulting APK directly (internal testing) or through the Play
 Store's internal testing track -- there's no separate "mobile hosting" step;

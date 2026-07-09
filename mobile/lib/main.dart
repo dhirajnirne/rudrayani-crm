@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'core/api/api_client.dart';
 import 'core/auth/auth_provider.dart';
 import 'core/router.dart';
 import 'core/tracking/tracking_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Must happen before any Dio is built (buildDio() reads effectiveBaseUrl
+  // synchronously) — otherwise the first requests race the storage read.
+  await loadServerUrlOverride();
   // Port for UI <-> tracking-service isolate communication (must be set up
   // before runApp per flutter_foreground_task docs).
   TrackingService.initCommunicationPort();

@@ -21,7 +21,12 @@ void startTrackingCallback() {
 /// along with the next batch. The server ignores duplicate
 /// (user_id, recorded_at) rows, so re-sends are always safe.
 class TrackingTaskHandler extends TaskHandler {
-  final Dio _dio = buildDio();
+  // Built in onStart, not as a field initializer: this isolate has its own
+  // memory space (a fresh copy of every top-level/static variable), so the
+  // server-URL override cached in the UI isolate is NOT visible here — it
+  // must be re-loaded from secure storage before Dio is constructed, or a
+  // release-build tracking service would silently ping the debug default.
+  late final Dio _dio;
   final List<Map<String, dynamic>> _pending = [];
   Box<String>? _box;
 
@@ -85,7 +90,8 @@ class TrackingTaskHandler extends TaskHandler {
     } catch (_) {
       if (updateNotification) {
         FlutterForegroundTask.updateService(
-          notificationText: '${_pending.length} ping(s) queued, will sync when online',
+          notificationText:
+              '${_pending.length} ping(s) queued, will sync when online',
         );
       }
     }
@@ -94,6 +100,8 @@ class TrackingTaskHandler extends TaskHandler {
 
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
+    await loadServerUrlOverride();
+    _dio = buildDio();
     await _openStore();
     await _capturePing();
   }
