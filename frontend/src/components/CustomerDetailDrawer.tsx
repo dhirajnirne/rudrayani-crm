@@ -1,8 +1,10 @@
 import {
   Button,
+  Collapse,
   Descriptions,
   Drawer,
   Empty,
+  Input,
   Space,
   Spin,
   Table,
@@ -45,6 +47,7 @@ interface CustomerDetail {
     product: string | null;
     bucket: string | null;
     due_amount: string | null;
+    pos: string | null;
     emi: string | null;
     due_date: string | null;
     status: "active" | "closed" | "recalled";
@@ -104,6 +107,7 @@ export default function CustomerDetailDrawer({
 }) {
   const [detail, setDetail] = useState<CustomerDetail | null>(null);
   const [loading, setLoading] = useState(false);
+  const [customFieldsFilter, setCustomFieldsFilter] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
   const [correctionTarget, setCorrectionTarget] = useState<{
@@ -226,6 +230,7 @@ export default function CustomerDetailDrawer({
               <Descriptions.Item label="Product">{orDash(detail.customer.product)}</Descriptions.Item>
               <Descriptions.Item label="Bucket">{orDash(detail.customer.bucket)}</Descriptions.Item>
               <Descriptions.Item label="Due Amount">{fmtAmount(detail.customer.due_amount)}</Descriptions.Item>
+              <Descriptions.Item label="POS">{fmtAmount(detail.customer.pos)}</Descriptions.Item>
               <Descriptions.Item label="EMI">{fmtAmount(detail.customer.emi)}</Descriptions.Item>
               <Descriptions.Item label="EMI Due Date">
                 {detail.customer.due_date ? dayjs(detail.customer.due_date).format("DD MMM YYYY") : "-"}
@@ -238,17 +243,36 @@ export default function CustomerDetailDrawer({
             </Descriptions>
           </div>
 
-          {detail.detail_fields.length > 0 && (
-            <div>
-              <Typography.Title level={5}>Customer Detail</Typography.Title>
-              <Descriptions size="small" bordered column={2}>
-                {detail.detail_fields.map((field) => (
-                  <Descriptions.Item key={field} label={field}>
-                    {orDash(detail.customer.custom_fields[field])}
-                  </Descriptions.Item>
-                ))}
-              </Descriptions>
-            </div>
+          {Object.keys(detail.customer.custom_fields).length > 0 && (
+            <Collapse
+              items={[
+                {
+                  key: "custom-fields",
+                  label: `Customer Detail (${Object.keys(detail.customer.custom_fields).length} fields from the import file)`,
+                  children: (
+                    <Space direction="vertical" style={{ width: "100%" }}>
+                      <Input.Search
+                        placeholder="Filter fields…"
+                        allowClear
+                        value={customFieldsFilter}
+                        onChange={(e) => setCustomFieldsFilter(e.target.value)}
+                      />
+                      <Descriptions size="small" bordered column={2}>
+                        {Object.entries(detail.customer.custom_fields)
+                          .filter(([field]) =>
+                            field.toLowerCase().includes(customFieldsFilter.toLowerCase()),
+                          )
+                          .map(([field, value]) => (
+                            <Descriptions.Item key={field} label={field}>
+                              {orDash(value)}
+                            </Descriptions.Item>
+                          ))}
+                      </Descriptions>
+                    </Space>
+                  ),
+                },
+              ]}
+            />
           )}
 
           <div>
