@@ -147,6 +147,7 @@ class _CallLogScreenState extends ConsumerState<CallLogScreen> {
 
       if (mounted) {
         ref.invalidate(worklistProvider);
+        ref.invalidate(dispositionCodesProvider);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Call log saved!'), backgroundColor: Colors.green),
         );

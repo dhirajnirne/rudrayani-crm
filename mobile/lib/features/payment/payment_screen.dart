@@ -115,6 +115,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
 
       if (mounted) {
         ref.invalidate(worklistProvider);
+        ref.invalidate(dispositionCodesProvider);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Payment recorded!'), backgroundColor: Colors.green),
         );

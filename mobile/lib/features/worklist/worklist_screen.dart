@@ -58,7 +58,10 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: () => ref.invalidate(worklistProvider),
+            onPressed: () {
+              ref.invalidate(worklistProvider);
+              ref.invalidate(dispositionCodesProvider);
+            },
           ),
           IconButton(
             icon: const Icon(Icons.logout),
@@ -103,7 +106,10 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
                     Text('Error: $e'),
                     const SizedBox(height: 8),
                     ElevatedButton(
-                      onPressed: () => ref.invalidate(worklistProvider),
+                      onPressed: () {
+                        ref.invalidate(worklistProvider);
+                        ref.invalidate(dispositionCodesProvider);
+                      },
                       child: const Text('Retry'),
                     ),
                   ],
@@ -130,7 +136,10 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
                 }
 
                 return RefreshIndicator(
-                  onRefresh: () async => ref.invalidate(worklistProvider),
+                  onRefresh: () async {
+                    ref.invalidate(worklistProvider);
+                    ref.invalidate(dispositionCodesProvider);
+                  },
                   child: ListView.builder(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     itemCount: filtered.length,
