@@ -26,6 +26,7 @@ const TYPE_TAG: Record<ReviewItemType, { color: string; label: string }> = {
   addition: { color: "blue", label: "Addition" },
   removal: { color: "red", label: "Removal" },
   reactivation: { color: "orange", label: "Reactivation" },
+  update: { color: "gold", label: "Update" },
 };
 
 const fmtAmount = (v: number | string | null | undefined) =>
@@ -190,6 +191,7 @@ export default function ImportReviewPage() {
             { value: "addition", label: "Addition" },
             { value: "removal", label: "Removal" },
             { value: "reactivation", label: "Reactivation" },
+            { value: "update", label: "Update" },
           ]}
         />
         <Button icon={<ReloadOutlined />} onClick={() => void load()}>
@@ -230,13 +232,38 @@ export default function ImportReviewPage() {
           expandedRowRender: (record) => {
             const detail = expandedDetail[record.id];
             const p = record.payload;
+            const isUpdate = record.item_type === "update";
+            // For an update item, show what actually changes -- a bucket/amount
+            // that matches the current value isn't worth a reviewer's attention.
+            const bucketChanged = isUpdate && p.bucket != null && p.bucket !== record.current_bucket;
+            const dueChanged =
+              isUpdate && p.due_amount != null && String(p.due_amount) !== String(record.current_due_amount);
             return (
               <Descriptions size="small" bordered column={2} style={{ maxWidth: 900 }}>
                 <Descriptions.Item label="Customer name">{p.customer_name ?? "-"}</Descriptions.Item>
                 <Descriptions.Item label="Mobile">{p.mobile_number ?? "-"}</Descriptions.Item>
                 <Descriptions.Item label="Product">{p.product ?? "-"}</Descriptions.Item>
-                <Descriptions.Item label="Bucket">{p.bucket ?? "-"}</Descriptions.Item>
-                <Descriptions.Item label="Due amount">{fmtAmount(p.due_amount)}</Descriptions.Item>
+                <Descriptions.Item label="Bucket">
+                  {isUpdate && bucketChanged ? (
+                    <>
+                      {record.current_bucket ?? "-"} <Typography.Text type="secondary">→</Typography.Text>{" "}
+                      <Typography.Text strong>{p.bucket}</Typography.Text>
+                    </>
+                  ) : (
+                    p.bucket ?? "-"
+                  )}
+                </Descriptions.Item>
+                <Descriptions.Item label="Due amount">
+                  {isUpdate && dueChanged ? (
+                    <>
+                      {fmtAmount(record.current_due_amount)}{" "}
+                      <Typography.Text type="secondary">→</Typography.Text>{" "}
+                      <Typography.Text strong>{fmtAmount(p.due_amount)}</Typography.Text>
+                    </>
+                  ) : (
+                    fmtAmount(p.due_amount)
+                  )}
+                </Descriptions.Item>
                 <Descriptions.Item label="EMI">{fmtAmount(p.emi)}</Descriptions.Item>
                 <Descriptions.Item label="Agent phone">{p.agent_phone ?? "-"}</Descriptions.Item>
                 <Descriptions.Item label="Custom fields" span={2}>

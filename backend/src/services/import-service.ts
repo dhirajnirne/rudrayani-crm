@@ -494,8 +494,15 @@ export async function commitImport(params: {
       : isRepeatImport
         ? []
         : diff!.additions.map((a) => a.row);
-  const toUpdate: { row: MappedRow; customerId: string }[] = mode === "allocation" ? diff!.updates : [];
+  // A repeat/refresh import's changes to already-active customers (due_amount,
+  // bucket, etc.) route to review too, same as additions do on a repeat import
+  // -- those customers may already have calls/payments/PTPs logged against
+  // the old numbers, so a silent overwrite isn't safe. The FIRST allocation
+  // import of a month still applies updates directly (nothing to protect yet).
+  const toUpdate: { row: MappedRow; customerId: string }[] =
+    mode === "allocation" && !isRepeatImport ? diff!.updates : [];
   const reviewAdditions = mode === "allocation" && isRepeatImport ? diff!.additions : [];
+  const reviewUpdates = mode === "allocation" && isRepeatImport ? diff!.updates : [];
   const reviewReactivations = mode === "allocation" ? diff!.reactivations : [];
   const reviewRemovals = mode === "allocation" ? diff!.removals : [];
 
@@ -683,6 +690,13 @@ export async function commitImport(params: {
         [runId, params.companyId, customerId, row.loan_number, JSON.stringify(rowToReviewPayload(row))],
       );
     }
+    for (const { row, customerId } of reviewUpdates) {
+      await client.query(
+        `INSERT INTO import_review_items (import_run_id, company_id, item_type, customer_id, loan_number, payload)
+         VALUES ($1, $2, 'update', $3, $4, $5)`,
+        [runId, params.companyId, customerId, row.loan_number, JSON.stringify(rowToReviewPayload(row))],
+      );
+    }
     for (const { customerId, loanNumber } of reviewRemovals) {
       await client.query(
         `INSERT INTO import_review_items (import_run_id, company_id, item_type, customer_id, loan_number, payload)
@@ -697,7 +711,7 @@ export async function commitImport(params: {
     const newBuckets = await deriveBuckets(client, params.companyId, validation.validRows);
 
     const duplicateRows = mode === "new" ? validation.duplicatesInDb.length : 0;
-    const pendingReviewRows = reviewAdditions.length + reviewReactivations.length;
+    const pendingReviewRows = reviewAdditions.length + reviewReactivations.length + reviewUpdates.length;
     await client.query(
       `UPDATE import_runs
           SET inserted_rows = $2, updated_rows = $3, duplicate_rows = $4,

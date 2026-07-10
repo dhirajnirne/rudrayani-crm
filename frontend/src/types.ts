@@ -112,7 +112,7 @@ export interface AllocationLog {
   allocated_by_name: string;
 }
 
-export type ReviewItemType = "addition" | "removal" | "reactivation";
+export type ReviewItemType = "addition" | "removal" | "reactivation" | "update";
 export type ReviewItemStatus = "pending" | "approved" | "rejected" | "superseded";
 
 export interface ReviewItem {

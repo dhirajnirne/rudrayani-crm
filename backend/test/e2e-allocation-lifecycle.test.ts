@@ -192,8 +192,11 @@ describe("Alpha Finance NBFC (Hero-style columns): full three-file reporting cyc
     expect(res.status).toBe(201);
     expect(res.body.is_repeat_import).toBe(true);
     expect(res.body.inserted_rows).toBe(0); // additions wait on a repeat import
-    expect(res.body.updated_rows).toBe(7); // the 7 continuing loans update directly
-    expect(res.body.pending_review).toBe(1); // ALPHA-009
+    // MVP hardening: a repeat import's changes to already-active customers now
+    // wait for review too, same as additions -- these loans may already have
+    // calls/payments logged against the old numbers.
+    expect(res.body.updated_rows).toBe(0); // nothing applied directly anymore
+    expect(res.body.pending_review).toBe(8); // 7 continuing-loan updates + ALPHA-009 addition
     expect(res.body.removal_flagged).toBe(1); // ALPHA-004
 
     const stillActive = await pool.query(
@@ -258,7 +261,8 @@ describe("Alpha Finance NBFC (Hero-style columns): full three-file reporting cyc
     expect(Number(reactivated.rows[0].due_amount)).toBe(41000);
     expect(reactivated.rows[0].due_date).not.toBeNull(); // emi_due_date column flowed through on reactivation
 
-    // ALPHA-008's due_date flowed through on a plain update too (no review needed).
+    // ALPHA-008's due_date flowed through too -- as a review item like every
+    // other continuing loan in this repeat import, approved above.
     const withDueDate = await pool.query(
       `SELECT due_date FROM customers WHERE company_id = $1 AND loan_number = 'ALPHA-008'`,
       [alphaCompanyId],
@@ -367,7 +371,10 @@ describe("Beta Credit Corp (Indifi-style columns, deliberately different layout)
 
     const m2 = await uploadAndCommit(betaCompanyId, await betaMonth2(), BETA_MAPPING, ALLOC_MONTH);
     expect(m2.status).toBe(201);
-    expect(m2.body.pending_review).toBe(1); // BETA-107
+    // MVP hardening: the 5 continuing loans (6 inserted in month 1, minus
+    // BETA-103 which is removed here) now also route to review, alongside
+    // BETA-107's addition.
+    expect(m2.body.pending_review).toBe(6); // 5 continuing-loan updates + BETA-107 addition
     expect(m2.body.removal_flagged).toBe(1); // BETA-103
     await approveAllPending(betaCompanyId);
 
