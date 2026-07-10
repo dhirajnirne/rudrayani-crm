@@ -28,6 +28,10 @@ let opsToken: string;
 let telecallerToken: string;
 let tlToken: string;
 
+// Owner feedback round, Phase 2: mobile_number/product/pos/emi_due_date are
+// now required-to-map too -- buildSheet() appends synthetic values for these
+// so the fixtures below (keyed on bucket/due_amount/emi/agent) don't each
+// need editing.
 const MAPPING = {
   Loan: "loan_number",
   Name: "customer_name",
@@ -35,13 +39,20 @@ const MAPPING = {
   POS: "due_amount",
   EMI: "emi",
   Agent: "agent_phone",
+  Mobile: "mobile_number",
+  Product: "product",
+  RealPos: "pos",
+  DueDate: "emi_due_date",
 };
 
 async function buildSheet(rows: (string | number)[][]): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Allocation");
-  ws.addRow(["Loan", "Name", "Bucket", "POS", "EMI", "Agent"]);
-  for (const r of rows) ws.addRow(r);
+  ws.addRow(["Loan", "Name", "Bucket", "POS", "EMI", "Agent", "Mobile", "Product", "RealPos", "DueDate"]);
+  for (const r of rows) {
+    const dueAmount = r[3]; // POS column position -> due_amount, per MAPPING above
+    ws.addRow([...r, "9800000000", "TestProduct", dueAmount, "2026-01-08"]);
+  }
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
@@ -221,8 +232,8 @@ describe("import review queue: addition approval", () => {
   it("approving an addition carries the mapped POS value through to the customer and snapshot", async () => {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet("Allocation");
-    ws.addRow(["Loan", "Name", "Bucket", "Total Due", "POS", "EMI", "Agent"]);
-    ws.addRow(["REV-POS-BASE", "Base Row", "30", 10000, 125000, 500, ""]);
+    ws.addRow(["Loan", "Name", "Bucket", "Total Due", "POS", "EMI", "Agent", "Mobile", "Product", "DueDate"]);
+    ws.addRow(["REV-POS-BASE", "Base Row", "30", 10000, 125000, 500, "", "9800000000", "TestProduct", "2026-01-08"]);
     const firstBuf = Buffer.from(await wb.xlsx.writeBuffer());
     const posMapping = {
       Loan: "loan_number",
@@ -232,6 +243,9 @@ describe("import review queue: addition approval", () => {
       POS: "pos",
       EMI: "emi",
       Agent: "agent_phone",
+      Mobile: "mobile_number",
+      Product: "product",
+      DueDate: "emi_due_date",
     };
     const uploadFirst = await request(app)
       .post("/api/imports/upload")
@@ -251,9 +265,9 @@ describe("import review queue: addition approval", () => {
 
     const wb2 = new ExcelJS.Workbook();
     const ws2 = wb2.addWorksheet("Allocation");
-    ws2.addRow(["Loan", "Name", "Bucket", "Total Due", "POS", "EMI", "Agent"]);
-    ws2.addRow(["REV-POS-BASE", "Base Row", "30", 10000, 125000, 500, ""]);
-    ws2.addRow(["REV-POS-NEW", "New Arrival", "60", 20000, 240000, 1000, ""]);
+    ws2.addRow(["Loan", "Name", "Bucket", "Total Due", "POS", "EMI", "Agent", "Mobile", "Product", "DueDate"]);
+    ws2.addRow(["REV-POS-BASE", "Base Row", "30", 10000, 125000, 500, "", "9800000000", "TestProduct", "2026-01-08"]);
+    ws2.addRow(["REV-POS-NEW", "New Arrival", "60", 20000, 240000, 1000, "", "9800000001", "TestProduct", "2026-01-08"]);
     const secondBuf = Buffer.from(await wb2.xlsx.writeBuffer());
     const uploadSecond = await request(app)
       .post("/api/imports/upload")

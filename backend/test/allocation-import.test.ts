@@ -30,13 +30,25 @@ const MAPPING = {
   POS: "due_amount",
   EMI: "emi",
   Agent: "agent_phone",
+  // Owner feedback round, Phase 2: mobile_number/product/pos/emi_due_date are
+  // now required-to-map too. buildSheet() below appends synthetic values for
+  // these to every row so the ~15 existing (rows-per-test) fixtures below
+  // don't each need individual edits -- their tested numbers (bucket/"POS"
+  // i.e. due_amount/emi/agent) are unaffected.
+  Mobile: "mobile_number",
+  Product: "product",
+  RealPos: "pos",
+  DueDate: "emi_due_date",
 };
 
 async function buildSheet(rows: (string | number)[][]): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Allocation");
-  ws.addRow(["Loan", "Name", "Bucket", "POS", "EMI", "Agent"]);
-  for (const r of rows) ws.addRow(r);
+  ws.addRow(["Loan", "Name", "Bucket", "POS", "EMI", "Agent", "Mobile", "Product", "RealPos", "DueDate"]);
+  for (const r of rows) {
+    const dueAmount = r[3]; // POS column position -> due_amount, per MAPPING above
+    ws.addRow([...r, "9800000000", "TestProduct", dueAmount, "2026-01-08"]);
+  }
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
@@ -464,8 +476,8 @@ describe("monthly allocation import", () => {
   it("maps an EMI due date column (DD-MM-YYYY) through to customers.due_date, for the DPD cross-check", async () => {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet("Allocation");
-    ws.addRow(["Loan", "Name", "Bucket", "POS", "EMI", "DueDate"]);
-    ws.addRow(["DUE-001", "Due Date Guy", "1", 10000, 500, "08-07-2026"]);
+    ws.addRow(["Loan", "Name", "Mobile", "Product", "Bucket", "POS", "RealPos", "EMI", "DueDate", "Agent"]);
+    ws.addRow(["DUE-001", "Due Date Guy", "9800000001", "TestProduct", "1", 10000, 10000, 500, "08-07-2026", ""]);
     const buffer = Buffer.from(await wb.xlsx.writeBuffer());
 
     const up = await request(app)
@@ -481,10 +493,14 @@ describe("monthly allocation import", () => {
         column_mapping: {
           Loan: "loan_number",
           Name: "customer_name",
+          Mobile: "mobile_number",
+          Product: "product",
           Bucket: "bucket",
           POS: "due_amount",
+          RealPos: "pos",
           EMI: "emi",
           DueDate: "emi_due_date",
+          Agent: "agent_phone",
         },
         mode: "allocation",
         allocation_month: "2027-01-01", // fresh month, unused elsewhere in this file
@@ -510,8 +526,8 @@ describe("monthly allocation import", () => {
   it("rejects an unparseable EMI due date instead of silently dropping it", async () => {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet("Allocation");
-    ws.addRow(["Loan", "Name", "Bucket", "POS", "EMI", "DueDate"]);
-    ws.addRow(["DUE-BAD", "Bad Date Guy", "1", 10000, 500, "not-a-date"]);
+    ws.addRow(["Loan", "Name", "Mobile", "Product", "Bucket", "POS", "RealPos", "EMI", "DueDate", "Agent"]);
+    ws.addRow(["DUE-BAD", "Bad Date Guy", "9800000002", "TestProduct", "1", 10000, 10000, 500, "not-a-date", ""]);
     const buffer = Buffer.from(await wb.xlsx.writeBuffer());
 
     const up = await request(app)
@@ -527,10 +543,14 @@ describe("monthly allocation import", () => {
         column_mapping: {
           Loan: "loan_number",
           Name: "customer_name",
+          Mobile: "mobile_number",
+          Product: "product",
           Bucket: "bucket",
           POS: "due_amount",
+          RealPos: "pos",
           EMI: "emi",
           DueDate: "emi_due_date",
+          Agent: "agent_phone",
         },
         mode: "new",
       });

@@ -43,18 +43,33 @@ import type { Company, ImportRun, ImportTemplate } from "../types";
 const SYSTEM_FIELDS = [
   { value: "loan_number", label: "Loan Number (required)" },
   { value: "customer_name", label: "Customer Name (required)" },
-  { value: "mobile_number", label: "Mobile Number (recommended)" },
-  { value: "product", label: "Product (recommended)" },
-  { value: "bucket", label: "Bucket (recommended)" },
-  { value: "due_amount", label: "Due Amount (recommended)" },
-  { value: "pos", label: "POS — Principal Outstanding (recommended)" },
-  { value: "emi", label: "EMI Amount (recommended)" },
+  { value: "mobile_number", label: "Mobile Number (required)" },
+  { value: "product", label: "Product (required)" },
+  { value: "bucket", label: "Bucket (required)" },
+  { value: "due_amount", label: "Due Amount (required)" },
+  { value: "pos", label: "POS — Principal Outstanding (required)" },
+  { value: "emi", label: "EMI Amount (required)" },
   { value: "emi_due_date", label: "EMI Due Date (recommended)" },
-  { value: "agent_phone", label: "Agent Phone — assigns the loan (recommended)" },
+  { value: "agent_phone", label: "Agent Phone — assigns the loan (required)" },
   { value: "address", label: "Address" },
 ];
 
-const RECOMMENDED_FIELDS = ["mobile_number", "product", "bucket", "due_amount", "pos", "emi", "emi_due_date", "agent_phone"];
+// Owner feedback round, Phase 2: every core loan-ledger field must now be
+// mapped -- mirrors backend REQUIRED_MAPPED_FIELDS in import-service.ts.
+// emi_due_date is deliberately excluded (see that file's comment): a company
+// may not share due dates from day one, and forcing it would block onboarding
+// for a real, current scenario, not a hypothetical one.
+const REQUIRED_MAPPED_FIELDS = [
+  "loan_number",
+  "customer_name",
+  "mobile_number",
+  "product",
+  "bucket",
+  "due_amount",
+  "pos",
+  "emi",
+  "agent_phone",
+];
 
 interface DiffSample {
   loan_number: string;
@@ -200,10 +215,15 @@ function ImportWizard() {
   };
 
   const handlePreview = async () => {
-    // Validate: required system fields must be mapped
+    // Validate: every required system field must be mapped to a column
     const mappedFields = Object.values(mapping);
-    if (!mappedFields.includes("loan_number") || !mappedFields.includes("customer_name")) {
-      return message.error("Map at least Loan Number and Customer Name before previewing");
+    const missingRequired = REQUIRED_MAPPED_FIELDS.filter((f) => !mappedFields.includes(f));
+    if (missingRequired.length > 0) {
+      return message.error(
+        `Map a column to every required field before previewing. Missing: ${missingRequired
+          .map((f) => SYSTEM_FIELDS.find((s) => s.value === f)?.label?.replace(" (required)", ""))
+          .join(", ")}`,
+      );
     }
     setLoading(true);
     try {
@@ -357,7 +377,17 @@ function ImportWizard() {
 
   const renderStep1 = () => {
     const mappedValues = Object.values(mapping);
-    const missingRecommended = RECOMMENDED_FIELDS.filter((f) => !mappedValues.includes(f));
+    const missingRequired = REQUIRED_MAPPED_FIELDS.filter((f) => !mappedValues.includes(f));
+    // Owner feedback round, Phase 2 breaking-change mitigation: a template
+    // saved before POS/mobile_number/etc. became required won't map them --
+    // surface that proactively instead of letting the admin discover it as a
+    // failed commit on their next monthly cycle.
+    const templatesMissingRequired = templates
+      .map((t) => ({
+        name: t.name,
+        missing: REQUIRED_MAPPED_FIELDS.filter((f) => !Object.values(t.column_mapping).includes(f)),
+      }))
+      .filter((t) => t.missing.length > 0);
     return (
     <Space direction="vertical" style={{ width: "100%" }} size="large">
       <Alert
@@ -365,12 +395,27 @@ function ImportWizard() {
         showIcon
         message={`${fileName} — ${rowCount} data rows, ${detectedColumns.length} columns detected`}
       />
-      {missingRecommended.length > 0 && (
+      {missingRequired.length > 0 && (
+        <Alert
+          type="error"
+          showIcon
+          message="Required fields are not mapped"
+          description={`Not mapped: ${missingRequired.map((f) => SYSTEM_FIELDS.find((s) => s.value === f)?.label?.replace(" (required)", "")).join(", ")}. Map a column to each before you can preview or commit.`}
+        />
+      )}
+      {templatesMissingRequired.length > 0 && (
         <Alert
           type="warning"
           showIcon
-          message="Some recommended fields are not mapped"
-          description={`Not mapped: ${missingRecommended.map((f) => SYSTEM_FIELDS.find((s) => s.value === f)?.label?.replace(" (recommended)", "")).join(", ")}. You can still proceed — these will be skipped.`}
+          message="Some saved templates are missing newly-required fields"
+          description={templatesMissingRequired
+            .map(
+              (t) =>
+                `"${t.name}" is missing ${t.missing
+                  .map((f) => SYSTEM_FIELDS.find((s) => s.value === f)?.label?.replace(" (required)", ""))
+                  .join(", ")}`,
+            )
+            .join("; ")}
         />
       )}
 

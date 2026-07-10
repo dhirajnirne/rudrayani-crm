@@ -188,7 +188,7 @@ function classifiedCtes(conditions: string[]): string {
   const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
   return `
     base AS (
-      SELECT s.customer_id, s.due_amount, s.emi, s.assigned_agent_id, s.assigned_team_id,
+      SELECT s.customer_id, s.due_amount, s.pos, s.emi, s.assigned_agent_id, s.assigned_team_id,
              s.product, s.company_id, s.bucket,
              bm.sort_order AS cur_sort, COALESCE(bm.category, 'normal') AS cur_cat,
              c.status,
@@ -259,18 +259,23 @@ function classifiedCtes(conditions: string[]): string {
     )`;
 }
 
+// Owner feedback round, Phase 2: portfolio-value aggregates (how much book do
+// we have) read SUM(pos) -- principal outstanding -- instead of due_amount;
+// due_amount keeps its narrower "current arrears" meaning, still used by the
+// is_resolved/is_normalized/is_rolled_back classification CASE expressions
+// above (unchanged).
 const AGGREGATE_SELECT = `
   COUNT(*)::int                                                    AS allocated_count,
-  COALESCE(SUM(due_amount), 0)::float                              AS allocated_amount,
+  COALESCE(SUM(pos), 0)::float                                     AS allocated_amount,
   COUNT(*) FILTER (WHERE cur_cat = 'npa')::int                     AS recovery_allocated_count,
-  COALESCE(SUM(due_amount) FILTER (WHERE cur_cat = 'npa'), 0)::float AS recovery_allocated_amount,
+  COALESCE(SUM(pos) FILTER (WHERE cur_cat = 'npa'), 0)::float      AS recovery_allocated_amount,
   COALESCE(SUM(paid), 0)::float                                    AS collected_amount,
   COUNT(*) FILTER (WHERE paid > 0)::int                            AS collected_count,
-  COALESCE(SUM(due_amount) FILTER (WHERE is_resolved), 0)::float   AS resolution_amount,
+  COALESCE(SUM(pos) FILTER (WHERE is_resolved), 0)::float          AS resolution_amount,
   COUNT(*) FILTER (WHERE is_resolved)::int                         AS resolution_count,
-  COALESCE(SUM(due_amount) FILTER (WHERE is_rolled_back), 0)::float AS rollback_amount,
+  COALESCE(SUM(pos) FILTER (WHERE is_rolled_back), 0)::float       AS rollback_amount,
   COUNT(*) FILTER (WHERE is_rolled_back)::int                      AS rollback_count,
-  COALESCE(SUM(due_amount) FILTER (WHERE is_normalized), 0)::float AS normalization_amount,
+  COALESCE(SUM(pos) FILTER (WHERE is_normalized), 0)::float        AS normalization_amount,
   COUNT(*) FILTER (WHERE is_normalized)::int                       AS normalization_count,
   COALESCE(SUM(paid) FILTER (WHERE cur_cat = 'npa'), 0)::float     AS recovery_amount,
   COUNT(*) FILTER (WHERE cur_cat = 'npa' AND paid > 0)::int        AS recovery_count,

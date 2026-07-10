@@ -19,6 +19,34 @@ export const SYSTEM_FIELDS = [
   "address",     // stored in custom_fields.address (no native column)
 ] as const;
 export type SystemField = (typeof SYSTEM_FIELDS)[number];
+// Owner feedback round, Phase 2: every core loan-ledger system field must now
+// be MAPPED to a column at import time -- previously only loan_number/
+// customer_name were, and everything else was silently optional in the
+// mapping wizard. This is a template-completeness requirement (a column must
+// be assigned to each field), separate from REQUIRED_FIELDS below, which
+// governs whether an individual ROW's cell may be blank.
+//
+// emi_due_date is deliberately EXCLUDED: it's a bonus capability layered on
+// top of the core ledger ("drives the independent DPD cross-check", not core
+// loan data), and a company may not share due dates from day one -- proven
+// by e2e-allocation-lifecycle.test.ts's own scenario, where Alpha/Beta's
+// first two monthly files have no due-date column at all and only start
+// sending one in month 3 ("a company can start sharing due dates any time").
+// Forcing it here would make onboarding impossible for any company that
+// hasn't started sharing due dates yet, which is a real and current scenario,
+// not a hypothetical -- a materially worse regression than what was asked.
+export const REQUIRED_MAPPED_FIELDS: SystemField[] = [
+  "loan_number",
+  "customer_name",
+  "mobile_number",
+  "product",
+  "bucket",
+  "due_amount",
+  "pos",
+  "emi",
+  "agent_phone",
+];
+/** Fields whose per-row cell value may never be blank, once mapped. */
 const REQUIRED_FIELDS: SystemField[] = ["loan_number", "customer_name"];
 const NUMERIC_FIELDS: SystemField[] = ["due_amount", "pos", "emi"];
 const DATE_FIELDS: SystemField[] = ["emi_due_date"];
@@ -148,7 +176,7 @@ export async function validateRows(
   mapping: ColumnMapping,
 ): Promise<ValidationResult> {
   const mappedFields = Object.values(mapping);
-  for (const required of REQUIRED_FIELDS) {
+  for (const required of REQUIRED_MAPPED_FIELDS) {
     if (!mappedFields.includes(required)) {
       throw new HttpError(400, `The template must map a column to "${required}"`);
     }

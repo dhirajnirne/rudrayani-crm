@@ -47,13 +47,21 @@ async function snapshot(
   emi: number,
   agent: string,
   team: string,
+  // Owner feedback round, Phase 2: real principal-outstanding value for the
+  // new customer_month_snapshots.pos column, separate from due_amount ($4,
+  // the misleadingly-named "pos" param above -- kept as-is to avoid touching
+  // every existing call site). Defaults to the same number as due_amount so
+  // pre-existing allocated/resolution/rollback/normalization amount
+  // assertions (all keyed off due_amount historically) stay numerically
+  // unchanged now that those aggregates read SUM(pos) instead.
+  posAmount: number = pos,
 ) {
   await pool.query(
     `INSERT INTO customer_month_snapshots
-       (customer_id, company_id, month, bucket, due_amount, emi, product,
+       (customer_id, company_id, month, bucket, due_amount, pos, emi, product,
         assigned_team_id, assigned_agent_id)
-     SELECT id, company_id, $2, $3, $4, $5, product, $6, $7 FROM customers WHERE id = $1`,
-    [customerIds[loan], month, bucket, pos, emi, team, agent],
+     SELECT id, company_id, $2, $3, $4, $5, $6, product, $7, $8 FROM customers WHERE id = $1`,
+    [customerIds[loan], month, bucket, pos, posAmount, emi, team, agent],
   );
 }
 
@@ -260,6 +268,31 @@ describe("report engine", () => {
     expect(m.recovery.allocated_amount).toBe(300000);
     expect(m.recovery.mtd_amount).toBe(10000);
     expect(m.recovery.basis).toBe("payments");
+  });
+
+  it("allocated/resolution/rollback/normalization amounts read pos, not due_amount (owner feedback round, Phase 2)", async () => {
+    const SEPT = "2026-09-01";
+    const { rows } = await pool.query(
+      `INSERT INTO customers (company_id, loan_number, customer_name, product, due_amount, emi)
+       VALUES ($1, 'RPT-POS-01', 'RPT-POS-01', 'CVL', 1, 1) RETURNING id`,
+      [companyId],
+    );
+    customerIds["RPT-POS-01"] = rows[0].id;
+    // due_amount (arrears) deliberately much smaller than pos (portfolio value)
+    // -- if allocated_amount were still reading due_amount this would show
+    // 5,000, not 999,000.
+    await snapshot("RPT-POS-01", SEPT, "30", 5000, 500, agentId, teamId, 999000);
+
+    const res = await request(app)
+      .get(`/api/reports/dashboard?month=2026-09&product=CVL`)
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.allocated.amount).toBe(999000);
+
+    await pool.query("DELETE FROM customer_month_snapshots WHERE customer_id = $1", [
+      customerIds["RPT-POS-01"],
+    ]);
+    await pool.query("DELETE FROM customers WHERE id = $1", [customerIds["RPT-POS-01"]]);
   });
 
   it("May collection, targets, deposits and trail line up", async () => {

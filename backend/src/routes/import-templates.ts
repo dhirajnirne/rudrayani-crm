@@ -4,7 +4,7 @@ import { pool } from "../config/db";
 import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
-import { SYSTEM_FIELDS } from "../services/import-service";
+import { REQUIRED_MAPPED_FIELDS, SYSTEM_FIELDS } from "../services/import-service";
 
 const router = Router();
 router.use(authenticate, requirePermission("imports.manage"));
@@ -53,7 +53,7 @@ router.post(
     if (company.rows.length === 0) throw new HttpError(404, "Company not found in this agency");
 
     const mappedFields = Object.values(body.column_mapping);
-    for (const required of ["loan_number", "customer_name"] as const) {
+    for (const required of REQUIRED_MAPPED_FIELDS) {
       if (!mappedFields.includes(required)) {
         throw new HttpError(400, `The template must map a column to "${required}"`);
       }
