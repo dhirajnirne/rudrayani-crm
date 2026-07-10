@@ -14,6 +14,7 @@ import bucketRoutes from "./routes/buckets";
 import callLogRoutes from "./routes/call-logs";
 import catalogRoutes from "./routes/catalog";
 import companyRoutes from "./routes/companies";
+import correctionRequestRoutes from "./routes/correction-requests";
 import customerRoutes from "./routes/customers";
 import dashboardPreferencesRoutes from "./routes/dashboard-preferences";
 import dayPlanRoutes from "./routes/day-plan";
@@ -72,6 +73,7 @@ export function createApp() {
   app.use("/api/field-visits", fieldVisitRoutes);
   app.use("/api/attachments", attachmentRoutes);
   app.use("/api/reallocation-requests", reallocationRequestRoutes);
+  app.use("/api/correction-requests", correctionRequestRoutes);
   app.use("/api/reminders", reminderRoutes);
   app.use("/api/buckets", bucketRoutes);
   app.use("/api/targets", targetRoutes);

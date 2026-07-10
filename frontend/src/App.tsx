@@ -14,6 +14,7 @@ const AttendancePage = lazy(() => import("./pages/AttendancePage"));
 const BranchesPage = lazy(() => import("./pages/BranchesPage"));
 const BucketsPage = lazy(() => import("./pages/BucketsPage"));
 const CompaniesPage = lazy(() => import("./pages/CompaniesPage"));
+const CorrectionRequestsPage = lazy(() => import("./pages/CorrectionRequestsPage"));
 const CustomersPage = lazy(() => import("./pages/CustomersPage"));
 const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 const DayPlanPage = lazy(() => import("./pages/DayPlanPage"));
@@ -64,6 +65,7 @@ export default function App() {
         <Route path="customers" element={<CustomersPage />} />
         <Route path="allocation" element={<AllocationPage />} />
         <Route path="reallocation-requests" element={<ReallocationRequestsPage />} />
+        <Route path="correction-requests" element={<CorrectionRequestsPage />} />
         <Route path="dispositions" element={<DispositionsPage />} />
         <Route path="tracking" element={<TrackingPage />} />
         <Route path="day-plan" element={<DayPlanPage />} />

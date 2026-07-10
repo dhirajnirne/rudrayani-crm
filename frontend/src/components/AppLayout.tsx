@@ -12,6 +12,7 @@ import {
   WalletOutlined,
   FileSearchOutlined,
   FileSyncOutlined,
+  FlagOutlined,
   LogoutOutlined,
   MoonOutlined,
   ScheduleOutlined,
@@ -88,6 +89,11 @@ export default function AppLayout() {
       key: "/reallocation-requests",
       icon: <FileSyncOutlined />,
       label: <Link to="/reallocation-requests">Reallocation Requests</Link>,
+    },
+    hasPermission("customers.allocate") && {
+      key: "/correction-requests",
+      icon: <FlagOutlined />,
+      label: <Link to="/correction-requests">Correction Requests</Link>,
     },
     hasPermission("dispositions.manage") && {
       key: "/dispositions",
