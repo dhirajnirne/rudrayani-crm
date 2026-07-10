@@ -73,6 +73,9 @@ export interface DispositionCode {
   result_code: string | null;
   description: string;
   remark_template: string | null;
+  // FV (field visit) or OC (on-call) -- NULL for legacy/custom codes an
+  // admin hasn't tagged yet.
+  channel: "FV" | "OC" | null;
   needs_amount: boolean;
   needs_date: boolean;
   needs_time: boolean;

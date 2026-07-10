@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { DatePicker, Input, InputNumber, Modal, Select, Space, Typography, message } from "antd";
+import { DatePicker, Input, InputNumber, Modal, Radio, Select, Space, Typography, message } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import { api, errorMessage } from "../api/client";
 import type { DispositionCode } from "../types";
@@ -7,12 +7,14 @@ import type { DispositionCode } from "../types";
 const MODE_OPTIONS = ["NEFT", "RTGS", "Cash", "UPI", "Cheque", "DD"].map((m) => ({ value: m, label: m }));
 
 /**
- * Log a call from the web worklist -- same contract as mobile's
- * call_log_screen.dart: dynamic fields render purely from the selected
- * disposition code's needs_* flags (the server enforces the same set via
- * missingRequiredFields, so this is a fast-fail convenience, not the source
- * of truth). No client_key -- that exists for mobile's offline-retry queue,
- * which web doesn't have.
+ * Log a call from the web worklist -- same 4-step contract as mobile's
+ * call_log_screen.dart: Channel (FV/OC) -> Result Code (filtered to that
+ * channel) -> dynamic fields (purely from the selected disposition code's
+ * needs_* flags) -> Remarks. Switching channel resets the code and every
+ * downstream field, same as mobile. The server enforces the same needs_*
+ * set via missingRequiredFields, so client-side validation here is a
+ * fast-fail convenience, not the source of truth. No client_key -- that
+ * exists for mobile's offline-retry queue, which web doesn't have.
  */
 export default function LogCallModal({
   customerId,
@@ -29,6 +31,7 @@ export default function LogCallModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const [channel, setChannel] = useState<"FV" | "OC" | undefined>(undefined);
   const [codeId, setCodeId] = useState<string | undefined>(undefined);
   const [amount, setAmount] = useState<number | null>(null);
   const [date, setDate] = useState<Dayjs | null>(null);
@@ -39,24 +42,40 @@ export default function LogCallModal({
   const [extraRemark, setExtraRemark] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  const codesForChannel = dispositionCodes.filter((c) => c.channel === channel);
   const code = dispositionCodes.find((c) => c.id === codeId);
+
+  const resetFields = () => {
+    setAmount(null);
+    setDate(null);
+    setTime("");
+    setMode(undefined);
+    setReason("");
+    setNameRelation("");
+  };
+
+  const selectChannel = (value: "FV" | "OC") => {
+    setChannel(value);
+    setCodeId(undefined); // step 2 resets when channel changes (brief §5/§6)
+    resetFields();
+  };
 
   useEffect(() => {
     if (open) {
+      setChannel(undefined);
       setCodeId(undefined);
-      setAmount(null);
-      setDate(null);
-      setTime("");
-      setMode(undefined);
-      setReason("");
-      setNameRelation("");
+      resetFields();
       setExtraRemark("");
     }
   }, [open]);
 
   const submit = async () => {
+    if (!channel) {
+      message.error("Pick a channel (Field Visit or On-Call)");
+      return;
+    }
     if (!code) {
-      message.error("Pick a disposition code");
+      message.error("Pick a result code");
       return;
     }
     const fields: Record<string, string | number> = {};
@@ -124,24 +143,47 @@ export default function LogCallModal({
       okText="Save"
     >
       <Space direction="vertical" style={{ width: "100%" }} size="middle">
+        {/* Step 1: Channel */}
         <div>
           <Typography.Text>
-            Disposition <Typography.Text type="danger">*</Typography.Text>
+            Channel <Typography.Text type="danger">*</Typography.Text>
           </Typography.Text>
-          <Select
-            style={{ width: "100%", marginTop: 4 }}
-            placeholder="Choose a disposition code"
-            showSearch
-            optionFilterProp="label"
-            value={codeId}
-            onChange={setCodeId}
-            options={dispositionCodes.map((c) => ({
-              value: c.id,
-              label: `${c.action_code}_${c.result_code ?? ""} — ${c.description}`,
-            }))}
-          />
+          <div style={{ marginTop: 4 }}>
+            <Radio.Group
+              value={channel}
+              onChange={(e) => selectChannel(e.target.value)}
+              options={[
+                { value: "FV", label: "Field Visit" },
+                { value: "OC", label: "On-Call" },
+              ]}
+              optionType="button"
+            />
+          </div>
         </div>
 
+        {/* Step 2: Result Code, filtered to the chosen channel */}
+        {channel && (
+          <div>
+            <Typography.Text>
+              Result Code <Typography.Text type="danger">*</Typography.Text>
+            </Typography.Text>
+            <Select
+              style={{ width: "100%", marginTop: 4 }}
+              placeholder="Choose a result code"
+              showSearch
+              optionFilterProp="label"
+              value={codeId}
+              onChange={setCodeId}
+              notFoundContent={`No ${channel} codes configured`}
+              options={codesForChannel.map((c) => ({
+                value: c.id,
+                label: `${c.action_code}_${c.result_code ?? ""} — ${c.description}`,
+              }))}
+            />
+          </div>
+        )}
+
+        {/* Step 3: dynamic fields, driven by the selected code's needs_* flags */}
         {code?.needs_amount && (
           <div>
             <Typography.Text>
@@ -210,9 +252,10 @@ export default function LogCallModal({
           </Typography.Text>
         )}
 
+        {/* Step 4: Remarks — last step before submit */}
         {code && (
           <div>
-            <Typography.Text>Additional Notes (optional)</Typography.Text>
+            <Typography.Text>Remarks (optional)</Typography.Text>
             <Input.TextArea
               style={{ marginTop: 4 }}
               rows={2}

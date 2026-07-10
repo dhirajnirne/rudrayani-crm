@@ -1,9 +1,11 @@
 import {
+  Alert,
   Button,
   Checkbox,
   Form,
   Input,
   Modal,
+  Select,
   Space,
   Switch,
   Table,
@@ -24,6 +26,7 @@ type FormValues = {
   result_code?: string;
   description: string;
   remark_template?: string;
+  channel: "FV" | "OC";
   needs_amount: boolean;
   needs_date: boolean;
   needs_time: boolean;
@@ -88,6 +91,7 @@ export default function DispositionsPage() {
       result_code: code.result_code ?? undefined,
       description: code.description,
       remark_template: code.remark_template ?? undefined,
+      channel: code.channel ?? undefined,
       needs_amount: code.needs_amount,
       needs_date: code.needs_date,
       needs_time: code.needs_time,
@@ -136,6 +140,8 @@ export default function DispositionsPage() {
       </Tag>
     ));
 
+  const uncategorizedCount = codes.filter((c) => c.channel == null).length;
+
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
@@ -157,6 +163,16 @@ export default function DispositionsPage() {
         </Space>
       </div>
 
+      {uncategorizedCount > 0 && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message={`${uncategorizedCount} code${uncategorizedCount === 1 ? "" : "s"} without a channel`}
+          description="These are custom codes that don't match a known FV/OC/LG prefix from the master list. Edit each to assign Field Visit or On-Call so it appears in the agent picker."
+        />
+      )}
+
       <Table
         rowKey="id"
         loading={loading}
@@ -164,6 +180,17 @@ export default function DispositionsPage() {
         pagination={{ pageSize: 50, showSizeChanger: false }}
         columns={[
           { title: "Action", dataIndex: "action_code", width: 80 },
+          {
+            title: "Channel",
+            dataIndex: "channel",
+            width: 90,
+            render: (v: "FV" | "OC" | null) =>
+              v ? (
+                <Tag color={v === "FV" ? "geekblue" : "purple"}>{v}</Tag>
+              ) : (
+                <Tag color="default">Unset</Tag>
+              ),
+          },
           { title: "Category", dataIndex: "category", width: 180, render: (v) => v ?? "—" },
           { title: "Result", dataIndex: "result_code", width: 80, render: (v) => v ?? "—" },
           { title: "Description", dataIndex: "description" },
@@ -230,6 +257,21 @@ export default function DispositionsPage() {
               <Input placeholder="PTP, BP, RTP..." />
             </Form.Item>
           </Space.Compact>
+
+          <Form.Item
+            name="channel"
+            label="Channel"
+            rules={[{ required: true, message: "Required" }]}
+            tooltip="Which flow this code appears in: Field Visit (FV) or On-Call (OC)"
+          >
+            <Select
+              placeholder="Select channel"
+              options={[
+                { value: "FV", label: "Field Visit (FV)" },
+                { value: "OC", label: "On-Call (OC)" },
+              ]}
+            />
+          </Form.Item>
 
           <Form.Item name="category" label="Category">
             <Input placeholder="PROMISE TO PAY, DISPUTE..." />
