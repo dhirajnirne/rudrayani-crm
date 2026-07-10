@@ -14,6 +14,7 @@ const AttendancePage = lazy(() => import("./pages/AttendancePage"));
 const BranchesPage = lazy(() => import("./pages/BranchesPage"));
 const BucketsPage = lazy(() => import("./pages/BucketsPage"));
 const CompaniesPage = lazy(() => import("./pages/CompaniesPage"));
+const CorrectionRequestsPage = lazy(() => import("./pages/CorrectionRequestsPage"));
 const CustomersPage = lazy(() => import("./pages/CustomersPage"));
 const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 const DayPlanPage = lazy(() => import("./pages/DayPlanPage"));
@@ -22,6 +23,8 @@ const DispositionsPage = lazy(() => import("./pages/DispositionsPage"));
 const EmployeesPage = lazy(() => import("./pages/EmployeesPage"));
 const ImportPage = lazy(() => import("./pages/ImportPage"));
 const ImportReviewPage = lazy(() => import("./pages/ImportReviewPage"));
+const MyRequestsPage = lazy(() => import("./pages/MyRequestsPage"));
+const MyWorklistPage = lazy(() => import("./pages/MyWorklistPage"));
 const ReallocationRequestsPage = lazy(() => import("./pages/ReallocationRequestsPage"));
 const TargetsPage = lazy(() => import("./pages/TargetsPage"));
 const TeamsPage = lazy(() => import("./pages/TeamsPage"));
@@ -62,8 +65,11 @@ export default function App() {
         <Route path="import" element={<ImportPage />} />
         <Route path="import-reviews" element={<ImportReviewPage />} />
         <Route path="customers" element={<CustomersPage />} />
+        <Route path="my-worklist" element={<MyWorklistPage />} />
+        <Route path="my-requests" element={<MyRequestsPage />} />
         <Route path="allocation" element={<AllocationPage />} />
         <Route path="reallocation-requests" element={<ReallocationRequestsPage />} />
+        <Route path="correction-requests" element={<CorrectionRequestsPage />} />
         <Route path="dispositions" element={<DispositionsPage />} />
         <Route path="tracking" element={<TrackingPage />} />
         <Route path="day-plan" element={<DayPlanPage />} />

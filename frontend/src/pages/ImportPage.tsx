@@ -37,6 +37,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, errorMessage } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { palette } from "../theme/tokens";
 import type { Company, ImportRun, ImportTemplate } from "../types";
 
 const SYSTEM_FIELDS = [
@@ -328,7 +329,7 @@ function ImportWizard() {
         fileList={file ? [file as unknown as import("antd").UploadFile] : []}
       >
         <p className="ant-upload-drag-icon">
-          <InboxOutlined style={{ color: "#00535b" }} />
+          <InboxOutlined style={{ color: palette.navy }} />
         </p>
         <p className="ant-upload-text">Click or drag an .xlsx file here</p>
         <p className="ant-upload-hint">Max 15 MB · Excel (.xlsx) only</p>
@@ -467,7 +468,7 @@ function ImportWizard() {
           size="large"
           onClick={handlePreview}
           loading={loading}
-          style={{ height: 48, paddingInline: 32, backgroundColor: "#00535b", borderColor: "#00535b" }}
+          style={{ height: 48, paddingInline: 32, backgroundColor: palette.navy, borderColor: palette.navy }}
         >
           Apply Template & Parse Ledger
         </Button>
@@ -506,7 +507,7 @@ function ImportWizard() {
                 <Statistic
                   title="Valid (will insert)"
                   value={preview.valid_rows}
-                  valueStyle={{ color: "#2c694e" }}
+                  valueStyle={{ color: palette.emerald }}
                 />
               </Card>
             </Col>
@@ -515,7 +516,7 @@ function ImportWizard() {
                 <Statistic
                   title="Errors (will skip)"
                   value={preview.error_rows}
-                  valueStyle={preview.error_rows > 0 ? { color: "#ba1a1a" } : {}}
+                  valueStyle={preview.error_rows > 0 ? { color: palette.destructive } : {}}
                 />
               </Card>
             </Col>
@@ -524,7 +525,7 @@ function ImportWizard() {
                 <Statistic
                   title="Already in DB"
                   value={preview.duplicates_in_db}
-                  valueStyle={(preview.duplicates_in_db ?? 0) > 0 ? { color: "#d77a00" } : {}}
+                  valueStyle={(preview.duplicates_in_db ?? 0) > 0 ? { color: palette.warning } : {}}
                 />
               </Card>
             </Col>
@@ -601,13 +602,13 @@ function ImportWizard() {
               <Statistic
                 title={preview.is_repeat_import ? "New loans (needs review)" : "New loans (will insert)"}
                 value={additions.count}
-                valueStyle={{ color: preview.is_repeat_import ? "#d77a00" : "#2c694e" }}
+                valueStyle={{ color: preview.is_repeat_import ? palette.warning : palette.emerald }}
               />
             </Card>
           </Col>
           <Col xs={12} sm={6}>
             <Card size="small">
-              <Statistic title="Existing loans (will update)" value={willUpdate} valueStyle={{ color: "#2c694e" }} />
+              <Statistic title="Existing loans (will update)" value={willUpdate} valueStyle={{ color: palette.emerald }} />
             </Card>
           </Col>
           <Col xs={12} sm={6}>
@@ -615,7 +616,7 @@ function ImportWizard() {
               <Statistic
                 title="Missing from file (needs review)"
                 value={removals.count}
-                valueStyle={removals.count > 0 ? { color: "#ba1a1a" } : {}}
+                valueStyle={removals.count > 0 ? { color: palette.destructive } : {}}
               />
             </Card>
           </Col>
@@ -747,19 +748,19 @@ function ImportWizard() {
     const pendingTotal = result.pending_review + result.removal_flagged;
     return (
       <Space direction="vertical" style={{ width: "100%" }} size="large" align="center">
-        <CheckCircleOutlined style={{ fontSize: 64, color: "#2c694e" }} />
+        <CheckCircleOutlined style={{ fontSize: 64, color: palette.emerald }} />
         <Typography.Title level={3} style={{ margin: 0 }}>
           Import complete
         </Typography.Title>
         <Descriptions bordered size="small" style={{ width: 360 }}>
           <Descriptions.Item label="Inserted" span={3}>
-            <span className="money" style={{ color: "#2c694e" }}>
+            <span className="money" style={{ color: palette.emerald }}>
               {result.inserted_rows}
             </span>
           </Descriptions.Item>
           {result.updated_rows > 0 && (
             <Descriptions.Item label="Updated" span={3}>
-              <span className="money" style={{ color: "#2c694e" }}>
+              <span className="money" style={{ color: palette.emerald }}>
                 {result.updated_rows}
               </span>
             </Descriptions.Item>
@@ -918,7 +919,7 @@ function ImportHistory() {
             dataIndex: "inserted_rows",
             width: 90,
             align: "right",
-            render: (v: number) => <span className="money" style={{ color: "#2c694e" }}>{v}</span>,
+            render: (v: number) => <span className="money" style={{ color: palette.emerald }}>{v}</span>,
           },
           {
             title: "Dupes",
@@ -933,7 +934,7 @@ function ImportHistory() {
             width: 80,
             align: "right",
             render: (v: number) => (
-              <span className="money" style={v > 0 ? { color: "#ba1a1a" } : {}}>
+              <span className="money" style={v > 0 ? { color: palette.destructive } : {}}>
                 {v}
               </span>
             ),

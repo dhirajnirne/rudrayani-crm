@@ -2,6 +2,7 @@
 import '../../../core/theme/app_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'correction_request_dialog.dart';
 import 'customer_detail_provider.dart';
 
 final _rupee = NumberFormat.currency(
@@ -17,12 +18,21 @@ class _HistoryEntry {
   final Color color;
   final String title;
   final String? subtitle;
+  // Only set for entries a correction request can be filed against
+  // (payment / call_log / ptp) — field_visits and attachments have no
+  // correction flow.
+  final String? correctableRecordType;
+  final String? recordId;
+  final Map<String, dynamic>? rawFields;
   const _HistoryEntry({
     required this.at,
     required this.icon,
     required this.color,
     required this.title,
     this.subtitle,
+    this.correctableRecordType,
+    this.recordId,
+    this.rawFields,
   });
 }
 
@@ -50,6 +60,9 @@ List<_HistoryEntry> _merge(Map<String, dynamic> detail) {
           m['agent_name'],
           m['remark'],
         ].whereType<String>().where((v) => v.isNotEmpty).join(' — '),
+        correctableRecordType: 'call_log',
+        recordId: m['id'] as String?,
+        rawFields: {'remark': m['remark']},
       ),
     );
   }
@@ -62,6 +75,13 @@ List<_HistoryEntry> _merge(Map<String, dynamic> detail) {
         color: Colors.green,
         title: 'Payment: ${_rupee.format((m['amount'] as num).toDouble())}',
         subtitle: m['mode'] as String?,
+        correctableRecordType: 'payment',
+        recordId: m['id'] as String?,
+        rawFields: {
+          'amount': m['amount'],
+          'mode': m['mode'],
+          'paid_at': m['paid_at'],
+        },
       ),
     );
   }
@@ -93,6 +113,9 @@ List<_HistoryEntry> _merge(Map<String, dynamic> detail) {
         subtitle: m['promised_date'] != null
             ? 'Promised ${DateFormat('dd MMM yyyy').format(DateTime.parse(m['promised_date'] as String))}'
             : null,
+        correctableRecordType: 'ptp',
+        recordId: m['id'] as String?,
+        rawFields: {'amount': m['amount'], 'promised_date': m['promised_date']},
       ),
     );
   }
@@ -196,6 +219,21 @@ class HistoryTimeline extends ConsumerWidget {
                               color: Colors.grey,
                             ),
                           ),
+                          trailing: e.correctableRecordType != null
+                              ? IconButton(
+                                  icon: const Icon(Icons.flag_outlined, size: 18),
+                                  tooltip: 'Report an error',
+                                  onPressed: () => showCorrectionRequestDialog(
+                                    context,
+                                    ref,
+                                    recordType: e.correctableRecordType!,
+                                    recordId: e.recordId!,
+                                    currentValues: e.rawFields!,
+                                    onSubmitted: () =>
+                                        ref.invalidate(customerDetailProvider(customerId)),
+                                  ),
+                                )
+                              : null,
                         ),
                       )
                       .toList(),

@@ -4,6 +4,7 @@ import dayjs, { type Dayjs } from "dayjs";
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../../api/client";
 import { compactCount, pctText } from "./format";
+import { palette } from "../../theme/tokens";
 import type { DashboardFilters } from "./types";
 
 const { RangePicker } = DatePicker;
@@ -20,7 +21,7 @@ interface TrailAnalytics {
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div style={{ background: "#f7f8f7", borderRadius: 8, padding: "10px 14px" }}>
+    <div style={{ background: palette.background, borderRadius: 8, padding: "10px 14px" }}>
       <Typography.Text type="secondary" style={{ fontSize: 13 }}>
         {label}
       </Typography.Text>
@@ -102,7 +103,7 @@ export default function TrailAnalyticsCard({ filters }: { filters: DashboardFilt
               yField="count"
               height={220}
               maxColumnWidth={28}
-              style={{ radiusTopLeft: 4, radiusTopRight: 4, fill: "#00535b" }}
+              style={{ radiusTopLeft: 4, radiusTopRight: 4, fill: palette.navy }}
               axis={{ x: { labelAutoRotate: true }, y: { grid: true } }}
               tooltip={{
                 title: (d: { result_code: string }) => d.result_code,

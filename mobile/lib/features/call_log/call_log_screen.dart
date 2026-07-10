@@ -4,14 +4,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
-import '../../core/models/customer.dart';
 import '../../core/models/disposition_code.dart';
 import '../../core/offline/offline_queue.dart';
 import '../worklist/worklist_provider.dart';
 
 class CallLogScreen extends ConsumerStatefulWidget {
-  final Customer customer;
-  const CallLogScreen({super.key, required this.customer});
+  final String customerId;
+  const CallLogScreen({super.key, required this.customerId});
 
   @override
   ConsumerState<CallLogScreen> createState() => _CallLogScreenState();
@@ -117,7 +116,7 @@ class _CallLogScreenState extends ConsumerState<CallLogScreen> {
       // One key for both paths: if the request reached the server but the
       // response was lost, the queued re-send must reuse the same key.
       final payload = {
-        'customer_id': widget.customer.id,
+        'customer_id': widget.customerId,
         'disposition_code_id': code.id,
         'fields': fields,
         if (_extraCtrl.text.isNotEmpty) 'extra_remark': _extraCtrl.text,
@@ -163,12 +162,18 @@ class _CallLogScreenState extends ConsumerState<CallLogScreen> {
   @override
   Widget build(BuildContext context) {
     final codesAsync = ref.watch(dispositionCodesProvider);
+    final customerAsync = ref.watch(customerByIdProvider(widget.customerId));
 
     return Scaffold(
       appBar: AppBar(
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
-        title: Text('Log Call — ${widget.customer.customerName}'),
+        title: Text(
+          customerAsync.maybeWhen(
+            data: (c) => 'Log Call — ${c.customerName}',
+            orElse: () => 'Log Call',
+          ),
+        ),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),

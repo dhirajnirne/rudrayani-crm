@@ -189,13 +189,51 @@ describe("monthly allocation import", () => {
     expect(julySnaps.rows[0].n).toBe(3); // AL-003 has no July snapshot
   });
 
-  it("re-uploading a corrected file for the same month overwrites, not duplicates", async () => {
+  it("re-uploading a corrected file for the same month routes the update to review, not a blind overwrite", async () => {
+    // This is a repeat import for 2026-07-01 (month 2 already ran) -- per the
+    // MVP-hardening fix, a change to an already-active customer now waits for
+    // an ops decision instead of applying silently, since AL-001 may already
+    // have calls/payments logged against the old numbers.
     const res = await uploadAndCommit(
       await buildSheet([["AL-001", "Anil", "X", 90000, 5000, AGENT_PHONE]]),
       "allocation",
       "2026-07-01",
     );
     expect(res.status).toBe(201);
+    expect(res.body.is_repeat_import).toBe(true);
+    expect(res.body.updated_rows).toBe(0); // nothing applied directly
+    expect(res.body.pending_review).toBeGreaterThanOrEqual(1);
+
+    // Bucket is untouched -- still month 2's value, not the new file's "X".
+    const custBefore = await pool.query(
+      `SELECT bucket FROM customers WHERE company_id = $1 AND loan_number = 'AL-001'`,
+      [companyId],
+    );
+    expect(custBefore.rows[0].bucket).toBe("Current");
+
+    const item = await pool.query(
+      `SELECT id, item_type, status, payload FROM import_review_items
+        WHERE company_id = $1 AND loan_number = 'AL-001' AND item_type = 'update'
+        ORDER BY created_at DESC LIMIT 1`,
+      [companyId],
+    );
+    expect(item.rows).toHaveLength(1);
+    expect(item.rows[0].status).toBe("pending");
+    expect(item.rows[0].payload.bucket).toBe("X");
+
+    // Approving it is what actually applies the change.
+    const decide = await request(app)
+      .post(`/api/import-reviews/${item.rows[0].id}/decision`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ action: "approve" });
+    expect(decide.status).toBe(200);
+
+    const custAfter = await pool.query(
+      `SELECT bucket FROM customers WHERE company_id = $1 AND loan_number = 'AL-001'`,
+      [companyId],
+    );
+    expect(custAfter.rows[0].bucket).toBe("X");
+
     const snaps = await pool.query(
       `SELECT s.bucket FROM customer_month_snapshots s JOIN customers c ON c.id = s.customer_id
         WHERE s.company_id = $1 AND c.loan_number = 'AL-001' AND s.month = '2026-07-01'`,

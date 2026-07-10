@@ -1,9 +1,6 @@
 import {
   Button,
-  Card,
-  Col,
   DatePicker,
-  Row,
   Select,
   Space,
   Spin,
@@ -13,60 +10,21 @@ import {
   Typography,
   message,
 } from "antd";
-import { DownloadOutlined } from "@ant-design/icons";
+import { DownloadOutlined, SettingOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, errorMessage } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import BreakdownTable from "../components/dashboard/BreakdownTable";
-import BucketMismatchCard from "../components/dashboard/BucketMismatchCard";
-import BucketMovementCard from "../components/dashboard/BucketMovementCard";
-import MetricPanel from "../components/dashboard/MetricPanel";
-import MetricTabsCard from "../components/dashboard/MetricTabsCard";
-import DepositsRangeCard from "../components/dashboard/DepositsRangeCard";
-import OverviewChart from "../components/dashboard/OverviewChart";
-import RecalledStatTile from "../components/dashboard/RecalledStatTile";
-import TrailAnalyticsCard from "../components/dashboard/TrailAnalyticsCard";
-import { lakh, compactCount, pctText } from "../components/dashboard/format";
+import DashboardCustomizer from "../components/dashboard/DashboardCustomizer";
+import { applyLayout, type DashboardRenderCtx } from "../components/dashboard/widgetRegistry";
+import { useDashboardPreferences } from "../hooks/useDashboardPreferences";
 import {
-  METRIC_TITLES,
   type DashboardData,
   type DashboardFilters,
   type MetricKey,
 } from "../components/dashboard/types";
 
 const ALL = "__all__";
-
-function SummaryStat({
-  label,
-  value,
-  accent,
-  sub,
-}: {
-  label: string;
-  value: string;
-  accent?: string;
-  sub?: string;
-}) {
-  return (
-    <div
-      style={{
-        background: "var(--stat-bg, #f0f7f6)",
-        borderRadius: 8,
-        padding: "12px 16px",
-        borderLeft: `3px solid ${accent ?? "#00535b"}`,
-      }}
-    >
-      <Typography.Text type="secondary" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-        {label}
-      </Typography.Text>
-      <div className="money" style={{ fontSize: 22, fontWeight: 700, color: "#00535b", lineHeight: 1.2, marginTop: 2 }}>
-        {value}
-      </div>
-      {sub && <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{sub}</div>}
-    </div>
-  );
-}
 
 /**
  * Performance dashboard (Phase 5, per the blueprint in "web dashboard view"):
@@ -98,6 +56,9 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [customizerOpen, setCustomizerOpen] = useState(false);
+
+  const prefs = useDashboardPreferences();
 
   useEffect(() => {
     if (!isManager) return;
@@ -175,9 +136,6 @@ export default function DashboardPage() {
 
   const products = data?.filters.products ?? [];
   const buckets = data?.filters.buckets ?? [];
-  const otherMetrics = (Object.keys(METRIC_TITLES) as MetricKey[]).filter(
-    (k) => k !== activeMetric,
-  );
 
   return (
     <div>
@@ -218,6 +176,9 @@ export default function DashboardPage() {
           </Space>
           <Button icon={<DownloadOutlined />} loading={exporting} onClick={exportExcel}>
             Export
+          </Button>
+          <Button icon={<SettingOutlined />} onClick={() => setCustomizerOpen(true)}>
+            Customize
           </Button>
         </Space>
       </div>
@@ -309,156 +270,23 @@ export default function DashboardPage() {
         </div>
       ) : (
         <Space direction="vertical" size={16} style={{ width: "100%", display: "flex" }}>
-          {/* Collection hero strip */}
-          <Card
-            size="small"
-            style={{ borderTop: "3px solid #00535b", borderRadius: 8 }}
-            bodyStyle={{ padding: "12px 16px" }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: "#00535b", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                Collection
-              </span>
-              <Tag color="cyan" style={{ fontSize: 11 }}>{data.days.elapsed}d elapsed · {data.days.left}d left</Tag>
-            </div>
-            <Row gutter={[12, 12]}>
-              <Col xs={12} md={6}>
-                <SummaryStat
-                  label="Collection MTD"
-                  value={lakh(data.collection.mtd_amount)}
-                  accent="#00535b"
-                  sub={`Run rate: ${data.collection.run_rate_current != null ? lakh(data.collection.run_rate_current) + "/day" : "—"}`}
-                />
-              </Col>
-              <Col xs={12} md={6}>
-                <SummaryStat
-                  label="Collection Target"
-                  value={data.collection.target_amount != null ? lakh(data.collection.target_amount) : "—"}
-                  accent="#1677ff"
-                />
-              </Col>
-              <Col xs={12} md={6}>
-                <SummaryStat
-                  label="Target Achieved"
-                  value={pctText(data.collection.target_pct)}
-                  accent={
-                    data.collection.target_pct != null && data.collection.target_pct >= 80
-                      ? "#52c41a"
-                      : "#faad14"
-                  }
-                />
-              </Col>
-              <Col xs={12} md={6}>
-                <SummaryStat
-                  label="Required / Day"
-                  value={data.collection.run_rate_required != null ? lakh(data.collection.run_rate_required) : "On target"}
-                  accent="#ff7a45"
-                />
-              </Col>
-            </Row>
-          </Card>
-
-          {/* Gauge + active metric panel */}
-          <Row gutter={[16, 16]}>
-            <Col xs={24} lg={11}>
-              <MetricTabsCard
-                metrics={data.metrics}
-                amountMode={amountMode}
-                active={activeMetric}
-                onChange={setActiveMetric}
-              />
-            </Col>
-            <Col xs={24} lg={13}>
-              <MetricPanel
-                title={METRIC_TITLES[activeMetric]}
-                metric={data.metrics[activeMetric]}
-                amountMode={amountMode}
-              />
-            </Col>
-          </Row>
-
-          {/* Remaining metric cards (blueprint row 2) */}
-          <Row gutter={[16, 16]}>
-            {otherMetrics.map((key) => (
-              <Col xs={24} md={8} key={key}>
-                <MetricPanel
-                  title={METRIC_TITLES[key]}
-                  metric={data.metrics[key]}
-                  amountMode={amountMode}
-                  compact
-                />
-              </Col>
-            ))}
-          </Row>
-
-          {/* Deposited + Trail */}
-          <Row gutter={[16, 16]}>
-            <Col xs={24} md={8}>
-              <Card size="small" title="Deposits (This Month)" style={{ height: "100%" }}>
-                <Row gutter={[10, 10]}>
-                  <Col span={8}>
-                    <SummaryStat label="Collected" value={lakh(data.deposits.collected)} accent="#00535b" />
-                  </Col>
-                  <Col span={8}>
-                    <SummaryStat label="Deposited" value={lakh(data.deposits.deposited)} accent="#1677ff" />
-                  </Col>
-                  <Col span={8}>
-                    <SummaryStat label="Pending" value={lakh(data.deposits.pending)} accent="#faad14" />
-                  </Col>
-                </Row>
-              </Card>
-            </Col>
-            <Col xs={24} md={8}>
-              <DepositsRangeCard filters={filters} />
-            </Col>
-            <Col xs={24} md={8}>
-              <Card size="small" title="Trail Activity" style={{ height: "100%" }}>
-                <Row gutter={[10, 10]}>
-                  <Col span={8}>
-                    <SummaryStat
-                      label="Allocated"
-                      value={compactCount(data.trail.allocated_count)}
-                      accent="#722ed1"
-                    />
-                  </Col>
-                  <Col span={8}>
-                    <SummaryStat
-                      label="Trailed"
-                      value={compactCount(data.trail.uploaded_count)}
-                      accent="#13c2c2"
-                    />
-                  </Col>
-                  <Col span={8}>
-                    <SummaryStat label="Trail %" value={pctText(data.trail.pct)} accent="#eb2f96" />
-                  </Col>
-                </Row>
-              </Card>
-            </Col>
-          </Row>
-
-          {/* Recalled cases + bucket movements (Phase 7) */}
-          <Row gutter={[16, 16]}>
-            <Col xs={24} md={6}>
-              <RecalledStatTile filters={filters} />
-            </Col>
-            <Col xs={24} md={18}>
-              <BucketMovementCard filters={filters} />
-            </Col>
-          </Row>
-
-          {/* DPD cross-check (Phase 7 correction) */}
-          <BucketMismatchCard filters={filters} />
-
-          {/* Dimension breakdown ("product wise view" and every other cut) */}
-          <BreakdownTable filters={filters} />
-
-          {/* Trail / disposition analytics */}
-          <TrailAnalyticsCard filters={filters} />
-
-          {/* Monthly overview chart */}
-          <OverviewChart filters={filters} />
+          {(() => {
+            const ctx: DashboardRenderCtx = { data, filters, amountMode, activeMetric, setActiveMetric };
+            return applyLayout(prefs.layout, isManager).map((w) => (
+              <div key={w.id}>{w.render(ctx)}</div>
+            ));
+          })()}
         </Space>
       )}
+
+      <DashboardCustomizer
+        open={customizerOpen}
+        onClose={() => setCustomizerOpen(false)}
+        layout={prefs.layout}
+        isManager={isManager}
+        onSave={prefs.save}
+        onReset={prefs.reset}
+      />
     </div>
   );
 }

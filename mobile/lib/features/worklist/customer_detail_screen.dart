@@ -11,6 +11,7 @@ import '../attachments/attachments_section.dart';
 import '../reminders/reminder_sheet.dart';
 import 'customer_detail_provider.dart';
 import 'history_timeline.dart';
+import 'worklist_provider.dart';
 
 final _rupee = NumberFormat.currency(
   locale: 'en_IN',
@@ -18,10 +19,65 @@ final _rupee = NumberFormat.currency(
   decimalDigits: 0,
 );
 
+/// Import column headers arrive as raw keys (e.g. "customer_dob",
+/// "PAN-number") — turn them into a readable label instead of showing the
+/// source spreadsheet's column name verbatim.
+String _formatFieldLabel(String key) {
+  final words = key.split(RegExp(r'[_\-\s]+')).where((w) => w.isNotEmpty);
+  return words
+      .map((w) => w[0].toUpperCase() + w.substring(1).toLowerCase())
+      .join(' ');
+}
+
+/// Resolves the customer by id before rendering — the screen navigates by
+/// id only (not the whole Customer object) so it survives an app restart or
+/// a cold deep link into `/customer/:id`.
 class CustomerDetailScreen extends ConsumerWidget {
+  final String customerId;
+
+  const CustomerDetailScreen({super.key, required this.customerId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final customerAsync = ref.watch(customerByIdProvider(customerId));
+    return customerAsync.when(
+      data: (customer) => _CustomerDetailBody(customer: customer),
+      loading: () => Scaffold(
+        appBar: AppBar(
+          backgroundColor: AppColors.primary,
+          foregroundColor: Colors.white,
+        ),
+        body: const Center(child: CircularProgressIndicator()),
+      ),
+      error: (err, _) => Scaffold(
+        appBar: AppBar(
+          backgroundColor: AppColors.primary,
+          foregroundColor: Colors.white,
+        ),
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.error_outline, size: 40, color: Colors.grey),
+              const SizedBox(height: 8),
+              const Text('Could not load this customer'),
+              const SizedBox(height: 12),
+              OutlinedButton(
+                onPressed: () => ref.invalidate(customerByIdProvider(customerId)),
+                child: const Text('Retry'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CustomerDetailBody extends ConsumerWidget {
   final Customer customer;
 
-  const CustomerDetailScreen({super.key, required this.customer});
+  const _CustomerDetailBody({required this.customer});
 
   Future<void> _dial(BuildContext context) async {
     final uri = Uri(scheme: 'tel', path: customer.mobileNumber);
@@ -165,12 +221,19 @@ class CustomerDetailScreen extends ConsumerWidget {
                   Expanded(
                     child: ElevatedButton.icon(
                       icon: const Icon(Icons.call),
-                      label: Text(customer.mobileNumber),
-                      onPressed: () => _dial(context),
+                      label: Text(
+                        customer.mobileNumber.isNotEmpty
+                            ? customer.mobileNumber
+                            : 'No Number',
+                      ),
+                      onPressed: customer.mobileNumber.isNotEmpty
+                          ? () => _dial(context)
+                          : null,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
+                        backgroundColor: AppColors.success,
                         foregroundColor: Colors.white,
-                        minimumSize: const Size(0, 48),
+                        disabledBackgroundColor: Colors.grey.shade300,
+                        disabledForegroundColor: Colors.grey.shade600,
                       ),
                     ),
                   ),
@@ -180,10 +243,7 @@ class CustomerDetailScreen extends ConsumerWidget {
                       icon: const Icon(Icons.note_add),
                       label: const Text('Log Call'),
                       onPressed: () =>
-                          context.push('/call-log', extra: customer),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(0, 48),
-                      ),
+                          context.push('/customer/${customer.id}/call-log'),
                     ),
                   ),
                 ],
@@ -196,10 +256,7 @@ class CustomerDetailScreen extends ConsumerWidget {
                       icon: const Icon(Icons.payment),
                       label: const Text('Record Payment'),
                       onPressed: () =>
-                          context.push('/payment', extra: customer),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(0, 48),
-                      ),
+                          context.push('/customer/${customer.id}/payment'),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -207,10 +264,8 @@ class CustomerDetailScreen extends ConsumerWidget {
                     child: OutlinedButton.icon(
                       icon: const Icon(Icons.calendar_today),
                       label: const Text('View PTPs'),
-                      onPressed: () => context.push('/ptps', extra: customer),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(0, 48),
-                      ),
+                      onPressed: () =>
+                          context.push('/customer/${customer.id}/ptps'),
                     ),
                   ),
                 ],
@@ -222,11 +277,8 @@ class CustomerDetailScreen extends ConsumerWidget {
                     child: OutlinedButton.icon(
                       icon: const Icon(Icons.assignment_turned_in),
                       label: const Text('Field Visit'),
-                      onPressed: () =>
-                          context.push('/field-visit', extra: customer),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(0, 48),
-                      ),
+                      onPressed: () => context
+                          .push('/customer/${customer.id}/field-visit'),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -235,9 +287,6 @@ class CustomerDetailScreen extends ConsumerWidget {
                       icon: const Icon(Icons.directions),
                       label: const Text('Navigate'),
                       onPressed: () => _navigate(context),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(0, 48),
-                      ),
                     ),
                   ),
                 ],
@@ -251,9 +300,6 @@ class CustomerDetailScreen extends ConsumerWidget {
                       label: const Text('Set Reminder'),
                       onPressed: () =>
                           showReminderSheet(context, ref, customer: customer),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(0, 48),
-                      ),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -345,7 +391,7 @@ class CustomerDetailScreen extends ConsumerWidget {
                   title: 'Additional Fields',
                   children: [
                     for (final e in customer.customFields.entries)
-                      _Row(e.key, e.value?.toString() ?? '—'),
+                      _Row(_formatFieldLabel(e.key), e.value?.toString() ?? '—'),
                   ],
                 ),
               const SizedBox(height: 12),

@@ -4,6 +4,7 @@ import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
 import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api/client";
+import { palette } from "../theme/tokens";
 import type { Employee, ReallocationRequest, ReallocationStatus } from "../types";
 
 dayjs.extend(relativeTime);
@@ -80,7 +81,7 @@ export default function ReallocationRequestsPage() {
     <div>
       <Typography.Title level={4}>
         Reallocation Approvals{" "}
-        <Badge count={pendingCount} showZero={false} style={{ backgroundColor: "#d77a00" }} />
+        <Badge count={pendingCount} showZero={false} style={{ backgroundColor: palette.warning }} />
       </Typography.Title>
       <Typography.Paragraph type="secondary">
         An agent flags a customer they can&apos;t work (wrong area, language mismatch, a dispute) from

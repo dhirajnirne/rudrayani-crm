@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import dayjs from "dayjs";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { palette } from "../theme/tokens";
 
 const POLL_MS = 30_000;
 
@@ -52,7 +53,7 @@ export default function AlertsBell() {
             key,
             message: a.full_name,
             description: alertText(a),
-            icon: <WarningOutlined style={{ color: a.status === "stationary" ? "#cf1322" : "#d46b08" }} />,
+            icon: <WarningOutlined style={{ color: a.status === "stationary" ? palette.destructive : palette.warning }} />,
             btn: (
               <Button size="small" type="primary" onClick={() => navigate("/tracking")}>
                 Open live map
@@ -100,7 +101,7 @@ export default function AlertsBell() {
               <List.Item.Meta
                 avatar={
                   <EnvironmentOutlined
-                    style={{ fontSize: 18, color: a.status === "stationary" ? "#cf1322" : "#d46b08" }}
+                    style={{ fontSize: 18, color: a.status === "stationary" ? palette.destructive : palette.warning }}
                   />
                 }
                 title={

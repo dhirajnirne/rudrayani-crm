@@ -245,21 +245,29 @@ function UnallocatedQueue() {
     load(1);
   }, [load]);
 
-  const assign = async () => {
+  const assign = () => {
     if (!agentId) return message.error("Pick an agent first");
-    setAssigning(true);
-    try {
-      const res = await api.post("/allocations/assign", {
-        customer_ids: selected,
-        agent_id: agentId,
-      });
-      message.success(`${res.data.assigned} customer(s) assigned to ${res.data.agent_name}`);
-      load(page);
-    } catch (err) {
-      message.error(errorMessage(err));
-    } finally {
-      setAssigning(false);
-    }
+    const agentName = agents.find((a) => a.id === agentId)?.full_name;
+    Modal.confirm({
+      title: `Assign ${selected.length} customer(s) to ${agentName}?`,
+      content: "This will move them out of the unallocated queue immediately.",
+      okText: "Assign",
+      onOk: async () => {
+        setAssigning(true);
+        try {
+          const res = await api.post("/allocations/assign", {
+            customer_ids: selected,
+            agent_id: agentId,
+          });
+          message.success(`${res.data.assigned} customer(s) assigned to ${res.data.agent_name}`);
+          load(page);
+        } catch (err) {
+          message.error(errorMessage(err));
+        } finally {
+          setAssigning(false);
+        }
+      },
+    });
   };
 
   return (

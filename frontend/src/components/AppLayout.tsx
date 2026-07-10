@@ -1,4 +1,4 @@
-import { Layout, Menu, Spin, Typography, Space, Tag, Button } from "antd";
+import { Layout, Menu, Spin, Typography, Space, Tag, Button, Tooltip } from "antd";
 import { Suspense } from "react";
 import {
   ApartmentOutlined,
@@ -12,9 +12,12 @@ import {
   WalletOutlined,
   FileSearchOutlined,
   FileSyncOutlined,
+  FlagOutlined,
   LogoutOutlined,
+  MoonOutlined,
   ScheduleOutlined,
   ShopOutlined,
+  SunOutlined,
   TeamOutlined,
   UnorderedListOutlined,
   UploadOutlined,
@@ -22,6 +25,7 @@ import {
 } from "@ant-design/icons";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { useThemeMode } from "../theme/ThemeModeProvider";
 import { CAPABILITY_LABELS } from "../types";
 import AlertsBell from "./AlertsBell";
 
@@ -31,10 +35,29 @@ export default function AppLayout() {
   const { user, hasPermission, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  const { mode, toggle } = useThemeMode();
 
   // Menu assembled from active capabilities/permissions (brief §3).
+  // A caller with calls.log but not customers.allocate is a plain
+  // telecaller/field_agent -- TL/ops/admin hold both, so this is the
+  // precise "individual contributor, not a manager" test used throughout.
+  const isIndividualContributor = hasPermission("calls.log") && !hasPermission("customers.allocate");
   const items = [
-    { key: "/", icon: <DashboardOutlined />, label: <Link to="/">Dashboard</Link> },
+    {
+      key: "/",
+      icon: <DashboardOutlined />,
+      label: <Link to="/">{hasPermission("reports.view") ? "Dashboard" : "My Performance"}</Link>,
+    },
+    isIndividualContributor && {
+      key: "/my-worklist",
+      icon: <UnorderedListOutlined />,
+      label: <Link to="/my-worklist">My Worklist</Link>,
+    },
+    isIndividualContributor && {
+      key: "/my-requests",
+      icon: <FileSyncOutlined />,
+      label: <Link to="/my-requests">My Requests</Link>,
+    },
     hasPermission("employees.view") && {
       key: "/employees",
       icon: <UserOutlined />,
@@ -70,7 +93,11 @@ export default function AppLayout() {
       icon: <FileSyncOutlined />,
       label: <Link to="/import-reviews">Import Review</Link>,
     },
-    hasPermission("customers.view") && {
+    // Hidden for a plain telecaller/field_agent: after the GET /customers
+    // scoping fix, it's a strict, less-useful subset of My Worklist above
+    // (no last-call/PTP context) -- two nav items pointing at overlapping
+    // data. The route itself stays reachable directly, it's just not linked.
+    hasPermission("customers.view") && !isIndividualContributor && {
       key: "/customers",
       icon: <UnorderedListOutlined />,
       label: <Link to="/customers">Customers</Link>,
@@ -84,6 +111,11 @@ export default function AppLayout() {
       key: "/reallocation-requests",
       icon: <FileSyncOutlined />,
       label: <Link to="/reallocation-requests">Reallocation Requests</Link>,
+    },
+    hasPermission("customers.allocate") && {
+      key: "/correction-requests",
+      icon: <FlagOutlined />,
+      label: <Link to="/correction-requests">Correction Requests</Link>,
     },
     hasPermission("dispositions.manage") && {
       key: "/dispositions",
@@ -133,7 +165,6 @@ export default function AppLayout() {
       <Layout>
         <Header
           style={{
-            background: "white",
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
@@ -142,6 +173,14 @@ export default function AppLayout() {
         >
           <Typography.Text strong>{user?.full_name}</Typography.Text>
           <Space>
+            <Tooltip title={mode === "dark" ? "Switch to light mode" : "Switch to dark mode"}>
+              <Button
+                type="text"
+                shape="circle"
+                icon={mode === "dark" ? <SunOutlined /> : <MoonOutlined />}
+                onClick={toggle}
+              />
+            </Tooltip>
             <AlertsBell />
             {user?.capabilities.map((c) => (
               <Tag color="blue" key={c}>

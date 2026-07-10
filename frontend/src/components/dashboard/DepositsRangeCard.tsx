@@ -3,6 +3,7 @@ import dayjs, { type Dayjs } from "dayjs";
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../../api/client";
 import { lakh } from "./format";
+import { palette } from "../../theme/tokens";
 import type { DashboardFilters } from "./types";
 
 const { RangePicker } = DatePicker;
@@ -15,11 +16,11 @@ interface DepositTotals {
 
 function Stat({ label, value, accent }: { label: string; value: string; accent?: string }) {
   return (
-    <div style={{ background: "var(--stat-bg, #f0f7f6)", borderRadius: 8, padding: "10px 14px", borderLeft: `3px solid ${accent ?? "#00535b"}` }}>
+    <div style={{ background: palette.background, borderRadius: 8, padding: "10px 14px", borderLeft: `3px solid ${accent ?? palette.navy}` }}>
       <Typography.Text type="secondary" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.04em" }}>
         {label}
       </Typography.Text>
-      <div className="money" style={{ fontSize: 20, fontWeight: 700, color: "#00535b", marginTop: 2 }}>
+      <div className="money" style={{ fontSize: 20, fontWeight: 700, color: palette.navy, marginTop: 2 }}>
         {value}
       </div>
     </div>
@@ -76,7 +77,7 @@ export default function DepositsRangeCard({ filters }: { filters: DashboardFilte
       ) : (
         <Row gutter={[10, 10]}>
           <Col span={8}>
-            <Stat label="Collected" value={data ? lakh(data.collected) : "—"} accent="#00535b" />
+            <Stat label="Collected" value={data ? lakh(data.collected) : "—"} accent={palette.navy} />
           </Col>
           <Col span={8}>
             <Stat label="Deposited" value={data ? lakh(data.deposited) : "—"} accent="#1677ff" />

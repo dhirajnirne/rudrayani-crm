@@ -203,6 +203,32 @@ describe("Task 3.1 — allocation", () => {
   });
 });
 
+describe("Web access — GET /customers self-scoping", () => {
+  it("a telecaller's GET /customers returns only their own assigned customer", async () => {
+    const res = await request(app)
+      .get("/api/customers")
+      .set("Authorization", `Bearer ${agentToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.customers.map((c: { id: string }) => c.id)).toEqual([customerIds[0]]);
+  });
+
+  it("passing agent_id for another agent doesn't leak their customers", async () => {
+    const res = await request(app)
+      .get(`/api/customers?agent_id=${agent2Id}`)
+      .set("Authorization", `Bearer ${agentToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.customers).toHaveLength(0); // the forced self-clamp wins over the requested filter
+  });
+
+  it("a TL (customers.allocate) still sees the whole agency's customer list", async () => {
+    const res = await request(app)
+      .get("/api/customers")
+      .set("Authorization", `Bearer ${tlToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.total).toBe(3);
+  });
+});
+
 describe("Task 3.2 — worklist, dispositions, PTP", () => {
   it("agent worklist shows exactly their allocation", async () => {
     const res = await request(app)
@@ -211,6 +237,29 @@ describe("Task 3.2 — worklist, dispositions, PTP", () => {
     expect(res.status).toBe(200);
     expect(res.body.total).toBe(1); // WF-002 was reallocated away
     expect(res.body.customers[0].loan_number).toBe("WF-001");
+  });
+
+  it("GET /worklist/:id returns a customer assigned to the caller", async () => {
+    const res = await request(app)
+      .get(`/api/worklist/${customerIds[0]}`)
+      .set("Authorization", `Bearer ${agentToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.customer.loan_number).toBe("WF-001");
+  });
+
+  it("GET /worklist/:id 404s for a customer assigned to someone else", async () => {
+    // WF-002 (customerIds[1]) was reallocated away from this agent above.
+    const res = await request(app)
+      .get(`/api/worklist/${customerIds[1]}`)
+      .set("Authorization", `Bearer ${agentToken}`);
+    expect(res.status).toBe(404);
+  });
+
+  it("GET /worklist/:id 404s for a nonexistent id", async () => {
+    const res = await request(app)
+      .get("/api/worklist/00000000-0000-0000-0000-000000000000")
+      .set("Authorization", `Bearer ${agentToken}`);
+    expect(res.status).toBe(404);
   });
 
   it("rejects a PTP disposition missing its required structured fields", async () => {
@@ -352,6 +401,25 @@ describe("Task 3.3 — payments and closure", () => {
       .field("customer_id", customerIds[0])
       .field("amount", "100");
     expect(res.status).toBe(400);
+  });
+
+  it("stamps exceeds_due_amount server-side, but never rejects the payment", async () => {
+    // WF-003 (customerIds[2]) has due_amount 150000 and was never closed.
+    const overDue = await request(app)
+      .post("/api/payments")
+      .set("Authorization", `Bearer ${agentToken}`)
+      .field("customer_id", customerIds[2])
+      .field("amount", "999999"); // way more than due_amount
+    expect(overDue.status).toBe(201);
+    expect(overDue.body.payment.exceeds_due_amount).toBe(true);
+
+    const withinDue = await request(app)
+      .post("/api/payments")
+      .set("Authorization", `Bearer ${agentToken}`)
+      .field("customer_id", customerIds[2])
+      .field("amount", "1000");
+    expect(withinDue.status).toBe(201);
+    expect(withinDue.body.payment.exceeds_due_amount).toBe(false);
   });
 
   it("closed customer cannot receive new dispositions", async () => {

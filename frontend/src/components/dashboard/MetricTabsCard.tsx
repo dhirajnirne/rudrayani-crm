@@ -2,6 +2,7 @@ import { Tabs, Typography } from "antd";
 import { InfoCircleOutlined } from "@ant-design/icons";
 import Gauge from "./Gauge";
 import { lakh, compactCount, metricValue, pctText } from "./format";
+import { palette } from "../../theme/tokens";
 import { METRIC_TITLES, type MetricBlock, type MetricKey } from "./types";
 
 /**
@@ -25,7 +26,7 @@ export default function MetricTabsCard({
   return (
     <div
       style={{
-        background: "linear-gradient(160deg, #00423f 0%, #01302e 100%)",
+        background: `linear-gradient(160deg, ${palette.navy} 0%, ${palette.sidebarDark} 100%)`,
         borderRadius: 12,
         padding: "8px 16px 16px",
         height: "100%",
@@ -39,7 +40,7 @@ export default function MetricTabsCard({
         items={(Object.keys(METRIC_TITLES) as MetricKey[]).map((key) => ({
           key,
           label: (
-            <span style={{ color: key === active ? "#35d431" : "rgba(255,255,255,0.85)" }}>
+            <span style={{ color: key === active ? palette.emerald : "rgba(255,255,255,0.85)" }}>
               {METRIC_TITLES[key]}
             </span>
           ),
@@ -65,12 +66,12 @@ export default function MetricTabsCard({
       </div>
       <div
         style={{
-          background: "rgba(53,212,49,0.12)",
+          background: "rgba(5,150,105,0.18)",
           borderRadius: 8,
           padding: "8px 12px",
         }}
       >
-        <Typography.Text style={{ color: "#e8ffe6", fontSize: 13 }}>
+        <Typography.Text style={{ color: "#D1FAE5", fontSize: 13 }}>
           <InfoCircleOutlined />{" "}
           {away != null ? (
             <>

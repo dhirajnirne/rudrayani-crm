@@ -12,11 +12,18 @@ import {
   Upload,
   message,
 } from "antd";
-import { DownloadOutlined, FilePdfOutlined, FileImageOutlined, UploadOutlined } from "@ant-design/icons";
+import {
+  DownloadOutlined,
+  FilePdfOutlined,
+  FileImageOutlined,
+  FlagOutlined,
+  UploadOutlined,
+} from "@ant-design/icons";
 import type { UploadProps } from "antd";
 import dayjs from "dayjs";
 import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api/client";
+import ReportCorrectionModal, { type CorrectableRecordType } from "./ReportCorrectionModal";
 
 interface Attachment {
   id: string;
@@ -99,16 +106,27 @@ export default function CustomerDetailDrawer({
   const [loading, setLoading] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
+  const [correctionTarget, setCorrectionTarget] = useState<{
+    recordType: CorrectableRecordType;
+    recordId: string;
+    currentValues: Record<string, string | number | null>;
+  } | null>(null);
 
-  useEffect(() => {
-    if (!open || !customerId) return;
-    setDetail(null);
-    setLoading(true);
+  const loadDetail = useCallback(() => {
+    if (!customerId) return;
     api
       .get(`/customers/${customerId}`)
       .then((res) => setDetail(res.data))
       .catch((err) => message.error(errorMessage(err)))
       .finally(() => setLoading(false));
+  }, [customerId]);
+
+  useEffect(() => {
+    if (!open || !customerId) return;
+    setDetail(null);
+    setLoading(true);
+    loadDetail();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, customerId]);
 
   const loadAttachments = useCallback(() => {
@@ -248,7 +266,23 @@ export default function CustomerDetailDrawer({
                       <Typography.Text type="secondary">
                         {dayjs(t.created_at).format("DD MMM YYYY, HH:mm")} — {orDash(t.agent_name)}
                       </Typography.Text>
-                      <div>{orDash(t.remark)}</div>
+                      <div>
+                        {orDash(t.remark)}{" "}
+                        <Button
+                          size="small"
+                          type="link"
+                          style={{ padding: 0, height: "auto" }}
+                          onClick={() =>
+                            setCorrectionTarget({
+                              recordType: "call_log",
+                              recordId: t.id,
+                              currentValues: { remark: t.remark },
+                            })
+                          }
+                        >
+                          Report an error
+                        </Button>
+                      </div>
                     </>
                   ),
                 }))}
@@ -278,6 +312,26 @@ export default function CustomerDetailDrawer({
                     <Tag color={v === "kept" ? "green" : v === "broken" ? "red" : "gold"}>{v}</Tag>
                   ),
                 },
+                {
+                  title: "",
+                  key: "actions",
+                  width: 40,
+                  render: (_: unknown, row: CustomerDetail["ptps"][number]) => (
+                    <Button
+                      size="small"
+                      type="text"
+                      icon={<FlagOutlined />}
+                      title="Report an error"
+                      onClick={() =>
+                        setCorrectionTarget({
+                          recordType: "ptp",
+                          recordId: row.id,
+                          currentValues: { amount: row.amount, promised_date: row.promised_date },
+                        })
+                      }
+                    />
+                  ),
+                },
               ]}
             />
           </div>
@@ -302,6 +356,26 @@ export default function CustomerDetailDrawer({
                   title: "Deposited",
                   dataIndex: "deposited_at",
                   render: (v: string | null) => (v ? dayjs(v).format("DD MMM YYYY") : "Pending"),
+                },
+                {
+                  title: "",
+                  key: "actions",
+                  width: 40,
+                  render: (_: unknown, row: CustomerDetail["payments"][number]) => (
+                    <Button
+                      size="small"
+                      type="text"
+                      icon={<FlagOutlined />}
+                      title="Report an error"
+                      onClick={() =>
+                        setCorrectionTarget({
+                          recordType: "payment",
+                          recordId: row.id,
+                          currentValues: { amount: row.amount, mode: row.mode, paid_at: row.paid_at },
+                        })
+                      }
+                    />
+                  ),
                 },
               ]}
             />
@@ -423,6 +497,16 @@ export default function CustomerDetailDrawer({
             />
           </div>
         </Space>
+      )}
+      {correctionTarget && (
+        <ReportCorrectionModal
+          recordType={correctionTarget.recordType}
+          recordId={correctionTarget.recordId}
+          currentValues={correctionTarget.currentValues}
+          open={correctionTarget !== null}
+          onClose={() => setCorrectionTarget(null)}
+          onSubmitted={loadDetail}
+        />
       )}
     </Drawer>
   );

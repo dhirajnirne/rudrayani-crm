@@ -33,6 +33,21 @@ router.get(
     const conditions: string[] = ["co.agency_id = $1"];
     const params: unknown[] = [req.user!.agency_id];
 
+    // A caller without customers.allocate can only ever see their own
+    // assigned customers here -- unconditionally, so agent_id/field_agent_id
+    // below can't be used to peek at someone else's book. (The single-customer
+    // GET /:id route below already had this check; the list route didn't.)
+    const canSeeAnyCustomer = await capabilitiesHavePermission(
+      capabilitiesOf(req.user!),
+      "customers.allocate",
+    );
+    if (!canSeeAnyCustomer) {
+      params.push(req.user!.id);
+      conditions.push(
+        `(c.assigned_agent_id = $${params.length} OR c.assigned_field_agent_id = $${params.length})`,
+      );
+    }
+
     if (q.company_id) {
       params.push(q.company_id);
       conditions.push(`c.company_id = $${params.length}`);

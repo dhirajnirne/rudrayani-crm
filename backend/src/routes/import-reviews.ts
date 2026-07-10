@@ -37,7 +37,7 @@ interface ReviewPayload {
 const listQuerySchema = z.object({
   company_id: z.string().uuid(),
   status: z.enum(["pending", "approved", "rejected", "superseded", "all"]).default("pending"),
-  type: z.enum(["addition", "removal", "reactivation"]).optional(),
+  type: z.enum(["addition", "removal", "reactivation", "update"]).optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(200).default(50),
 });
@@ -302,6 +302,78 @@ async function approveReactivation(
   );
 }
 
+/**
+ * Applies a due_amount/bucket/etc. change to an already-active customer --
+ * the same COALESCE update import-service.ts applies directly on a FIRST
+ * allocation import of a month, now gated behind review on repeat imports.
+ */
+async function approveUpdate(
+  client: PoolClient,
+  item: { id: string; customer_id: string; payload: ReviewPayload; company_id: string; allocation_month: string },
+  approvedBy: string,
+): Promise<void> {
+  const payload = item.payload;
+  const agent = await resolveAgentByPhone(client, item.company_id, payload.agent_phone);
+  const existing = await client.query(
+    `SELECT id, assigned_agent_id FROM customers WHERE id = $1 AND status = 'active' FOR UPDATE`,
+    [item.customer_id],
+  );
+  const cust = existing.rows[0];
+  if (!cust) {
+    throw new HttpError(
+      409,
+      "Customer is no longer active -- this review item is stale, re-run the import to refresh the queue",
+    );
+  }
+  await client.query(
+    `UPDATE customers
+        SET customer_name   = COALESCE($2, customer_name),
+            mobile_number   = COALESCE($3, mobile_number),
+            product         = COALESCE($4, product),
+            bucket          = COALESCE($5, bucket),
+            due_amount      = COALESCE($6, due_amount),
+            emi             = COALESCE($7, emi),
+            due_date        = COALESCE($8, due_date),
+            custom_fields   = custom_fields || $9::jsonb,
+            assigned_agent_id = COALESCE($10, assigned_agent_id),
+            assigned_team_id  = COALESCE($11, assigned_team_id)
+      WHERE id = $1`,
+    [
+      item.customer_id,
+      payload.customer_name ?? null,
+      payload.mobile_number ?? null,
+      payload.product ?? null,
+      payload.bucket ?? null,
+      payload.due_amount ?? null,
+      payload.emi ?? null,
+      payload.emi_due_date ?? null,
+      JSON.stringify(payload.custom_fields ?? {}),
+      agent?.id ?? null,
+      agent?.team_id ?? null,
+    ],
+  );
+  if (agent && cust.assigned_agent_id !== agent.id) {
+    await client.query(
+      `INSERT INTO allocation_logs (customer_id, from_agent_id, to_agent_id, allocated_by, reason)
+       VALUES ($1, $2, $3, $4, 'Approved from import review (update)')`,
+      [item.customer_id, cust.assigned_agent_id, agent.id, approvedBy],
+    );
+  }
+  await client.query(
+    `INSERT INTO customer_month_snapshots
+       (customer_id, company_id, month, bucket, due_amount, emi, product,
+        assigned_team_id, assigned_agent_id, import_run_id)
+     SELECT c.id, c.company_id, $2, c.bucket, c.due_amount, c.emi, c.product,
+            c.assigned_team_id, c.assigned_agent_id, NULL
+       FROM customers c WHERE c.id = $1
+     ON CONFLICT (customer_id, month) DO UPDATE
+       SET bucket = EXCLUDED.bucket, due_amount = EXCLUDED.due_amount, emi = EXCLUDED.emi,
+           product = EXCLUDED.product, assigned_team_id = EXCLUDED.assigned_team_id,
+           assigned_agent_id = EXCLUDED.assigned_agent_id`,
+    [item.customer_id, item.allocation_month],
+  );
+}
+
 const decisionSchema = z.object({
   action: z.enum(["approve", "reject"]),
   note: z.string().max(500).optional(),
@@ -335,6 +407,8 @@ async function applyDecision(
       await approveAddition(client, item, decidedBy);
     } else if (item.item_type === "removal") {
       await approveRemoval(client, item.customer_id);
+    } else if (item.item_type === "update") {
+      await approveUpdate(client, item, decidedBy);
     } else {
       await approveReactivation(client, item, decidedBy);
     }

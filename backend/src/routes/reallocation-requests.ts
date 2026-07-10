@@ -4,6 +4,8 @@ import { pool } from "../config/db";
 import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
+import { capabilitiesHavePermission } from "../services/permission-service";
+import { capabilitiesOf } from "../types/user";
 
 /**
  * Agent-initiated reallocation requests (brief §8, TL view: "Reallocation
@@ -53,14 +55,34 @@ router.post(
   }),
 );
 
-/** Pending (or historical) requests for the approver's agency. */
+/**
+ * Pending (or historical) requests. TL/ops (customers.allocate) see the
+ * whole agency's approval queue; a plain agent sees only requests they
+ * submitted themselves -- same self-clamp convention already used in
+ * reminders.ts/ptps.ts, so an agent can check the status of their own
+ * requests without needing approval power.
+ */
 router.get(
   "/",
-  requirePermission("customers.allocate"),
+  requirePermission("calls.log"),
   asyncHandler(async (req, res) => {
-    const status = z.enum(["pending", "approved", "rejected"]).default("pending").parse(
-      req.query.status ?? "pending",
-    );
+    const status = z
+      .enum(["pending", "approved", "rejected", "all"])
+      .default("pending")
+      .parse(req.query.status ?? "pending");
+    const seesAll = await capabilitiesHavePermission(capabilitiesOf(req.user!), "customers.allocate");
+
+    const params: unknown[] = [req.user!.agency_id];
+    const filters: string[] = [];
+    if (status !== "all") {
+      params.push(status);
+      filters.push(`r.status = $${params.length}`);
+    }
+    if (!seesAll) {
+      params.push(req.user!.id);
+      filters.push(`r.requested_by = $${params.length}`);
+    }
+
     const { rows } = await pool.query(
       `SELECT r.id, r.reason, r.status, r.created_at, r.decided_at, r.decision_note,
               c.id AS customer_id, c.loan_number, c.customer_name, c.due_amount,
@@ -72,9 +94,10 @@ router.get(
          JOIN companies co ON co.id = c.company_id
          JOIN users u ON u.id = r.requested_by
          LEFT JOIN users d ON d.id = r.decided_by
-        WHERE co.agency_id = $1 AND r.status = $2
-        ORDER BY r.created_at ASC`,
-      [req.user!.agency_id, status],
+        WHERE co.agency_id = $1
+          ${filters.map((f) => `AND ${f}`).join(" ")}
+        ORDER BY r.created_at DESC`,
+      params,
     );
     res.json({ requests: rows, total: rows.length });
   }),

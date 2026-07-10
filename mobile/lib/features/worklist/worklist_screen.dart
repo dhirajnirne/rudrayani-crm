@@ -247,7 +247,7 @@ class _DutyBanner extends ConsumerWidget {
 
     return Container(
       width: double.infinity,
-      color: onDuty ? const Color(0xFFE6F4EA) : const Color(0xFFF1F3F4),
+      color: onDuty ? AppColors.successContainer : AppColors.neutralContainer,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -399,7 +399,7 @@ class _CustomerCard extends StatelessWidget {
           ],
         ),
         trailing: const Icon(Icons.chevron_right),
-        onTap: () => context.push('/customer/${customer.id}', extra: customer),
+        onTap: () => context.push('/customer/${customer.id}'),
       ),
     );
   }

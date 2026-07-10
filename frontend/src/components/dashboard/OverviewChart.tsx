@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { api, errorMessage } from "../../api/client";
 import { message } from "antd";
 import { lakh } from "./format";
+import { palette } from "../../theme/tokens";
 import type { DashboardFilters } from "./types";
 
 interface Point {
@@ -45,7 +46,7 @@ export default function OverviewChart({ filters }: { filters: DashboardFilters }
 
   return (
     <Card
-      style={{ background: "#01302e", border: "none" }}
+      style={{ background: palette.sidebarDark, border: "none" }}
       styles={{ body: { paddingTop: 16 } }}
       title={
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
@@ -53,11 +54,11 @@ export default function OverviewChart({ filters }: { filters: DashboardFilters }
             <Typography.Text style={{ color: "rgba(255,255,255,0.75)", fontSize: 14 }}>
               Total Collection ({viewAll ? "All Months" : "Last 3 Months"})
             </Typography.Text>
-            <div className="money" style={{ color: "#e8ffe6", fontSize: 22, fontWeight: 700 }}>
+            <div className="money" style={{ color: "#D1FAE5", fontSize: 22, fontWeight: 700 }}>
               {new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(total)}
             </div>
           </div>
-          <a style={{ color: "#35d431", fontSize: 13 }} onClick={() => setViewAll((v) => !v)}>
+          <a style={{ color: palette.emerald, fontSize: 13 }} onClick={() => setViewAll((v) => !v)}>
             {viewAll ? "Last 3 Months" : "View All"}
           </a>
         </div>
@@ -74,7 +75,7 @@ export default function OverviewChart({ filters }: { filters: DashboardFilters }
           yField="collected"
           height={260}
           maxColumnWidth={28}
-          style={{ radiusTopLeft: 6, radiusTopRight: 6, fill: "#e8ffe6" }}
+          style={{ radiusTopLeft: 6, radiusTopRight: 6, fill: palette.emerald }}
           axis={{
             x: { labelFill: "rgba(255,255,255,0.85)", line: false, tick: false },
             y: {

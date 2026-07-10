@@ -3,7 +3,7 @@ import '../../../core/theme/app_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
-import '../../core/models/customer.dart';
+import '../worklist/worklist_provider.dart';
 
 final _rupee = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 final _date = DateFormat('dd MMM yyyy');
@@ -15,8 +15,8 @@ final ptpListProvider = FutureProvider.family<List<Map<String, dynamic>>, String
 });
 
 class PtpsScreen extends ConsumerWidget {
-  final Customer customer;
-  const PtpsScreen({super.key, required this.customer});
+  final String customerId;
+  const PtpsScreen({super.key, required this.customerId});
 
   Color _statusColor(String status) => switch (status) {
         'kept' => Colors.green,
@@ -26,17 +26,23 @@ class PtpsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final ptps = ref.watch(ptpListProvider(customer.id));
+    final ptps = ref.watch(ptpListProvider(customerId));
+    final customerAsync = ref.watch(customerByIdProvider(customerId));
 
     return Scaffold(
       appBar: AppBar(
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
-        title: Text('PTPs — ${customer.customerName}'),
+        title: Text(
+          customerAsync.maybeWhen(
+            data: (c) => 'PTPs — ${c.customerName}',
+            orElse: () => 'PTPs',
+          ),
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: () => ref.invalidate(ptpListProvider(customer.id)),
+            onPressed: () => ref.invalidate(ptpListProvider(customerId)),
           ),
         ],
       ),
