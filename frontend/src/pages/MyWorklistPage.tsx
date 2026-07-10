@@ -5,8 +5,10 @@ import relativeTime from "dayjs/plugin/relativeTime";
 import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api/client";
 import CustomerDetailDrawer from "../components/CustomerDetailDrawer";
+import LogCallModal from "../components/LogCallModal";
+import RecordPaymentModal from "../components/RecordPaymentModal";
 import { palette } from "../theme/tokens";
-import type { WorklistCustomer } from "../types";
+import type { DispositionCode, WorklistCustomer } from "../types";
 
 dayjs.extend(relativeTime);
 
@@ -43,6 +45,9 @@ export default function MyWorklistPage() {
   const [ptpsDue, setPtpsDue] = useState<PtpDue[]>([]);
   const [loading, setLoading] = useState(true);
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [dispositionCodes, setDispositionCodes] = useState<DispositionCode[]>([]);
+  const [logCallTarget, setLogCallTarget] = useState<WorklistCustomer | null>(null);
+  const [paymentTarget, setPaymentTarget] = useState<WorklistCustomer | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -61,6 +66,10 @@ export default function MyWorklistPage() {
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    api.get("/dispositions").then((res) => setDispositionCodes(res.data.disposition_codes));
   }, []);
 
   useEffect(() => {
@@ -205,6 +214,20 @@ export default function MyWorklistPage() {
                 "-"
               ),
           },
+          {
+            title: "Actions",
+            width: 180,
+            render: (_, r) => (
+              <Space onClick={(e) => e.stopPropagation()}>
+                <Button size="small" onClick={() => setLogCallTarget(r)}>
+                  Log Call
+                </Button>
+                <Button size="small" onClick={() => setPaymentTarget(r)}>
+                  Payment
+                </Button>
+              </Space>
+            ),
+          },
         ]}
       />
 
@@ -216,6 +239,27 @@ export default function MyWorklistPage() {
           void load();
         }}
       />
+
+      {logCallTarget && (
+        <LogCallModal
+          customerId={logCallTarget.id}
+          customerName={logCallTarget.customer_name}
+          dispositionCodes={dispositionCodes}
+          open={logCallTarget !== null}
+          onClose={() => setLogCallTarget(null)}
+          onSaved={load}
+        />
+      )}
+      {paymentTarget && (
+        <RecordPaymentModal
+          customerId={paymentTarget.id}
+          customerName={paymentTarget.customer_name}
+          dueAmount={paymentTarget.due_amount != null ? Number(paymentTarget.due_amount) : null}
+          open={paymentTarget !== null}
+          onClose={() => setPaymentTarget(null)}
+          onSaved={load}
+        />
+      )}
     </div>
   );
 }
