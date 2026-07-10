@@ -1,4 +1,4 @@
-import { Alert, Badge, Button, Collapse, Space, Table, Tag, Typography, message } from "antd";
+import { Alert, Badge, Button, Collapse, Input, Modal, Space, Table, Tag, Typography, message } from "antd";
 import { CalendarOutlined, PhoneOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
@@ -48,6 +48,9 @@ export default function MyWorklistPage() {
   const [dispositionCodes, setDispositionCodes] = useState<DispositionCode[]>([]);
   const [logCallTarget, setLogCallTarget] = useState<WorklistCustomer | null>(null);
   const [paymentTarget, setPaymentTarget] = useState<WorklistCustomer | null>(null);
+  const [reallocTarget, setReallocTarget] = useState<WorklistCustomer | null>(null);
+  const [reallocReason, setReallocReason] = useState("");
+  const [reallocSubmitting, setReallocSubmitting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -77,6 +80,28 @@ export default function MyWorklistPage() {
   }, [load]);
 
   const dueCount = reminders.length + ptpsDue.length;
+
+  const submitReallocation = async () => {
+    if (!reallocTarget) return;
+    if (reallocReason.trim().length < 3) {
+      message.error("Please explain why (at least a few words)");
+      return;
+    }
+    setReallocSubmitting(true);
+    try {
+      await api.post("/reallocation-requests", {
+        customer_id: reallocTarget.id,
+        reason: reallocReason.trim(),
+      });
+      message.success("Request sent — your team leader will review it");
+      setReallocTarget(null);
+      setReallocReason("");
+    } catch (err) {
+      message.error(errorMessage(err));
+    } finally {
+      setReallocSubmitting(false);
+    }
+  };
 
   return (
     <div>
@@ -216,7 +241,7 @@ export default function MyWorklistPage() {
           },
           {
             title: "Actions",
-            width: 180,
+            width: 260,
             render: (_, r) => (
               <Space onClick={(e) => e.stopPropagation()}>
                 <Button size="small" onClick={() => setLogCallTarget(r)}>
@@ -224,6 +249,15 @@ export default function MyWorklistPage() {
                 </Button>
                 <Button size="small" onClick={() => setPaymentTarget(r)}>
                   Payment
+                </Button>
+                <Button
+                  size="small"
+                  onClick={() => {
+                    setReallocReason("");
+                    setReallocTarget(r);
+                  }}
+                >
+                  Reallocate
                 </Button>
               </Space>
             ),
@@ -260,6 +294,26 @@ export default function MyWorklistPage() {
           onSaved={load}
         />
       )}
+
+      <Modal
+        title={`Request Reallocation — ${reallocTarget?.customer_name ?? ""}`}
+        open={!!reallocTarget}
+        onCancel={() => setReallocTarget(null)}
+        onOk={submitReallocation}
+        confirmLoading={reallocSubmitting}
+        okText="Send Request"
+      >
+        <Typography.Paragraph type="secondary">
+          Your team lead will review this — nothing changes until they decide. Check My Requests for the
+          outcome.
+        </Typography.Paragraph>
+        <Input.TextArea
+          rows={3}
+          placeholder="Why should this customer be moved? (wrong area, language, dispute…)"
+          value={reallocReason}
+          onChange={(e) => setReallocReason(e.target.value)}
+        />
+      </Modal>
     </div>
   );
 }

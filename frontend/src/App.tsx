@@ -23,6 +23,7 @@ const DispositionsPage = lazy(() => import("./pages/DispositionsPage"));
 const EmployeesPage = lazy(() => import("./pages/EmployeesPage"));
 const ImportPage = lazy(() => import("./pages/ImportPage"));
 const ImportReviewPage = lazy(() => import("./pages/ImportReviewPage"));
+const MyRequestsPage = lazy(() => import("./pages/MyRequestsPage"));
 const MyWorklistPage = lazy(() => import("./pages/MyWorklistPage"));
 const ReallocationRequestsPage = lazy(() => import("./pages/ReallocationRequestsPage"));
 const TargetsPage = lazy(() => import("./pages/TargetsPage"));
@@ -65,6 +66,7 @@ export default function App() {
         <Route path="import-reviews" element={<ImportReviewPage />} />
         <Route path="customers" element={<CustomersPage />} />
         <Route path="my-worklist" element={<MyWorklistPage />} />
+        <Route path="my-requests" element={<MyRequestsPage />} />
         <Route path="allocation" element={<AllocationPage />} />
         <Route path="reallocation-requests" element={<ReallocationRequestsPage />} />
         <Route path="correction-requests" element={<CorrectionRequestsPage />} />

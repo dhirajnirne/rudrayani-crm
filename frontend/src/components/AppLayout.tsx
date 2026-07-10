@@ -53,6 +53,11 @@ export default function AppLayout() {
       icon: <UnorderedListOutlined />,
       label: <Link to="/my-worklist">My Worklist</Link>,
     },
+    isIndividualContributor && {
+      key: "/my-requests",
+      icon: <FileSyncOutlined />,
+      label: <Link to="/my-requests">My Requests</Link>,
+    },
     hasPermission("employees.view") && {
       key: "/employees",
       icon: <UserOutlined />,

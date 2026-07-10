@@ -187,11 +187,19 @@ describe("reallocation requests", () => {
     expect(res.status).toBe(409);
   });
 
-  it("agents cannot list requests (no customers.allocate)", async () => {
+  it("an agent CAN list their own requests (self-scoped), but not decide them", async () => {
     const res = await request(app)
-      .get("/api/reallocation-requests")
+      .get("/api/reallocation-requests?status=all")
       .set("Authorization", `Bearer ${agentToken}`);
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
+    expect(res.body.requests.length).toBe(1);
+    expect(res.body.requests[0].id).toBe(requestId);
+
+    const decide = await request(app)
+      .post(`/api/reallocation-requests/${requestId}/decide`)
+      .set("Authorization", `Bearer ${agentToken}`)
+      .send({ approve: true });
+    expect(decide.status).toBe(403);
   });
 
   it("the TL sees the pending request", async () => {
