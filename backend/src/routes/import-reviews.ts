@@ -28,6 +28,7 @@ interface ReviewPayload {
   product?: string | null;
   bucket?: string | null;
   due_amount?: number | null;
+  pos?: number | null;
   emi?: number | null;
   emi_due_date?: string | null;
   agent_phone?: string | null;
@@ -72,7 +73,7 @@ router.get(
               iri.reviewed_by, iri.reviewed_at, iri.review_note, iri.created_at,
               ir.file_name, ir.allocation_month,
               c.customer_name AS current_customer_name, c.bucket AS current_bucket,
-              c.due_amount AS current_due_amount, c.status AS current_status,
+              c.due_amount AS current_due_amount, c.pos AS current_pos, c.status AS current_status,
               agent.full_name AS current_agent_name
          FROM import_review_items iri
          JOIN import_runs ir ON ir.id = iri.import_run_id
@@ -128,7 +129,7 @@ router.get(
           [item.customer_id],
         ),
         pool.query(
-          `SELECT customer_name, bucket, due_amount, emi, status, custom_fields,
+          `SELECT customer_name, bucket, due_amount, pos, emi, status, custom_fields,
                   assigned_agent_id
              FROM customers WHERE id = $1`,
           [item.customer_id],
@@ -172,8 +173,8 @@ async function approveAddition(
   const inserted = await client.query(
     `INSERT INTO customers
        (company_id, loan_number, customer_name, mobile_number, product, bucket,
-        due_amount, emi, due_date, custom_fields, assigned_agent_id, assigned_team_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        due_amount, pos, emi, due_date, custom_fields, assigned_agent_id, assigned_team_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
      ON CONFLICT (company_id, loan_number) DO NOTHING
      RETURNING id`,
     [
@@ -184,6 +185,7 @@ async function approveAddition(
       payload.product ?? null,
       payload.bucket ?? null,
       payload.due_amount ?? null,
+      payload.pos ?? null,
       payload.emi ?? null,
       payload.emi_due_date ?? null,
       JSON.stringify(payload.custom_fields ?? {}),
@@ -207,13 +209,13 @@ async function approveAddition(
   }
   await client.query(
     `INSERT INTO customer_month_snapshots
-       (customer_id, company_id, month, bucket, due_amount, emi, product,
+       (customer_id, company_id, month, bucket, due_amount, pos, emi, product,
         assigned_team_id, assigned_agent_id, import_run_id)
-     SELECT c.id, c.company_id, $2, c.bucket, c.due_amount, c.emi, c.product,
+     SELECT c.id, c.company_id, $2, c.bucket, c.due_amount, c.pos, c.emi, c.product,
             c.assigned_team_id, c.assigned_agent_id, NULL
        FROM customers c WHERE c.id = $1
      ON CONFLICT (customer_id, month) DO UPDATE
-       SET bucket = EXCLUDED.bucket, due_amount = EXCLUDED.due_amount, emi = EXCLUDED.emi,
+       SET bucket = EXCLUDED.bucket, due_amount = EXCLUDED.due_amount, pos = EXCLUDED.pos, emi = EXCLUDED.emi,
            product = EXCLUDED.product, assigned_team_id = EXCLUDED.assigned_team_id,
            assigned_agent_id = EXCLUDED.assigned_agent_id`,
     [customerId, item.allocation_month],
@@ -260,11 +262,12 @@ async function approveReactivation(
             product = COALESCE($4, product),
             bucket = COALESCE($5, bucket),
             due_amount = COALESCE($6, due_amount),
-            emi = COALESCE($7, emi),
-            due_date = COALESCE($8, due_date),
-            custom_fields = custom_fields || $9::jsonb,
-            assigned_agent_id = COALESCE($10, assigned_agent_id),
-            assigned_team_id = COALESCE($11, assigned_team_id)
+            pos = COALESCE($7, pos),
+            emi = COALESCE($8, emi),
+            due_date = COALESCE($9, due_date),
+            custom_fields = custom_fields || $10::jsonb,
+            assigned_agent_id = COALESCE($11, assigned_agent_id),
+            assigned_team_id = COALESCE($12, assigned_team_id)
       WHERE id = $1`,
     [
       item.customer_id,
@@ -273,6 +276,7 @@ async function approveReactivation(
       payload.product ?? null,
       payload.bucket ?? null,
       payload.due_amount ?? null,
+      payload.pos ?? null,
       payload.emi ?? null,
       payload.emi_due_date ?? null,
       JSON.stringify(payload.custom_fields ?? {}),
@@ -289,13 +293,13 @@ async function approveReactivation(
   }
   await client.query(
     `INSERT INTO customer_month_snapshots
-       (customer_id, company_id, month, bucket, due_amount, emi, product,
+       (customer_id, company_id, month, bucket, due_amount, pos, emi, product,
         assigned_team_id, assigned_agent_id, import_run_id)
-     SELECT c.id, c.company_id, $2, c.bucket, c.due_amount, c.emi, c.product,
+     SELECT c.id, c.company_id, $2, c.bucket, c.due_amount, c.pos, c.emi, c.product,
             c.assigned_team_id, c.assigned_agent_id, NULL
        FROM customers c WHERE c.id = $1
      ON CONFLICT (customer_id, month) DO UPDATE
-       SET bucket = EXCLUDED.bucket, due_amount = EXCLUDED.due_amount, emi = EXCLUDED.emi,
+       SET bucket = EXCLUDED.bucket, due_amount = EXCLUDED.due_amount, pos = EXCLUDED.pos, emi = EXCLUDED.emi,
            product = EXCLUDED.product, assigned_team_id = EXCLUDED.assigned_team_id,
            assigned_agent_id = EXCLUDED.assigned_agent_id`,
     [item.customer_id, item.allocation_month],
@@ -332,11 +336,12 @@ async function approveUpdate(
             product         = COALESCE($4, product),
             bucket          = COALESCE($5, bucket),
             due_amount      = COALESCE($6, due_amount),
-            emi             = COALESCE($7, emi),
-            due_date        = COALESCE($8, due_date),
-            custom_fields   = custom_fields || $9::jsonb,
-            assigned_agent_id = COALESCE($10, assigned_agent_id),
-            assigned_team_id  = COALESCE($11, assigned_team_id)
+            pos             = COALESCE($7, pos),
+            emi             = COALESCE($8, emi),
+            due_date        = COALESCE($9, due_date),
+            custom_fields   = custom_fields || $10::jsonb,
+            assigned_agent_id = COALESCE($11, assigned_agent_id),
+            assigned_team_id  = COALESCE($12, assigned_team_id)
       WHERE id = $1`,
     [
       item.customer_id,
@@ -345,6 +350,7 @@ async function approveUpdate(
       payload.product ?? null,
       payload.bucket ?? null,
       payload.due_amount ?? null,
+      payload.pos ?? null,
       payload.emi ?? null,
       payload.emi_due_date ?? null,
       JSON.stringify(payload.custom_fields ?? {}),
@@ -361,13 +367,13 @@ async function approveUpdate(
   }
   await client.query(
     `INSERT INTO customer_month_snapshots
-       (customer_id, company_id, month, bucket, due_amount, emi, product,
+       (customer_id, company_id, month, bucket, due_amount, pos, emi, product,
         assigned_team_id, assigned_agent_id, import_run_id)
-     SELECT c.id, c.company_id, $2, c.bucket, c.due_amount, c.emi, c.product,
+     SELECT c.id, c.company_id, $2, c.bucket, c.due_amount, c.pos, c.emi, c.product,
             c.assigned_team_id, c.assigned_agent_id, NULL
        FROM customers c WHERE c.id = $1
      ON CONFLICT (customer_id, month) DO UPDATE
-       SET bucket = EXCLUDED.bucket, due_amount = EXCLUDED.due_amount, emi = EXCLUDED.emi,
+       SET bucket = EXCLUDED.bucket, due_amount = EXCLUDED.due_amount, pos = EXCLUDED.pos, emi = EXCLUDED.emi,
            product = EXCLUDED.product, assigned_team_id = EXCLUDED.assigned_team_id,
            assigned_agent_id = EXCLUDED.assigned_agent_id`,
     [item.customer_id, item.allocation_month],

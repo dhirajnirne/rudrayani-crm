@@ -67,9 +67,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await pool.query("DELETE FROM import_runs WHERE company_id = $1", [companyId]);
   await pool.query("DELETE FROM products WHERE company_id = $1", [companyId]);
   await pool.query("DELETE FROM customers WHERE company_id = $1", [companyId]);
+  await pool.query("DELETE FROM import_runs WHERE company_id = $1", [companyId]);
   await pool.query("DELETE FROM import_templates WHERE company_id = $1", [companyId]);
   await pool.query("DELETE FROM companies WHERE id = $1", [companyId]);
   await pool.query("DELETE FROM users WHERE agency_id = $1", [agencyId]);
@@ -171,6 +171,51 @@ describe("Excel import pipeline (brief §4)", () => {
     expect(rows[0].customer_name).toBe("Ramesh Kumar");
     expect(Number(rows[0].due_amount)).toBe(125000); // "1,25,000" parsed
     expect(rows[0].custom_fields["Vehicle No"]).toBe("MH10AB1234"); // nothing lost
+  });
+
+  it("commit stores a mapped POS column separately from due_amount", async () => {
+    // Own company so this doesn't add an extra import_runs row to companyId's
+    // history, which the later "records the import history" test counts exactly.
+    const posCompany = await pool.query(
+      "INSERT INTO companies (agency_id, name) VALUES ($1, 'Pos Test FinCorp') RETURNING id",
+      [agencyId],
+    );
+    const posCompanyId = posCompany.rows[0].id;
+
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Ledger");
+    ws.addRow(["Loan No", "Cust Name", "Total Due", "POS"]);
+    ws.addRow(["LN900", "Pos Test Customer", "5,000", "1,25,000"]);
+    const buffer = Buffer.from(await wb.xlsx.writeBuffer());
+
+    const upload = await request(app)
+      .post("/api/imports/upload")
+      .set("Authorization", `Bearer ${token}`)
+      .attach("file", buffer, "pos_test.xlsx");
+    expect(upload.status).toBe(201);
+
+    const commit = await request(app)
+      .post("/api/imports/commit")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        upload_key: upload.body.upload_key,
+        company_id: posCompanyId,
+        column_mapping: { "Loan No": "loan_number", "Cust Name": "customer_name", "Total Due": "due_amount", POS: "pos" },
+        file_name: "pos_test.xlsx",
+      });
+    expect(commit.status).toBe(201);
+    expect(commit.body.inserted_rows).toBe(1);
+
+    const { rows } = await pool.query(
+      "SELECT due_amount, pos FROM customers WHERE company_id = $1 AND loan_number = 'LN900'",
+      [posCompanyId],
+    );
+    expect(Number(rows[0].due_amount)).toBe(5000);
+    expect(Number(rows[0].pos)).toBe(125000);
+
+    await pool.query("DELETE FROM customers WHERE company_id = $1", [posCompanyId]);
+    await pool.query("DELETE FROM import_runs WHERE company_id = $1", [posCompanyId]);
+    await pool.query("DELETE FROM companies WHERE id = $1", [posCompanyId]);
   });
 
   it("re-importing the same file flags all rows as DB duplicates, inserts none", async () => {

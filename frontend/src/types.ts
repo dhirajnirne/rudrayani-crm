@@ -90,6 +90,7 @@ export interface Customer {
   product: string | null;
   bucket: string | null;
   due_amount: string | null;
+  pos: string | null;
   emi: string | null;
   status: "active" | "closed" | "recalled";
   assigned_agent_id: string | null;
@@ -116,6 +117,7 @@ export interface WorklistCustomer {
   product: string | null;
   bucket: string | null;
   due_amount: string | null;
+  pos: string | null;
   emi: string | null;
   custom_fields: Record<string, unknown>;
   company_name: string;
@@ -153,6 +155,7 @@ export interface ReviewItem {
     product?: string | null;
     bucket?: string | null;
     due_amount?: number | null;
+    pos?: number | null;
     emi?: number | null;
     agent_phone?: string | null;
     custom_fields?: Record<string, string>;
@@ -166,6 +169,7 @@ export interface ReviewItem {
   current_customer_name: string | null;
   current_bucket: string | null;
   current_due_amount: string | null;
+  current_pos: string | null;
   current_status: string | null;
   current_agent_name: string | null;
 }
@@ -183,6 +187,7 @@ export interface ReallocationRequest {
   loan_number: string;
   customer_name: string;
   due_amount: string | null;
+  pos: string | null;
   company_name: string;
   requested_by_id: string;
   requested_by_name: string;
@@ -204,5 +209,6 @@ export const SYSTEM_FIELD_LABELS: Record<string, string> = {
   product: "Product",
   bucket: "Bucket",
   due_amount: "Due Amount",
+  pos: "POS (Principal Outstanding)",
   emi: "EMI Amount",
 };

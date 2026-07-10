@@ -46,20 +46,22 @@ const SYSTEM_FIELDS = [
   { value: "mobile_number", label: "Mobile Number (recommended)" },
   { value: "product", label: "Product (recommended)" },
   { value: "bucket", label: "Bucket (recommended)" },
-  { value: "due_amount", label: "Due Amount / POS (recommended)" },
+  { value: "due_amount", label: "Due Amount (recommended)" },
+  { value: "pos", label: "POS — Principal Outstanding (recommended)" },
   { value: "emi", label: "EMI Amount (recommended)" },
   { value: "emi_due_date", label: "EMI Due Date (recommended)" },
   { value: "agent_phone", label: "Agent Phone — assigns the loan (recommended)" },
   { value: "address", label: "Address" },
 ];
 
-const RECOMMENDED_FIELDS = ["mobile_number", "product", "bucket", "due_amount", "emi", "emi_due_date", "agent_phone"];
+const RECOMMENDED_FIELDS = ["mobile_number", "product", "bucket", "due_amount", "pos", "emi", "emi_due_date", "agent_phone"];
 
 interface DiffSample {
   loan_number: string;
   customer_name: string | null;
   bucket: string | null;
   due_amount: number | null;
+  pos?: number | null;
   agent_name?: string | null;
   previous_status?: string;
 }
@@ -484,6 +486,11 @@ function ImportWizard() {
     {
       title: "Due Amount",
       dataIndex: "due_amount",
+      render: (v: number | null) => (v == null ? "-" : v.toLocaleString("en-IN")),
+    },
+    {
+      title: "POS",
+      dataIndex: "pos",
       render: (v: number | null) => (v == null ? "-" : v.toLocaleString("en-IN")),
     },
   ];

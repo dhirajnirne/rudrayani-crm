@@ -140,12 +140,21 @@ router.post(
     const removalCustomerIds = diff.removals.map((r) => r.customerId);
     const removalDetails = removalCustomerIds.length
       ? await pool.query(
-          `SELECT c.id, c.customer_name, c.bucket, c.due_amount, u.full_name AS agent_name
+          `SELECT c.id, c.customer_name, c.bucket, c.due_amount, c.pos, u.full_name AS agent_name
              FROM customers c LEFT JOIN users u ON u.id = c.assigned_agent_id
             WHERE c.id = ANY($1)`,
           [removalCustomerIds],
         )
-      : { rows: [] as { id: string; customer_name: string; bucket: string | null; due_amount: string | null; agent_name: string | null }[] };
+      : {
+          rows: [] as {
+            id: string;
+            customer_name: string;
+            bucket: string | null;
+            due_amount: string | null;
+            pos: string | null;
+            agent_name: string | null;
+          }[],
+        };
     const removalById = new Map(removalDetails.rows.map((r) => [r.id, r]));
 
     res.json({
@@ -161,6 +170,7 @@ router.post(
           customer_name: a.row.customer_name,
           bucket: a.row.bucket,
           due_amount: a.row.due_amount,
+          pos: a.row.pos,
         })),
       },
       removals: {
@@ -170,6 +180,7 @@ router.post(
           customer_name: removalById.get(r.customerId)?.customer_name ?? null,
           bucket: removalById.get(r.customerId)?.bucket ?? null,
           due_amount: removalById.get(r.customerId)?.due_amount ?? null,
+          pos: removalById.get(r.customerId)?.pos ?? null,
           agent_name: removalById.get(r.customerId)?.agent_name ?? null,
         })),
       },

@@ -85,7 +85,7 @@ router.get(
 
     const { rows } = await pool.query(
       `SELECT r.id, r.reason, r.status, r.created_at, r.decided_at, r.decision_note,
-              c.id AS customer_id, c.loan_number, c.customer_name, c.due_amount,
+              c.id AS customer_id, c.loan_number, c.customer_name, c.due_amount, c.pos,
               co.name AS company_name,
               u.id AS requested_by_id, u.full_name AS requested_by_name,
               d.full_name AS decided_by_name

@@ -1010,6 +1010,7 @@ export interface RecalledCustomerRow {
   recalled_at: string;
   last_bucket: string | null;
   last_due_amount: number | null;
+  last_pos: number | null;
   last_agent_name: string | null;
 }
 
@@ -1074,6 +1075,7 @@ export async function recallReport(
   const customerRows = await pool.query(
     `SELECT c.id AS customer_id, c.loan_number, c.customer_name, co.name AS company_name,
             c.recalled_at, c.bucket AS last_bucket, c.due_amount::float AS last_due_amount,
+            c.pos::float AS last_pos,
             (SELECT u.full_name FROM allocation_logs al
                JOIN users u ON u.id = al.to_agent_id
               WHERE al.customer_id = c.id

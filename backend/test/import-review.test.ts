@@ -218,6 +218,84 @@ describe("import review queue: addition approval", () => {
     expect(snap.rows).toHaveLength(1);
   });
 
+  it("approving an addition carries the mapped POS value through to the customer and snapshot", async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Allocation");
+    ws.addRow(["Loan", "Name", "Bucket", "Total Due", "POS", "EMI", "Agent"]);
+    ws.addRow(["REV-POS-BASE", "Base Row", "30", 10000, 125000, 500, ""]);
+    const firstBuf = Buffer.from(await wb.xlsx.writeBuffer());
+    const posMapping = {
+      Loan: "loan_number",
+      Name: "customer_name",
+      Bucket: "bucket",
+      "Total Due": "due_amount",
+      POS: "pos",
+      EMI: "emi",
+      Agent: "agent_phone",
+    };
+    const uploadFirst = await request(app)
+      .post("/api/imports/upload")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .attach("file", firstBuf, "pos_allocation.xlsx");
+    const first = await request(app)
+      .post("/api/imports/commit")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        upload_key: uploadFirst.body.upload_key,
+        company_id: companyId,
+        column_mapping: posMapping,
+        mode: "allocation",
+        allocation_month: "2026-06-01",
+      });
+    expect(first.status).toBe(201); // first-of-month, inserts directly
+
+    const wb2 = new ExcelJS.Workbook();
+    const ws2 = wb2.addWorksheet("Allocation");
+    ws2.addRow(["Loan", "Name", "Bucket", "Total Due", "POS", "EMI", "Agent"]);
+    ws2.addRow(["REV-POS-BASE", "Base Row", "30", 10000, 125000, 500, ""]);
+    ws2.addRow(["REV-POS-NEW", "New Arrival", "60", 20000, 240000, 1000, ""]);
+    const secondBuf = Buffer.from(await wb2.xlsx.writeBuffer());
+    const uploadSecond = await request(app)
+      .post("/api/imports/upload")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .attach("file", secondBuf, "pos_allocation2.xlsx");
+    const second = await request(app)
+      .post("/api/imports/commit")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        upload_key: uploadSecond.body.upload_key,
+        company_id: companyId,
+        column_mapping: posMapping,
+        mode: "allocation",
+        allocation_month: "2026-06-01", // repeat import: REV-POS-NEW is an addition item
+      });
+    expect(second.status).toBe(201);
+
+    const item = await findItem("REV-POS-NEW", "addition");
+    expect(item.payload.pos).toBe(240000);
+
+    const decision = await request(app)
+      .post(`/api/import-reviews/${item.id}/decision`)
+      .set("Authorization", `Bearer ${opsToken}`)
+      .send({ action: "approve" });
+    expect(decision.status).toBe(200);
+
+    const cust = await pool.query(
+      `SELECT due_amount, pos FROM customers WHERE company_id = $1 AND loan_number = 'REV-POS-NEW'`,
+      [companyId],
+    );
+    expect(Number(cust.rows[0].due_amount)).toBe(20000);
+    expect(Number(cust.rows[0].pos)).toBe(240000);
+
+    const snap = await pool.query(
+      `SELECT s.pos FROM customer_month_snapshots s
+         JOIN customers c ON c.id = s.customer_id
+        WHERE c.company_id = $1 AND c.loan_number = 'REV-POS-NEW' AND s.month = '2026-06-01'`,
+      [companyId],
+    );
+    expect(Number(snap.rows[0].pos)).toBe(240000);
+  });
+
   it("deciding on an already-decided item returns 409, not a silent no-op", async () => {
     const item = await findItem("REV-ADD-NEW", "addition");
     const res = await request(app)

@@ -12,6 +12,7 @@ export const SYSTEM_FIELDS = [
   "product",
   "bucket",
   "due_amount",
+  "pos", // principal outstanding -- distinct from due_amount (owner feedback round, Phase 1)
   "emi",
   "emi_due_date", // this cycle's EMI due date -- drives the independent DPD cross-check (Phase 7)
   "agent_phone", // assigns the loan to the agent with this phone (optional)
@@ -19,7 +20,7 @@ export const SYSTEM_FIELDS = [
 ] as const;
 export type SystemField = (typeof SYSTEM_FIELDS)[number];
 const REQUIRED_FIELDS: SystemField[] = ["loan_number", "customer_name"];
-const NUMERIC_FIELDS: SystemField[] = ["due_amount", "emi"];
+const NUMERIC_FIELDS: SystemField[] = ["due_amount", "pos", "emi"];
 const DATE_FIELDS: SystemField[] = ["emi_due_date"];
 // Fields that route into custom_fields rather than a native customers column.
 const CUSTOM_FIELDS_PASSTHROUGH: SystemField[] = ["address"];
@@ -45,6 +46,7 @@ export interface MappedRow {
   product: string | null;
   bucket: string | null;
   due_amount: number | null;
+  pos: number | null;
   emi: number | null;
   emi_due_date: string | null; // 'YYYY-MM-DD'
   agent_phone: string | null;
@@ -414,6 +416,7 @@ function rowToReviewPayload(row: MappedRow): Record<string, unknown> {
     product: row.product,
     bucket: row.bucket,
     due_amount: row.due_amount,
+    pos: row.pos,
     emi: row.emi,
     emi_due_date: row.emi_due_date,
     agent_phone: row.agent_phone,
@@ -561,8 +564,8 @@ export async function commitImport(params: {
       const inserted = await client.query(
         `INSERT INTO customers
            (company_id, loan_number, customer_name, mobile_number, product, bucket,
-            due_amount, emi, due_date, custom_fields, assigned_agent_id, assigned_team_id, import_run_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+            due_amount, pos, emi, due_date, custom_fields, assigned_agent_id, assigned_team_id, import_run_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
          ON CONFLICT (company_id, loan_number) DO NOTHING
          RETURNING id`,
         [
@@ -573,6 +576,7 @@ export async function commitImport(params: {
           row.product,
           row.bucket,
           row.due_amount,
+          row.pos,
           row.emi,
           row.emi_due_date,
           JSON.stringify(row.custom_fields),
@@ -610,11 +614,12 @@ export async function commitImport(params: {
                 product         = COALESCE($4, product),
                 bucket          = COALESCE($5, bucket),
                 due_amount      = COALESCE($6, due_amount),
-                emi             = COALESCE($7, emi),
-                due_date        = COALESCE($8, due_date),
-                custom_fields   = custom_fields || $9::jsonb,
-                assigned_agent_id = COALESCE($10, assigned_agent_id),
-                assigned_team_id  = COALESCE($11, assigned_team_id)
+                pos             = COALESCE($7, pos),
+                emi             = COALESCE($8, emi),
+                due_date        = COALESCE($9, due_date),
+                custom_fields   = custom_fields || $10::jsonb,
+                assigned_agent_id = COALESCE($11, assigned_agent_id),
+                assigned_team_id  = COALESCE($12, assigned_team_id)
           WHERE id = $1`,
         [
           cust.id,
@@ -623,6 +628,7 @@ export async function commitImport(params: {
           row.product,
           row.bucket,
           row.due_amount,
+          row.pos,
           row.emi,
           row.emi_due_date,
           JSON.stringify(row.custom_fields),
@@ -645,14 +651,15 @@ export async function commitImport(params: {
       for (const customerId of snapshotIds) {
         await client.query(
           `INSERT INTO customer_month_snapshots
-             (customer_id, company_id, month, bucket, due_amount, emi, due_date, product,
+             (customer_id, company_id, month, bucket, due_amount, pos, emi, due_date, product,
               assigned_team_id, assigned_agent_id, import_run_id)
-           SELECT c.id, c.company_id, $2, c.bucket, c.due_amount, c.emi, c.due_date, c.product,
+           SELECT c.id, c.company_id, $2, c.bucket, c.due_amount, c.pos, c.emi, c.due_date, c.product,
                   c.assigned_team_id, c.assigned_agent_id, $3
              FROM customers c WHERE c.id = $1
            ON CONFLICT (customer_id, month) DO UPDATE
              SET bucket = EXCLUDED.bucket,
                  due_amount = EXCLUDED.due_amount,
+                 pos = EXCLUDED.pos,
                  emi = EXCLUDED.emi,
                  due_date = EXCLUDED.due_date,
                  product = EXCLUDED.product,
