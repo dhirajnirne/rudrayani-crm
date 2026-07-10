@@ -26,6 +26,10 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
   bool _closeCustomer = false;
   bool _loading = false;
   String? _error;
+  // Amounts above what's owed are never blocked (per product decision) — just
+  // requires a deliberate acknowledgement so a typo'd extra zero doesn't slip
+  // through silently.
+  bool _confirmedExceedsDue = false;
 
   @override
   void dispose() {
@@ -55,6 +59,13 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
     if (_amountCtrl.text.isEmpty) { setState(() => _error = 'Amount is required'); return; }
     final amount = double.tryParse(_amountCtrl.text);
     if (amount == null || amount <= 0) { setState(() => _error = 'Enter a valid positive amount'); return; }
+
+    final dueAmount = ref.read(customerByIdProvider(widget.customerId)).valueOrNull?.dueAmount;
+    final exceedsDue = dueAmount != null && amount > dueAmount;
+    if (exceedsDue && !_confirmedExceedsDue) {
+      setState(() => _error = 'Confirm the amount above — it\'s more than what\'s owed');
+      return;
+    }
 
     setState(() { _loading = true; _error = null; });
     try {
@@ -120,6 +131,9 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
   @override
   Widget build(BuildContext context) {
     final customerAsync = ref.watch(customerByIdProvider(widget.customerId));
+    final dueAmount = customerAsync.valueOrNull?.dueAmount;
+    final enteredAmount = double.tryParse(_amountCtrl.text);
+    final exceedsDue = dueAmount != null && enteredAmount != null && enteredAmount > dueAmount;
     return Scaffold(
       appBar: AppBar(
         backgroundColor: AppColors.primary,
@@ -144,7 +158,38 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
                 border: OutlineInputBorder(),
                 prefixIcon: Icon(Icons.currency_rupee),
               ),
+              onChanged: (_) => setState(() => _confirmedExceedsDue = false),
             ),
+            if (exceedsDue) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppColors.warningContainer,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'This is more than what\'s owed (₹${dueAmount.toStringAsFixed(0)} due). Double-check the amount.',
+                      style: const TextStyle(fontSize: 12, color: AppColors.warning),
+                    ),
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      controlAffinity: ListTileControlAffinity.leading,
+                      title: const Text(
+                        'Yes, this amount is correct',
+                        style: TextStyle(fontSize: 13),
+                      ),
+                      value: _confirmedExceedsDue,
+                      onChanged: (v) => setState(() => _confirmedExceedsDue = v ?? false),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
               initialValue: _mode,

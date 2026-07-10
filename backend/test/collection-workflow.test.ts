@@ -377,6 +377,25 @@ describe("Task 3.3 — payments and closure", () => {
     expect(res.status).toBe(400);
   });
 
+  it("stamps exceeds_due_amount server-side, but never rejects the payment", async () => {
+    // WF-003 (customerIds[2]) has due_amount 150000 and was never closed.
+    const overDue = await request(app)
+      .post("/api/payments")
+      .set("Authorization", `Bearer ${agentToken}`)
+      .field("customer_id", customerIds[2])
+      .field("amount", "999999"); // way more than due_amount
+    expect(overDue.status).toBe(201);
+    expect(overDue.body.payment.exceeds_due_amount).toBe(true);
+
+    const withinDue = await request(app)
+      .post("/api/payments")
+      .set("Authorization", `Bearer ${agentToken}`)
+      .field("customer_id", customerIds[2])
+      .field("amount", "1000");
+    expect(withinDue.status).toBe(201);
+    expect(withinDue.body.payment.exceeds_due_amount).toBe(false);
+  });
+
   it("closed customer cannot receive new dispositions", async () => {
     const res = await request(app)
       .post("/api/call-logs")

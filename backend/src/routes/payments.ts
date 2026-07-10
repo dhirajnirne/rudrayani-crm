@@ -65,7 +65,7 @@ router.post(
     }
 
     const custRes = await pool.query(
-      `SELECT c.id, c.status FROM customers c
+      `SELECT c.id, c.status, c.due_amount FROM customers c
          JOIN companies co ON co.id = c.company_id
         WHERE c.id = $1 AND co.agency_id = $2`,
       [body.customer_id, agencyId],
@@ -75,6 +75,13 @@ router.post(
     if (custRes.rows[0].status === "recalled") {
       throw new HttpError(400, "Customer was recalled by the lender -- no longer collectible here");
     }
+
+    // Stamped server-side from the customer's actual due_amount, ignoring
+    // whatever the client believes — a reliable ops signal even if a future
+    // client build forgets to show the warning (product decision: never
+    // block on this, just flag it for later spot-checking).
+    const dueAmount = custRes.rows[0].due_amount as string | null;
+    const exceedsDueAmount = dueAmount != null && body.amount > Number(dueAmount);
 
     let photoKey: string | null = null;
     if (req.file) {
@@ -87,8 +94,8 @@ router.post(
     try {
       await client.query("BEGIN");
       const payRes = await client.query(
-        `INSERT INTO payments (customer_id, collected_by_user_id, amount, mode, photo_proof_url, paid_at, client_key)
-         VALUES ($1, $2, $3, $4, $5, COALESCE($6::date, now()), $7)
+        `INSERT INTO payments (customer_id, collected_by_user_id, amount, mode, photo_proof_url, paid_at, client_key, exceeds_due_amount)
+         VALUES ($1, $2, $3, $4, $5, COALESCE($6::date, now()), $7, $8)
          RETURNING *`,
         [
           body.customer_id,
@@ -98,6 +105,7 @@ router.post(
           photoKey,
           body.paid_at ?? null,
           body.client_key ?? null,
+          exceedsDueAmount,
         ],
       );
 
