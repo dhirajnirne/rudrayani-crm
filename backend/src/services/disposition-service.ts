@@ -13,6 +13,10 @@ export interface DispositionCodeRow {
   result_code: string | null;
   description: string | null;
   remark_template: string | null;
+  // FV (field visit) or OC (on-call) -- NULL for legacy/custom codes an
+  // admin hasn't tagged yet. Only used for filtering pickers on the client;
+  // call-log submission itself doesn't branch on it.
+  channel: "FV" | "OC" | null;
   needs_amount: boolean;
   needs_date: boolean;
   needs_time: boolean;
