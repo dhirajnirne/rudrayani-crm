@@ -38,8 +38,21 @@ export default function AppLayout() {
   const { mode, toggle } = useThemeMode();
 
   // Menu assembled from active capabilities/permissions (brief §3).
+  // A caller with calls.log but not customers.allocate is a plain
+  // telecaller/field_agent -- TL/ops/admin hold both, so this is the
+  // precise "individual contributor, not a manager" test used throughout.
+  const isIndividualContributor = hasPermission("calls.log") && !hasPermission("customers.allocate");
   const items = [
-    { key: "/", icon: <DashboardOutlined />, label: <Link to="/">Dashboard</Link> },
+    {
+      key: "/",
+      icon: <DashboardOutlined />,
+      label: <Link to="/">{hasPermission("reports.view") ? "Dashboard" : "My Performance"}</Link>,
+    },
+    isIndividualContributor && {
+      key: "/my-worklist",
+      icon: <UnorderedListOutlined />,
+      label: <Link to="/my-worklist">My Worklist</Link>,
+    },
     hasPermission("employees.view") && {
       key: "/employees",
       icon: <UserOutlined />,
@@ -75,7 +88,11 @@ export default function AppLayout() {
       icon: <FileSyncOutlined />,
       label: <Link to="/import-reviews">Import Review</Link>,
     },
-    hasPermission("customers.view") && {
+    // Hidden for a plain telecaller/field_agent: after the GET /customers
+    // scoping fix, it's a strict, less-useful subset of My Worklist above
+    // (no last-call/PTP context) -- two nav items pointing at overlapping
+    // data. The route itself stays reachable directly, it's just not linked.
+    hasPermission("customers.view") && !isIndividualContributor && {
       key: "/customers",
       icon: <UnorderedListOutlined />,
       label: <Link to="/customers">Customers</Link>,

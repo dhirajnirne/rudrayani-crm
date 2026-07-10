@@ -203,6 +203,32 @@ describe("Task 3.1 — allocation", () => {
   });
 });
 
+describe("Web access — GET /customers self-scoping", () => {
+  it("a telecaller's GET /customers returns only their own assigned customer", async () => {
+    const res = await request(app)
+      .get("/api/customers")
+      .set("Authorization", `Bearer ${agentToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.customers.map((c: { id: string }) => c.id)).toEqual([customerIds[0]]);
+  });
+
+  it("passing agent_id for another agent doesn't leak their customers", async () => {
+    const res = await request(app)
+      .get(`/api/customers?agent_id=${agent2Id}`)
+      .set("Authorization", `Bearer ${agentToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.customers).toHaveLength(0); // the forced self-clamp wins over the requested filter
+  });
+
+  it("a TL (customers.allocate) still sees the whole agency's customer list", async () => {
+    const res = await request(app)
+      .get("/api/customers")
+      .set("Authorization", `Bearer ${tlToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.total).toBe(3);
+  });
+});
+
 describe("Task 3.2 — worklist, dispositions, PTP", () => {
   it("agent worklist shows exactly their allocation", async () => {
     const res = await request(app)

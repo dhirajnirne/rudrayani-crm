@@ -102,6 +102,33 @@ export interface Customer {
   company_id: string;
 }
 
+/**
+ * GET /worklist's response shape -- deliberately NOT the same as Customer.
+ * It's scoped to "assigned to me" and carries call/PTP context Customer
+ * doesn't have, while omitting fields (status, assigned_agent_id, etc.)
+ * that don't apply to a self-scoped worklist.
+ */
+export interface WorklistCustomer {
+  id: string;
+  loan_number: string;
+  customer_name: string;
+  mobile_number: string | null;
+  product: string | null;
+  bucket: string | null;
+  due_amount: string | null;
+  emi: string | null;
+  custom_fields: Record<string, unknown>;
+  company_name: string;
+  is_primary_for_me: boolean;
+  is_field_agent_for_me: boolean;
+  last_remark: string | null;
+  last_call_at: string | null;
+  last_result_code: string | null;
+  ptp_amount: string | null;
+  ptp_date: string | null;
+  normalized_pending: boolean;
+}
+
 export interface AllocationLog {
   id: string;
   reason: string | null;
