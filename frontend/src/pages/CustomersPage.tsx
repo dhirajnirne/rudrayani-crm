@@ -218,6 +218,15 @@ export default function CustomersPage() {
             ),
           },
           {
+            title: "POS",
+            dataIndex: "pos",
+            width: 130,
+            align: "right",
+            render: (v) => (
+              <span className="money">{fmtAmount(v)}</span>
+            ),
+          },
+          {
             title: "EMI",
             dataIndex: "emi",
             width: 110,
