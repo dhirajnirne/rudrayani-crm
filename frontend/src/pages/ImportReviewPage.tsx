@@ -17,6 +17,7 @@ import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
 import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api/client";
+import { palette } from "../theme/tokens";
 import type { Company, ReviewItem, ReviewItemType } from "../types";
 
 dayjs.extend(relativeTime);
@@ -150,7 +151,7 @@ export default function ImportReviewPage() {
     <div>
       <Typography.Title level={4}>
         Import Review{" "}
-        <Badge count={pendingCount} showZero={false} style={{ backgroundColor: "#d77a00" }} />
+        <Badge count={pendingCount} showZero={false} style={{ backgroundColor: palette.warning }} />
       </Typography.Title>
       <Typography.Paragraph type="secondary">
         A repeat allocation import for a month you've already loaded (allocation files can arrive at

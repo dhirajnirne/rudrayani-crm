@@ -4,6 +4,8 @@
  * Deliberately not a chart-library gauge — the mock's dashed outer arc and
  * label layout aren't achievable with stock G2.
  */
+import { palette } from "../../theme/tokens";
+
 interface GaugeProps {
   value: number; // MTD
   target: number | null; // arc scale max; null -> no target set
@@ -49,7 +51,7 @@ export default function Gauge({ value, target, valueText, targetText, pctText }:
         <path
           d={arcPath(0, sweep)}
           fill="none"
-          stroke="#35d431"
+          stroke={palette.emerald}
           strokeWidth={16}
           strokeLinecap="round"
         />
@@ -61,7 +63,7 @@ export default function Gauge({ value, target, valueText, targetText, pctText }:
           y1={polar(sweep, R - 14).y}
           x2={polar(sweep, R + 12).x}
           y2={polar(sweep, R + 12).y}
-          stroke="#e8ffe6"
+          stroke="#D1FAE5"
           strokeWidth={3}
         />
       )}
@@ -76,7 +78,7 @@ export default function Gauge({ value, target, valueText, targetText, pctText }:
       <text
         x={CX}
         y={CY - 22}
-        fill="#35d431"
+        fill={palette.emerald}
         fontSize={26}
         fontWeight={700}
         textAnchor="middle"

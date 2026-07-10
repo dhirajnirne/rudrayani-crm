@@ -1,4 +1,4 @@
-import { Layout, Menu, Spin, Typography, Space, Tag, Button } from "antd";
+import { Layout, Menu, Spin, Typography, Space, Tag, Button, Tooltip } from "antd";
 import { Suspense } from "react";
 import {
   ApartmentOutlined,
@@ -13,8 +13,10 @@ import {
   FileSearchOutlined,
   FileSyncOutlined,
   LogoutOutlined,
+  MoonOutlined,
   ScheduleOutlined,
   ShopOutlined,
+  SunOutlined,
   TeamOutlined,
   UnorderedListOutlined,
   UploadOutlined,
@@ -22,6 +24,7 @@ import {
 } from "@ant-design/icons";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { useThemeMode } from "../theme/ThemeModeProvider";
 import { CAPABILITY_LABELS } from "../types";
 import AlertsBell from "./AlertsBell";
 
@@ -31,6 +34,7 @@ export default function AppLayout() {
   const { user, hasPermission, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  const { mode, toggle } = useThemeMode();
 
   // Menu assembled from active capabilities/permissions (brief §3).
   const items = [
@@ -133,7 +137,6 @@ export default function AppLayout() {
       <Layout>
         <Header
           style={{
-            background: "white",
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
@@ -142,6 +145,14 @@ export default function AppLayout() {
         >
           <Typography.Text strong>{user?.full_name}</Typography.Text>
           <Space>
+            <Tooltip title={mode === "dark" ? "Switch to light mode" : "Switch to dark mode"}>
+              <Button
+                type="text"
+                shape="circle"
+                icon={mode === "dark" ? <SunOutlined /> : <MoonOutlined />}
+                onClick={toggle}
+              />
+            </Tooltip>
             <AlertsBell />
             {user?.capabilities.map((c) => (
               <Tag color="blue" key={c}>

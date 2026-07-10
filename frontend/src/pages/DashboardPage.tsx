@@ -18,6 +18,7 @@ import dayjs, { type Dayjs } from "dayjs";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, errorMessage } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { palette } from "../theme/tokens";
 import BreakdownTable from "../components/dashboard/BreakdownTable";
 import BucketMismatchCard from "../components/dashboard/BucketMismatchCard";
 import BucketMovementCard from "../components/dashboard/BucketMovementCard";
@@ -51,19 +52,19 @@ function SummaryStat({
   return (
     <div
       style={{
-        background: "var(--stat-bg, #f0f7f6)",
+        background: palette.background,
         borderRadius: 8,
         padding: "12px 16px",
-        borderLeft: `3px solid ${accent ?? "#00535b"}`,
+        borderLeft: `3px solid ${accent ?? palette.navy}`,
       }}
     >
       <Typography.Text type="secondary" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.04em" }}>
         {label}
       </Typography.Text>
-      <div className="money" style={{ fontSize: 22, fontWeight: 700, color: "#00535b", lineHeight: 1.2, marginTop: 2 }}>
+      <div className="money" style={{ fontSize: 22, fontWeight: 700, color: palette.navy, lineHeight: 1.2, marginTop: 2 }}>
         {value}
       </div>
-      {sub && <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{sub}</div>}
+      {sub && <div style={{ fontSize: 11, color: palette.textMuted, marginTop: 2 }}>{sub}</div>}
     </div>
   );
 }
@@ -312,11 +313,11 @@ export default function DashboardPage() {
           {/* Collection hero strip */}
           <Card
             size="small"
-            style={{ borderTop: "3px solid #00535b", borderRadius: 8 }}
+            style={{ borderTop: `3px solid ${palette.navy}`, borderRadius: 8 }}
             bodyStyle={{ padding: "12px 16px" }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: "#00535b", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: palette.navy, textTransform: "uppercase", letterSpacing: "0.06em" }}>
                 Collection
               </span>
               <Tag color="cyan" style={{ fontSize: 11 }}>{data.days.elapsed}d elapsed · {data.days.left}d left</Tag>
@@ -326,7 +327,7 @@ export default function DashboardPage() {
                 <SummaryStat
                   label="Collection MTD"
                   value={lakh(data.collection.mtd_amount)}
-                  accent="#00535b"
+                  accent={palette.navy}
                   sub={`Run rate: ${data.collection.run_rate_current != null ? lakh(data.collection.run_rate_current) + "/day" : "—"}`}
                 />
               </Col>
@@ -397,7 +398,7 @@ export default function DashboardPage() {
               <Card size="small" title="Deposits (This Month)" style={{ height: "100%" }}>
                 <Row gutter={[10, 10]}>
                   <Col span={8}>
-                    <SummaryStat label="Collected" value={lakh(data.deposits.collected)} accent="#00535b" />
+                    <SummaryStat label="Collected" value={lakh(data.deposits.collected)} accent={palette.navy} />
                   </Col>
                   <Col span={8}>
                     <SummaryStat label="Deposited" value={lakh(data.deposits.deposited)} accent="#1677ff" />

@@ -1,13 +1,14 @@
 import { Card, Col, Row, Tooltip, Typography } from "antd";
 import { InfoCircleOutlined } from "@ant-design/icons";
 import { lakh, metricValue, pctText } from "./format";
+import { palette } from "../../theme/tokens";
 import type { MetricBlock } from "./types";
 
 function Stat({ label, value, info }: { label: string; value: string; info?: string }) {
   return (
     <div
       style={{
-        background: "#f7f8f7",
+        background: palette.background,
         borderRadius: 8,
         padding: "10px 14px",
         height: "100%",
@@ -56,7 +57,7 @@ export default function MetricPanel({
         <span>
           {title} Metrics{" "}
           <Tooltip title={basisInfo}>
-            <InfoCircleOutlined style={{ fontSize: 13, color: "#999" }} />
+            <InfoCircleOutlined style={{ fontSize: 13, color: palette.textMuted }} />
           </Tooltip>
         </span>
       }

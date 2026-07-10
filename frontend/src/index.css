@@ -1,11 +1,24 @@
 /* Design brief: Inter everywhere; tabular numerals are MANDATORY for all
    financial values — applied globally so no numeric column can drift. */
+
+:root {
+  --rcrm-bg: #f8fafc;
+  --rcrm-text: #0f172a;
+}
+
+/* ThemeModeProvider stamps data-theme on <html> to keep this body chrome in
+   sync with the AntD ConfigProvider algorithm — see theme/ThemeModeProvider.tsx. */
+:root[data-theme="dark"] {
+  --rcrm-bg: #0b1120;
+  --rcrm-text: #f1f5f9;
+}
+
 body {
   margin: 0;
   font-family: Inter, sans-serif;
   font-variant-numeric: tabular-nums;
-  color: #181c20;
-  background: #f7f9ff;
+  color: var(--rcrm-text);
+  background: var(--rcrm-bg);
 }
 
 /* Explicit helper for financial figures (large balances, ledger cells). */

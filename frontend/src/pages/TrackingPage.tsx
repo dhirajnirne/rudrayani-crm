@@ -31,6 +31,7 @@ import "leaflet/dist/leaflet.css";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { alertText } from "../components/AlertsBell";
+import { palette } from "../theme/tokens";
 
 // Default map center (Pune) used only before any data arrives.
 const FALLBACK_CENTER: [number, number] = [18.5204, 73.8567];
@@ -59,10 +60,10 @@ interface RoutePoint {
 }
 
 const STATUS_META: Record<LiveAgent["status"], { color: string; label: string }> = {
-  moving: { color: "#237804", label: "Moving" },
-  stationary: { color: "#cf1322", label: "Stationary" },
-  no_signal: { color: "#d46b08", label: "No signal" },
-  awaiting_first_ping: { color: "#8c8c8c", label: "Awaiting first ping" },
+  moving: { color: palette.emerald, label: "Moving" },
+  stationary: { color: palette.destructive, label: "Stationary" },
+  no_signal: { color: palette.warning, label: "No signal" },
+  awaiting_first_ping: { color: palette.textMuted, label: "Awaiting first ping" },
 };
 
 /** Colored dot marker — avoids Leaflet's bundler-hostile image icons. */
@@ -330,27 +331,27 @@ function RouteReplay() {
               url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
             <FitBounds positions={positions} />
-            {/* The travelled path, highlighted in brand teal */}
-            <Polyline positions={positions} pathOptions={{ color: "#00535B", weight: 5, opacity: 0.85 }} />
+            {/* The travelled path, highlighted in brand navy */}
+            <Polyline positions={positions} pathOptions={{ color: palette.navy, weight: 5, opacity: 0.85 }} />
             {route.points.map((p, i) => (
               <CircleMarker
                 key={p.recorded_at}
                 center={[p.lat, p.lng]}
                 radius={3}
-                pathOptions={{ color: "#00535B", fillOpacity: 0.9 }}
+                pathOptions={{ color: palette.navy, fillOpacity: 0.9 }}
               >
                 <Tooltip>{`${i + 1}. ${dayjs(p.recorded_at).format("HH:mm:ss")}`}</Tooltip>
               </CircleMarker>
             ))}
             {start && (
-              <Marker position={[start.lat, start.lng]} icon={dotIcon("#237804", false)}>
+              <Marker position={[start.lat, start.lng]} icon={dotIcon(palette.emerald, false)}>
                 <Tooltip permanent direction="top" offset={[0, -10]}>
                   Start {dayjs(start.recorded_at).format("HH:mm")}
                 </Tooltip>
               </Marker>
             )}
             {end && end !== start && (
-              <Marker position={[end.lat, end.lng]} icon={dotIcon("#cf1322", false)}>
+              <Marker position={[end.lat, end.lng]} icon={dotIcon(palette.destructive, false)}>
                 <Tooltip permanent direction="top" offset={[0, -10]}>
                   End {dayjs(end.recorded_at).format("HH:mm")}
                 </Tooltip>

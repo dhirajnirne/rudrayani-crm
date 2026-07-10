@@ -3,6 +3,7 @@ import dayjs from "dayjs";
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../../api/client";
 import { lakh, compactCount } from "./format";
+import { palette } from "../../theme/tokens";
 import type { DashboardFilters } from "./types";
 
 interface RecallRow {
@@ -51,7 +52,7 @@ export default function RecalledStatTile({ filters }: { filters: DashboardFilter
         size="small"
         hoverable
         onClick={() => setOpen(true)}
-        style={{ background: "#f7f8f7", border: "none", cursor: "pointer" }}
+        style={{ background: palette.background, border: "none", cursor: "pointer" }}
       >
         <Typography.Text type="secondary" style={{ fontSize: 13 }}>
           Recalled This Month
