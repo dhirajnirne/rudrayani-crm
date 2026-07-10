@@ -11,6 +11,7 @@ import '../attachments/attachments_section.dart';
 import '../reminders/reminder_sheet.dart';
 import 'customer_detail_provider.dart';
 import 'history_timeline.dart';
+import 'worklist_provider.dart';
 
 final _rupee = NumberFormat.currency(
   locale: 'en_IN',
@@ -18,10 +19,55 @@ final _rupee = NumberFormat.currency(
   decimalDigits: 0,
 );
 
+/// Resolves the customer by id before rendering — the screen navigates by
+/// id only (not the whole Customer object) so it survives an app restart or
+/// a cold deep link into `/customer/:id`.
 class CustomerDetailScreen extends ConsumerWidget {
+  final String customerId;
+
+  const CustomerDetailScreen({super.key, required this.customerId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final customerAsync = ref.watch(customerByIdProvider(customerId));
+    return customerAsync.when(
+      data: (customer) => _CustomerDetailBody(customer: customer),
+      loading: () => Scaffold(
+        appBar: AppBar(
+          backgroundColor: AppColors.primary,
+          foregroundColor: Colors.white,
+        ),
+        body: const Center(child: CircularProgressIndicator()),
+      ),
+      error: (err, _) => Scaffold(
+        appBar: AppBar(
+          backgroundColor: AppColors.primary,
+          foregroundColor: Colors.white,
+        ),
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.error_outline, size: 40, color: Colors.grey),
+              const SizedBox(height: 8),
+              const Text('Could not load this customer'),
+              const SizedBox(height: 12),
+              OutlinedButton(
+                onPressed: () => ref.invalidate(customerByIdProvider(customerId)),
+                child: const Text('Retry'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CustomerDetailBody extends ConsumerWidget {
   final Customer customer;
 
-  const CustomerDetailScreen({super.key, required this.customer});
+  const _CustomerDetailBody({required this.customer});
 
   Future<void> _dial(BuildContext context) async {
     final uri = Uri(scheme: 'tel', path: customer.mobileNumber);
@@ -180,7 +226,7 @@ class CustomerDetailScreen extends ConsumerWidget {
                       icon: const Icon(Icons.note_add),
                       label: const Text('Log Call'),
                       onPressed: () =>
-                          context.push('/call-log', extra: customer),
+                          context.push('/customer/${customer.id}/call-log'),
                       style: OutlinedButton.styleFrom(
                         minimumSize: const Size(0, 48),
                       ),
@@ -196,7 +242,7 @@ class CustomerDetailScreen extends ConsumerWidget {
                       icon: const Icon(Icons.payment),
                       label: const Text('Record Payment'),
                       onPressed: () =>
-                          context.push('/payment', extra: customer),
+                          context.push('/customer/${customer.id}/payment'),
                       style: OutlinedButton.styleFrom(
                         minimumSize: const Size(0, 48),
                       ),
@@ -207,7 +253,8 @@ class CustomerDetailScreen extends ConsumerWidget {
                     child: OutlinedButton.icon(
                       icon: const Icon(Icons.calendar_today),
                       label: const Text('View PTPs'),
-                      onPressed: () => context.push('/ptps', extra: customer),
+                      onPressed: () =>
+                          context.push('/customer/${customer.id}/ptps'),
                       style: OutlinedButton.styleFrom(
                         minimumSize: const Size(0, 48),
                       ),
@@ -222,8 +269,8 @@ class CustomerDetailScreen extends ConsumerWidget {
                     child: OutlinedButton.icon(
                       icon: const Icon(Icons.assignment_turned_in),
                       label: const Text('Field Visit'),
-                      onPressed: () =>
-                          context.push('/field-visit', extra: customer),
+                      onPressed: () => context
+                          .push('/customer/${customer.id}/field-visit'),
                       style: OutlinedButton.styleFrom(
                         minimumSize: const Size(0, 48),
                       ),

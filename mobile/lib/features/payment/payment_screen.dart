@@ -7,13 +7,12 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
-import '../../core/models/customer.dart';
 import '../../core/offline/offline_queue.dart';
 import '../worklist/worklist_provider.dart';
 
 class PaymentScreen extends ConsumerStatefulWidget {
-  final Customer customer;
-  const PaymentScreen({super.key, required this.customer});
+  final String customerId;
+  const PaymentScreen({super.key, required this.customerId});
 
   @override
   ConsumerState<PaymentScreen> createState() => _PaymentScreenState();
@@ -62,7 +61,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
       final api = ref.read(apiClientProvider);
       // One key for both paths: a lost response must not double-record money.
       final payload = <String, dynamic>{
-        'customer_id': widget.customer.id,
+        'customer_id': widget.customerId,
         'amount': amount,
         if (_mode != null) 'mode': _mode,
         if (_dateCtrl.text.isNotEmpty) 'paid_at': _dateCtrl.text,
@@ -120,11 +119,17 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final customerAsync = ref.watch(customerByIdProvider(widget.customerId));
     return Scaffold(
       appBar: AppBar(
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
-        title: Text('Record Payment — ${widget.customer.customerName}'),
+        title: Text(
+          customerAsync.maybeWhen(
+            data: (c) => 'Record Payment — ${c.customerName}',
+            orElse: () => 'Record Payment',
+          ),
+        ),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),

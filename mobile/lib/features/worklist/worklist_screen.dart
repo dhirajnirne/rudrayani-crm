@@ -399,7 +399,7 @@ class _CustomerCard extends StatelessWidget {
           ],
         ),
         trailing: const Icon(Icons.chevron_right),
-        onTap: () => context.push('/customer/${customer.id}', extra: customer),
+        onTap: () => context.push('/customer/${customer.id}'),
       ),
     );
   }

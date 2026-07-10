@@ -213,6 +213,29 @@ describe("Task 3.2 — worklist, dispositions, PTP", () => {
     expect(res.body.customers[0].loan_number).toBe("WF-001");
   });
 
+  it("GET /worklist/:id returns a customer assigned to the caller", async () => {
+    const res = await request(app)
+      .get(`/api/worklist/${customerIds[0]}`)
+      .set("Authorization", `Bearer ${agentToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.customer.loan_number).toBe("WF-001");
+  });
+
+  it("GET /worklist/:id 404s for a customer assigned to someone else", async () => {
+    // WF-002 (customerIds[1]) was reallocated away from this agent above.
+    const res = await request(app)
+      .get(`/api/worklist/${customerIds[1]}`)
+      .set("Authorization", `Bearer ${agentToken}`);
+    expect(res.status).toBe(404);
+  });
+
+  it("GET /worklist/:id 404s for a nonexistent id", async () => {
+    const res = await request(app)
+      .get("/api/worklist/00000000-0000-0000-0000-000000000000")
+      .set("Authorization", `Bearer ${agentToken}`);
+    expect(res.status).toBe(404);
+  });
+
   it("rejects a PTP disposition missing its required structured fields", async () => {
     const res = await request(app)
       .post("/api/call-logs")

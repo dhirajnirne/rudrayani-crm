@@ -10,6 +10,17 @@ final worklistProvider = FutureProvider<List<Customer>>((ref) async {
   return list.map(Customer.fromJson).toList();
 });
 
+/// Resolves a single assigned customer by id — backs the detail screen and
+/// its children (call log / payment / PTPs / field visit), which navigate
+/// by id rather than carrying the Customer object across routes (go_router's
+/// `extra` doesn't survive an app restart or a cold deep link).
+final customerByIdProvider =
+    FutureProvider.family<Customer, String>((ref, id) async {
+  final api = ref.watch(apiClientProvider);
+  final res = await api.get<Map<String, dynamic>>('/worklist/$id');
+  return Customer.fromJson(res.data!['customer'] as Map<String, dynamic>);
+});
+
 final dispositionCodesProvider = FutureProvider((ref) async {
   final api = ref.watch(apiClientProvider);
   final res = await api.get<Map<String, dynamic>>('/dispositions');

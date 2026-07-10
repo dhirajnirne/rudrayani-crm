@@ -1,7 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../core/auth/auth_provider.dart';
-import '../core/models/customer.dart';
 import '../features/auth/login_screen.dart';
 import '../features/home/home_shell.dart';
 import '../features/worklist/customer_detail_screen.dart';
@@ -27,38 +26,35 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/home', builder: (ctx, s) => const HomeShell()),
       GoRoute(
         path: '/customer/:id',
-        builder: (_, state) {
-          final customer = state.extra as Customer;
-          return CustomerDetailScreen(customer: customer);
-        },
-      ),
-      GoRoute(
-        path: '/call-log',
-        builder: (_, state) {
-          final customer = state.extra as Customer;
-          return CallLogScreen(customer: customer);
-        },
-      ),
-      GoRoute(
-        path: '/payment',
-        builder: (_, state) {
-          final customer = state.extra as Customer;
-          return PaymentScreen(customer: customer);
-        },
-      ),
-      GoRoute(
-        path: '/ptps',
-        builder: (_, state) {
-          final customer = state.extra as Customer;
-          return PtpsScreen(customer: customer);
-        },
-      ),
-      GoRoute(
-        path: '/field-visit',
-        builder: (_, state) {
-          final customer = state.extra as Customer;
-          return FieldVisitScreen(customer: customer);
-        },
+        builder: (_, state) => CustomerDetailScreen(
+          customerId: state.pathParameters['id']!,
+        ),
+        routes: [
+          GoRoute(
+            path: 'call-log',
+            builder: (_, state) => CallLogScreen(
+              customerId: state.pathParameters['id']!,
+            ),
+          ),
+          GoRoute(
+            path: 'payment',
+            builder: (_, state) => PaymentScreen(
+              customerId: state.pathParameters['id']!,
+            ),
+          ),
+          GoRoute(
+            path: 'ptps',
+            builder: (_, state) => PtpsScreen(
+              customerId: state.pathParameters['id']!,
+            ),
+          ),
+          GoRoute(
+            path: 'field-visit',
+            builder: (_, state) => FieldVisitScreen(
+              customerId: state.pathParameters['id']!,
+            ),
+          ),
+        ],
       ),
     ],
   );

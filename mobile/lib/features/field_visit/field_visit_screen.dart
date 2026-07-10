@@ -9,15 +9,15 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../core/api/api_client.dart';
-import '../../core/models/customer.dart';
 import '../../core/offline/offline_queue.dart';
+import '../worklist/worklist_provider.dart';
 
 /// Field-visit evidence (brief §8): a photo of the visit, an optional remark,
 /// and the GPS point. (Customer signature was dropped per product decision
 /// 2026-07-06 — the photo is the required evidence.)
 class FieldVisitScreen extends ConsumerStatefulWidget {
-  final Customer customer;
-  const FieldVisitScreen({super.key, required this.customer});
+  final String customerId;
+  const FieldVisitScreen({super.key, required this.customerId});
 
   @override
   ConsumerState<FieldVisitScreen> createState() => _FieldVisitScreenState();
@@ -66,7 +66,7 @@ class _FieldVisitScreenState extends ConsumerState<FieldVisitScreen> {
 
       // One key for both paths (direct send / offline queue).
       final payload = <String, dynamic>{
-        'customer_id': widget.customer.id,
+        'customer_id': widget.customerId,
         if (_remarkCtrl.text.trim().isNotEmpty) 'remark': _remarkCtrl.text.trim(),
         if (pos != null) 'lat': pos.latitude,
         if (pos != null) 'lng': pos.longitude,
@@ -118,11 +118,17 @@ class _FieldVisitScreenState extends ConsumerState<FieldVisitScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final customerAsync = ref.watch(customerByIdProvider(widget.customerId));
     return Scaffold(
       appBar: AppBar(
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
-        title: Text('Field Visit — ${widget.customer.customerName}'),
+        title: Text(
+          customerAsync.maybeWhen(
+            data: (c) => 'Field Visit — ${c.customerName}',
+            orElse: () => 'Field Visit',
+          ),
+        ),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
