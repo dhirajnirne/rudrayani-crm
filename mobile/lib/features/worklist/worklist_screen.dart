@@ -247,7 +247,7 @@ class _DutyBanner extends ConsumerWidget {
 
     return Container(
       width: double.infinity,
-      color: onDuty ? const Color(0xFFE6F4EA) : const Color(0xFFF1F3F4),
+      color: onDuty ? AppColors.successContainer : AppColors.neutralContainer,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

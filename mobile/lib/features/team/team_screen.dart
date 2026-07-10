@@ -243,7 +243,7 @@ class _ApprovalsSection extends ConsumerWidget {
         for (final r in requests)
           Card(
             margin: const EdgeInsets.only(bottom: 8),
-            color: const Color(0xFFFFF7E6),
+            color: AppColors.warningContainer,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             child: Padding(
               padding: const EdgeInsets.all(12),
