@@ -19,6 +19,16 @@ final _rupee = NumberFormat.currency(
   decimalDigits: 0,
 );
 
+/// Import column headers arrive as raw keys (e.g. "customer_dob",
+/// "PAN-number") — turn them into a readable label instead of showing the
+/// source spreadsheet's column name verbatim.
+String _formatFieldLabel(String key) {
+  final words = key.split(RegExp(r'[_\-\s]+')).where((w) => w.isNotEmpty);
+  return words
+      .map((w) => w[0].toUpperCase() + w.substring(1).toLowerCase())
+      .join(' ');
+}
+
 /// Resolves the customer by id before rendering — the screen navigates by
 /// id only (not the whole Customer object) so it survives an app restart or
 /// a cold deep link into `/customer/:id`.
@@ -211,12 +221,19 @@ class _CustomerDetailBody extends ConsumerWidget {
                   Expanded(
                     child: ElevatedButton.icon(
                       icon: const Icon(Icons.call),
-                      label: Text(customer.mobileNumber),
-                      onPressed: () => _dial(context),
+                      label: Text(
+                        customer.mobileNumber.isNotEmpty
+                            ? customer.mobileNumber
+                            : 'No Number',
+                      ),
+                      onPressed: customer.mobileNumber.isNotEmpty
+                          ? () => _dial(context)
+                          : null,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
+                        backgroundColor: AppColors.success,
                         foregroundColor: Colors.white,
-                        minimumSize: const Size(0, 48),
+                        disabledBackgroundColor: Colors.grey.shade300,
+                        disabledForegroundColor: Colors.grey.shade600,
                       ),
                     ),
                   ),
@@ -227,9 +244,6 @@ class _CustomerDetailBody extends ConsumerWidget {
                       label: const Text('Log Call'),
                       onPressed: () =>
                           context.push('/customer/${customer.id}/call-log'),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(0, 48),
-                      ),
                     ),
                   ),
                 ],
@@ -243,9 +257,6 @@ class _CustomerDetailBody extends ConsumerWidget {
                       label: const Text('Record Payment'),
                       onPressed: () =>
                           context.push('/customer/${customer.id}/payment'),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(0, 48),
-                      ),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -255,9 +266,6 @@ class _CustomerDetailBody extends ConsumerWidget {
                       label: const Text('View PTPs'),
                       onPressed: () =>
                           context.push('/customer/${customer.id}/ptps'),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(0, 48),
-                      ),
                     ),
                   ),
                 ],
@@ -271,9 +279,6 @@ class _CustomerDetailBody extends ConsumerWidget {
                       label: const Text('Field Visit'),
                       onPressed: () => context
                           .push('/customer/${customer.id}/field-visit'),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(0, 48),
-                      ),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -282,9 +287,6 @@ class _CustomerDetailBody extends ConsumerWidget {
                       icon: const Icon(Icons.directions),
                       label: const Text('Navigate'),
                       onPressed: () => _navigate(context),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(0, 48),
-                      ),
                     ),
                   ),
                 ],
@@ -298,9 +300,6 @@ class _CustomerDetailBody extends ConsumerWidget {
                       label: const Text('Set Reminder'),
                       onPressed: () =>
                           showReminderSheet(context, ref, customer: customer),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(0, 48),
-                      ),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -392,7 +391,7 @@ class _CustomerDetailBody extends ConsumerWidget {
                   title: 'Additional Fields',
                   children: [
                     for (final e in customer.customFields.entries)
-                      _Row(e.key, e.value?.toString() ?? '—'),
+                      _Row(_formatFieldLabel(e.key), e.value?.toString() ?? '—'),
                   ],
                 ),
               const SizedBox(height: 12),

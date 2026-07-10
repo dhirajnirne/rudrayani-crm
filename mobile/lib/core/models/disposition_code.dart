@@ -26,8 +26,8 @@ class DispositionCode {
   factory DispositionCode.fromJson(Map<String, dynamic> j) => DispositionCode(
         id: j['id'] as String,
         actionCode: j['action_code'] as String,
-        resultCode: j['result_code'] as String,
-        description: j['description'] as String,
+        resultCode: (j['result_code'] as String?) ?? '',
+        description: (j['description'] as String?) ?? '',
         needsAmount: j['needs_amount'] == true,
         needsDate: j['needs_date'] == true,
         needsTime: j['needs_time'] == true,

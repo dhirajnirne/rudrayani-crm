@@ -46,7 +46,7 @@ class Customer {
         id: j['id'] as String,
         loanNumber: j['loan_number'] as String,
         customerName: j['customer_name'] as String,
-        mobileNumber: j['mobile_number'] as String,
+        mobileNumber: (j['mobile_number'] as String?) ?? '',
         product: j['product'] as String?,
         bucket: j['bucket'] as String?,
         dueAmount: (j['due_amount'] as num?)?.toDouble(),
