@@ -1,7 +1,5 @@
 import {
-  Button,
   Col,
-  Descriptions,
   Empty,
   Input,
   Row,
@@ -90,21 +88,6 @@ export default function CustomersPage() {
   const fmtAmount = (v: string | null) =>
     v == null ? "—" : Number(v).toLocaleString("en-IN", { maximumFractionDigits: 0 });
 
-  const expandedRow = (record: Customer) => {
-    const customKeys = Object.keys(record.custom_fields ?? {});
-    if (customKeys.length === 0)
-      return <Typography.Text type="secondary">No custom fields</Typography.Text>;
-    return (
-      <Descriptions size="small" column={3} bordered>
-        {customKeys.map((k) => (
-          <Descriptions.Item key={k} label={k}>
-            {String(record.custom_fields[k] ?? "")}
-          </Descriptions.Item>
-        ))}
-      </Descriptions>
-    );
-  };
-
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
@@ -184,10 +167,6 @@ export default function CustomersPage() {
         loading={loading}
         dataSource={customers}
         locale={{ emptyText: <Empty description="No customers found — import data first" /> }}
-        expandable={{
-          expandedRowRender: expandedRow,
-          rowExpandable: (r) => Object.keys(r.custom_fields ?? {}).length > 0,
-        }}
         onRow={(record) => ({
           onClick: () => setDetailId(record.id),
           style: { cursor: "pointer" },
@@ -251,11 +230,9 @@ export default function CustomersPage() {
             width: 80,
             render: (_, r) => {
               const n = Object.keys(r.custom_fields ?? {}).length;
-              return n ? (
-                <Button type="link" size="small" style={{ padding: 0 }}>
-                  {n} field{n > 1 ? "s" : ""}
-                </Button>
-              ) : null;
+              // Not clickable on its own — the whole row opens the drawer,
+              // which already shows these under "Customer Detail".
+              return n ? <Tag>{n} field{n > 1 ? "s" : ""}</Tag> : null;
             },
           },
         ]}
