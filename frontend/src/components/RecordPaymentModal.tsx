@@ -112,7 +112,7 @@ export default function RecordPaymentModal({
               style={{
                 marginTop: 8,
                 padding: 10,
-                background: "#FEF3E2",
+                background: palette.warningContainer,
                 borderRadius: 6,
               }}
             >
