@@ -7,6 +7,11 @@ import { api, errorMessage } from "../api/client";
 import { palette } from "../theme/tokens";
 
 const MODE_OPTIONS = ["Cash", "NEFT", "RTGS", "UPI", "Cheque", "DD"].map((m) => ({ value: m, label: m }));
+// Phase 12 (Management Dashboard "Settlement vs EMI Collections" KPI).
+const TYPE_OPTIONS = [
+  { value: "emi", label: "EMI Collection" },
+  { value: "settlement", label: "Settlement" },
+];
 
 /**
  * Record a payment from the web worklist -- same field set and photo-proof
@@ -33,6 +38,7 @@ export default function RecordPaymentModal({
 }) {
   const [amount, setAmount] = useState<number | null>(null);
   const [mode, setMode] = useState<string | undefined>(undefined);
+  const [type, setType] = useState<string>("emi");
   const [paidAt, setPaidAt] = useState<Dayjs | null>(null);
   const [closeCustomer, setCloseCustomer] = useState(false);
   const [photo, setPhoto] = useState<File | null>(null);
@@ -43,6 +49,7 @@ export default function RecordPaymentModal({
     if (open) {
       setAmount(null);
       setMode(undefined);
+      setType("emi");
       setPaidAt(null);
       setCloseCustomer(false);
       setPhoto(null);
@@ -66,6 +73,7 @@ export default function RecordPaymentModal({
       const form = new FormData();
       form.append("customer_id", customerId);
       form.append("amount", String(amount));
+      form.append("type", type);
       if (mode) form.append("mode", mode);
       if (paidAt) form.append("paid_at", paidAt.format("YYYY-MM-DD"));
       form.append("close_customer", String(closeCustomer));
@@ -139,6 +147,15 @@ export default function RecordPaymentModal({
             value={mode}
             onChange={setMode}
             options={MODE_OPTIONS}
+          />
+        </div>
+        <div>
+          <Typography.Text>Collection Type</Typography.Text>
+          <Select
+            style={{ width: "100%", marginTop: 4 }}
+            value={type}
+            onChange={setType}
+            options={TYPE_OPTIONS}
           />
         </div>
         <div>

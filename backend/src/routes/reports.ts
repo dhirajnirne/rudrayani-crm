@@ -10,6 +10,7 @@ import {
   agentBreakdown,
   bucketMismatchReport,
   bucketMovementReport,
+  collectionTrend,
   dashboard,
   depositsByRange,
   dimensionBreakdown,
@@ -150,6 +151,32 @@ router.get(
     }
     const result = await trailAnalytics(req.user!.agency_id, from, to, scope);
     res.json(result);
+  }),
+);
+
+/**
+ * Recovery Trend (Management Dashboard KPI, Phase 12): daily/weekly collected
+ * buckets over a free date range -- same scope clamp as /deposits-range and
+ * /trail (event-level data, so a range fits better than month-at-a-time).
+ */
+router.get(
+  "/trend",
+  asyncHandler(async (req, res) => {
+    const { from, to, granularity, ...filters } = dateRangeSchema
+      .extend({ granularity: z.enum(["day", "week"]).default("day") })
+      .parse(req.query);
+    const full = await hasFullView(req);
+    let scope: Omit<ReportFilters, "month">;
+    if (full) {
+      scope = filters;
+    } else {
+      if (filters.agent_id && filters.agent_id !== req.user!.id) {
+        throw new HttpError(403, "You can only view your own collection trend");
+      }
+      scope = { ...filters, agent_id: req.user!.id, team_id: undefined };
+    }
+    const points = await collectionTrend(req.user!.agency_id, from, to, granularity, scope);
+    res.json({ from, to, granularity, points });
   }),
 );
 

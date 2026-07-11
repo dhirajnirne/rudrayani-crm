@@ -2,7 +2,6 @@ import {
   Alert,
   Button,
   Card,
-  Checkbox,
   Col,
   DatePicker,
   Descriptions,
@@ -40,26 +39,28 @@ import { useAuth } from "../auth/AuthContext";
 import { palette } from "../theme/tokens";
 import type { Company, ImportRun, ImportTemplate } from "../types";
 
-const SYSTEM_FIELDS = [
-  { value: "loan_number", label: "Loan Number (required)" },
-  { value: "customer_name", label: "Customer Name (required)" },
-  { value: "mobile_number", label: "Mobile Number (recommended)" },
-  { value: "product", label: "Product (recommended)" },
-  { value: "bucket", label: "Bucket (recommended)" },
-  { value: "due_amount", label: "Due Amount / POS (recommended)" },
-  { value: "emi", label: "EMI Amount (recommended)" },
-  { value: "emi_due_date", label: "EMI Due Date (recommended)" },
-  { value: "agent_phone", label: "Agent Phone — assigns the loan (recommended)" },
-  { value: "address", label: "Address" },
-];
-
-const RECOMMENDED_FIELDS = ["mobile_number", "product", "bucket", "due_amount", "emi", "emi_due_date", "agent_phone"];
+// Owner feedback round, Phase 10: the system field list (which keys exist,
+// which are required-to-map) is no longer a hardcoded const here -- it's
+// fetched per company from the runtime catalog (system_field_definitions +
+// company_field_settings, see backend field-config-service.ts) via the
+// /imports/upload?company_id= response, so an agency admin's FieldConfigPage
+// changes show up here without a frontend deploy.
+interface FieldCatalogEntry {
+  field_key: string;
+  label: string;
+  field_type: string;
+  is_core: boolean;
+  is_enabled: boolean;
+  is_required: boolean;
+  sort_order: number;
+}
 
 interface DiffSample {
   loan_number: string;
   customer_name: string | null;
   bucket: string | null;
   due_amount: number | null;
+  pos?: number | null;
   agent_name?: string | null;
   previous_status?: string;
 }
@@ -120,9 +121,17 @@ function ImportWizard() {
   const [rowCount, setRowCount] = useState(0);
   const [templates, setTemplates] = useState<ImportTemplate[]>([]);
   const [mapping, setMapping] = useState<Record<string, string>>({});
-  const [detailFields, setDetailFields] = useState<string[]>([]);
   const [templateName, setTemplateName] = useState("");
   const [savedTemplateId, setSavedTemplateId] = useState<string | null>(null);
+  // This company's runtime field catalog (Phase 10) -- returned by
+  // /imports/upload?company_id=, drives the mapping dropdown + required list.
+  const [systemFields, setSystemFields] = useState<FieldCatalogEntry[]>([]);
+  const fieldOptions = systemFields.map((f) => ({
+    value: f.field_key,
+    label: f.is_required ? `${f.label} (required)` : f.label,
+  }));
+  const requiredMappedFields = systemFields.filter((f) => f.is_required).map((f) => f.field_key);
+  const fieldLabel = (key: string) => systemFields.find((f) => f.field_key === key)?.label ?? key;
 
   // Step 2
   const [preview, setPreview] = useState<PreviewResult | null>(null);
@@ -163,16 +172,18 @@ function ImportWizard() {
     try {
       const fd = new FormData();
       fd.append("file", file as unknown as Blob);
-      const res = await api.post("/imports/upload", fd, {
+      // Phase 10: company_id scopes the returned system_fields catalog to
+      // this company's enabled/required config instead of the whole agency.
+      const res = await api.post(`/imports/upload?company_id=${companyId}`, fd, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       setUploadKey(res.data.upload_key);
       setFileName(file.name);
       setDetectedColumns(res.data.columns);
       setRowCount(res.data.row_count);
+      setSystemFields(res.data.system_fields ?? []);
       // Clear mapping for the new file
       setMapping({});
-      setDetailFields([]);
       setSavedTemplateId(null);
       setTemplateName("");
       setStep(1);
@@ -194,14 +205,18 @@ function ImportWizard() {
       if (mapped) newMapping[col] = mapped;
     }
     setMapping(newMapping);
-    setDetailFields((tpl.detail_fields ?? []).filter((f) => detectedColumns.includes(f)));
   };
 
   const handlePreview = async () => {
-    // Validate: required system fields must be mapped
+    // Validate: every required system field must be mapped to a column
     const mappedFields = Object.values(mapping);
-    if (!mappedFields.includes("loan_number") || !mappedFields.includes("customer_name")) {
-      return message.error("Map at least Loan Number and Customer Name before previewing");
+    const missingRequired = requiredMappedFields.filter((f) => !mappedFields.includes(f));
+    if (missingRequired.length > 0) {
+      return message.error(
+        `Map a column to every required field before previewing. Missing: ${missingRequired
+          .map((f) => fieldLabel(f))
+          .join(", ")}`,
+      );
     }
     setLoading(true);
     try {
@@ -213,7 +228,6 @@ function ImportWizard() {
           company_id: companyId,
           name: templateName.trim(),
           column_mapping: mapping,
-          detail_fields: detailFields,
         });
         resolvedTemplateId = saveRes.data.template.id;
         setSavedTemplateId(resolvedTemplateId);
@@ -273,8 +287,8 @@ function ImportWizard() {
     setCompanyId(null);
     setUploadKey("");
     setDetectedColumns([]);
+    setSystemFields([]);
     setMapping({});
-    setDetailFields([]);
     setTemplateName("");
     setSavedTemplateId(null);
     setPreview(null);
@@ -355,7 +369,18 @@ function ImportWizard() {
 
   const renderStep1 = () => {
     const mappedValues = Object.values(mapping);
-    const missingRecommended = RECOMMENDED_FIELDS.filter((f) => !mappedValues.includes(f));
+    const missingRequired = requiredMappedFields.filter((f) => !mappedValues.includes(f));
+    // Owner feedback round, Phase 2 breaking-change mitigation (now Phase 10
+    // runtime-catalog-aware): a template saved before a field became
+    // required for this company won't map it -- surface that proactively
+    // instead of letting the admin discover it as a failed commit on their
+    // next monthly cycle.
+    const templatesMissingRequired = templates
+      .map((t) => ({
+        name: t.name,
+        missing: requiredMappedFields.filter((f) => !Object.values(t.column_mapping).includes(f)),
+      }))
+      .filter((t) => t.missing.length > 0);
     return (
     <Space direction="vertical" style={{ width: "100%" }} size="large">
       <Alert
@@ -363,12 +388,22 @@ function ImportWizard() {
         showIcon
         message={`${fileName} — ${rowCount} data rows, ${detectedColumns.length} columns detected`}
       />
-      {missingRecommended.length > 0 && (
+      {missingRequired.length > 0 && (
+        <Alert
+          type="error"
+          showIcon
+          message="Required fields are not mapped"
+          description={`Not mapped: ${missingRequired.map((f) => fieldLabel(f)).join(", ")}. Map a column to each before you can preview or commit.`}
+        />
+      )}
+      {templatesMissingRequired.length > 0 && (
         <Alert
           type="warning"
           showIcon
-          message="Some recommended fields are not mapped"
-          description={`Not mapped: ${missingRecommended.map((f) => SYSTEM_FIELDS.find((s) => s.value === f)?.label?.replace(" (recommended)", "")).join(", ")}. You can still proceed — these will be skipped.`}
+          message="Some saved templates are missing newly-required fields"
+          description={templatesMissingRequired
+            .map((t) => `"${t.name}" is missing ${t.missing.map((f) => fieldLabel(f)).join(", ")}`)
+            .join("; ")}
         />
       )}
 
@@ -387,8 +422,8 @@ function ImportWizard() {
       )}
 
       <Typography.Text type="secondary">
-        Tick "Keep as customer detail" for any source column (mapped or not) you want visible on the
-        customer's detail view. Empty values show as "-".
+        Every column from the file — mapped or not — is kept and shown on the customer's detail view;
+        nothing needs to be picked manually.
       </Typography.Text>
 
       {/* Mapping matrix */}
@@ -424,21 +459,7 @@ function ImportWizard() {
                     return next;
                   })
                 }
-                options={SYSTEM_FIELDS}
-              />
-            ),
-          },
-          {
-            title: "Keep as customer detail",
-            width: "20%",
-            render: (_: string, record: { col: string }) => (
-              <Checkbox
-                checked={detailFields.includes(record.col)}
-                onChange={(e) =>
-                  setDetailFields((prev) =>
-                    e.target.checked ? [...prev, record.col] : prev.filter((f) => f !== record.col),
-                  )
-                }
+                options={fieldOptions}
               />
             ),
           },
@@ -484,6 +505,11 @@ function ImportWizard() {
     {
       title: "Due Amount",
       dataIndex: "due_amount",
+      render: (v: number | null) => (v == null ? "-" : v.toLocaleString("en-IN")),
+    },
+    {
+      title: "POS",
+      dataIndex: "pos",
       render: (v: number | null) => (v == null ? "-" : v.toLocaleString("en-IN")),
     },
   ];

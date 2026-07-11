@@ -2,12 +2,14 @@ import { Button, Form, Input, Modal, Table, Typography, message } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api/client";
+import BranchDetailDrawer from "../components/BranchDetailDrawer";
 import type { Branch } from "../types";
 
 export default function BranchesPage() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Branch | "new" | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
   const [form] = Form.useForm<{ name: string }>();
 
   const load = useCallback(async () => {
@@ -63,6 +65,10 @@ export default function BranchesPage() {
         loading={loading}
         dataSource={branches}
         pagination={false}
+        onRow={(record) => ({
+          onClick: () => setDetailId(record.id),
+          style: { cursor: "pointer" },
+        })}
         columns={[
           { title: "Name", dataIndex: "name" },
           {
@@ -71,7 +77,8 @@ export default function BranchesPage() {
             render: (_, record) => (
               <Button
                 type="link"
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation();
                   form.setFieldsValue({ name: record.name });
                   setEditing(record);
                 }}
@@ -81,6 +88,11 @@ export default function BranchesPage() {
             ),
           },
         ]}
+      />
+      <BranchDetailDrawer
+        branchId={detailId}
+        open={detailId !== null}
+        onClose={() => setDetailId(null)}
       />
       <Modal
         open={editing !== null}

@@ -21,10 +21,13 @@ const DayPlanPage = lazy(() => import("./pages/DayPlanPage"));
 const DepositsPage = lazy(() => import("./pages/DepositsPage"));
 const DispositionsPage = lazy(() => import("./pages/DispositionsPage"));
 const EmployeesPage = lazy(() => import("./pages/EmployeesPage"));
+const FieldConfigPage = lazy(() => import("./pages/FieldConfigPage"));
 const ImportPage = lazy(() => import("./pages/ImportPage"));
 const ImportReviewPage = lazy(() => import("./pages/ImportReviewPage"));
+const ManagementDashboardPage = lazy(() => import("./pages/dashboards/ManagementDashboardPage"));
 const MyRequestsPage = lazy(() => import("./pages/MyRequestsPage"));
 const MyWorklistPage = lazy(() => import("./pages/MyWorklistPage"));
+const OrgChartPage = lazy(() => import("./pages/OrgChartPage"));
 const ReallocationRequestsPage = lazy(() => import("./pages/ReallocationRequestsPage"));
 const TargetsPage = lazy(() => import("./pages/TargetsPage"));
 const TeamsPage = lazy(() => import("./pages/TeamsPage"));
@@ -57,11 +60,14 @@ export default function App() {
         }
       >
         <Route index element={<DashboardPage />} />
+        <Route path="management-dashboard" element={<ManagementDashboardPage />} />
         <Route path="employees" element={<EmployeesPage />} />
+        <Route path="org-chart" element={<OrgChartPage />} />
         <Route path="branches" element={<BranchesPage />} />
         <Route path="teams" element={<TeamsPage />} />
         <Route path="companies" element={<CompaniesPage />} />
         <Route path="buckets" element={<BucketsPage />} />
+        <Route path="field-config" element={<FieldConfigPage />} />
         <Route path="import" element={<ImportPage />} />
         <Route path="import-reviews" element={<ImportReviewPage />} />
         <Route path="customers" element={<CustomersPage />} />

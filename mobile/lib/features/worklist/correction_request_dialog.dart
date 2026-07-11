@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
+import '../../core/theme/app_theme.dart';
 
 const _modeOptions = ['NEFT', 'RTGS', 'Cash', 'UPI', 'Cheque', 'DD'];
 
@@ -49,7 +50,7 @@ Future<void> showCorrectionRequestDialog(
             children: [
               Text(
                 'A team lead or ops will review this before anything changes.',
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
               ),
               const SizedBox(height: 12),
               if (recordType == 'payment' || recordType == 'ptp') ...[
@@ -58,6 +59,8 @@ Future<void> showCorrectionRequestDialog(
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
                   ),
+                  // Tabular-nums (MANDATORY, design brief) even while typing.
+                  style: const TextStyle().tabular,
                   decoration: const InputDecoration(
                     labelText: 'Amount (₹)',
                     border: OutlineInputBorder(),
@@ -205,7 +208,7 @@ Future<void> showCorrectionRequestDialog(
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Correction request sent for review'),
-          backgroundColor: Colors.green,
+          backgroundColor: AppColors.success,
         ),
       );
     }
@@ -218,7 +221,7 @@ Future<void> showCorrectionRequestDialog(
           : 'Could not send the request — check your connection';
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
+      ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: AppColors.error));
     }
   }
 }

@@ -104,6 +104,13 @@ export function monthDays(month: string, now = new Date()): MonthDays {
   return { in_month: inMonth, elapsed, left: inMonth - elapsed };
 }
 
+/** Is `month` ('YYYY-MM' or 'YYYY-MM-01') the current calendar month in IST? */
+function isCurrentMonth(month: string, now = new Date()): boolean {
+  const [y, m] = month.split("-").map(Number);
+  const istNow = new Date(now.toLocaleString("en-US", { timeZone: IST }));
+  return y === istNow.getFullYear() && m === istNow.getMonth() + 1;
+}
+
 /** WHERE fragments for the snapshot base under the resolved filters. */
 function baseConditions(filters: ReportFilters, params: unknown[]): string[] {
   const conditions: string[] = [];
@@ -143,6 +150,148 @@ function baseConditions(filters: ReportFilters, params: unknown[]): string[] {
     conditions.push(`c.status = $${params.length}`);
   }
   return conditions;
+}
+
+/**
+ * WHERE fragments against the LIVE `customers` table — same shape as
+ * baseConditions() but for the current month, which has no frozen snapshot
+ * to read (Phase 8 computed-default target).
+ */
+function liveConditions(filters: ReportFilters, params: unknown[]): string[] {
+  const conditions: string[] = [];
+  if (filters.company_id) {
+    params.push(filters.company_id);
+    conditions.push(`c.company_id = $${params.length}`);
+  }
+  if (filters.branch_id) {
+    params.push(filters.branch_id);
+    conditions.push(`tm.branch_id = $${params.length}`);
+  }
+  if (filters.team_id) {
+    params.push(filters.team_id);
+    conditions.push(`c.assigned_team_id = $${params.length}`);
+  }
+  if (filters.agent_id) {
+    params.push(filters.agent_id);
+    conditions.push(`c.assigned_agent_id = $${params.length}`);
+  }
+  if (filters.product) {
+    params.push(filters.product);
+    conditions.push(
+      `(lower(c.product) = lower($${params.length}) OR EXISTS (
+          SELECT 1 FROM products pr
+           WHERE pr.company_id = c.company_id
+             AND lower(pr.raw_label) = lower(c.product)
+             AND lower(pr.canonical_label) = lower($${params.length})))`,
+    );
+  }
+  if (filters.bucket) {
+    params.push(filters.bucket);
+    conditions.push(`lower(c.bucket) = lower($${params.length})`);
+  }
+  if (filters.status) {
+    params.push(filters.status);
+    conditions.push(`c.status = $${params.length}`);
+  }
+  return conditions;
+}
+
+/**
+ * Book totals (SUM(emi), SUM(pos), COUNT) under the resolved scope/dimension
+ * filters — current month reads the live `customers` table (up to date);
+ * past months read the frozen `customer_month_snapshots` row for that month
+ * (what the book looked like then). Backs the Phase 8 computed-default
+ * collection target and the pos_total secondary stat.
+ */
+export interface BookTotals {
+  count: number;
+  emi_total: number;
+  pos_total: number;
+}
+
+export async function bookTotals(agencyId: string, filters: ReportFilters): Promise<BookTotals> {
+  if (isCurrentMonth(filters.month.slice(0, 7))) {
+    const params: unknown[] = [agencyId];
+    const conditions = liveConditions(filters, params);
+    const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
+    const { rows } = await pool.query(
+      `SELECT COUNT(*)::int AS n, COALESCE(SUM(c.emi), 0)::float AS emi_total,
+              COALESCE(SUM(c.pos), 0)::float AS pos_total
+         FROM customers c
+         JOIN companies co ON co.id = c.company_id AND co.agency_id = $1
+         LEFT JOIN teams tm ON tm.id = c.assigned_team_id
+        WHERE true ${where}`,
+      params,
+    );
+    return { count: rows[0].n, emi_total: rows[0].emi_total, pos_total: rows[0].pos_total };
+  }
+  const params: unknown[] = [agencyId, filters.month];
+  const conditions = baseConditions(filters, params);
+  const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
+  const { rows } = await pool.query(
+    `SELECT COUNT(*)::int AS n, COALESCE(SUM(s.emi), 0)::float AS emi_total,
+            COALESCE(SUM(s.pos), 0)::float AS pos_total
+       FROM customer_month_snapshots s
+       JOIN companies co ON co.id = s.company_id AND co.agency_id = $1
+       JOIN customers c ON c.id = s.customer_id
+       LEFT JOIN teams tm ON tm.id = s.assigned_team_id
+      WHERE s.month = $2::date ${where}`,
+    params,
+  );
+  return { count: rows[0].n, emi_total: rows[0].emi_total, pos_total: rows[0].pos_total };
+}
+
+export interface ScopeBookTotal {
+  scope_id: string | null;
+  count: number;
+  emi_total: number;
+  pos_total: number;
+}
+
+const SCOPE_GROUP_EXPR: Record<"agency" | "branch" | "team" | "agent", { live: string; snap: string }> = {
+  agency: { live: "NULL::uuid", snap: "NULL::uuid" },
+  branch: { live: "tm.branch_id", snap: "tm.branch_id" },
+  team: { live: "c.assigned_team_id", snap: "s.assigned_team_id" },
+  agent: { live: "c.assigned_agent_id", snap: "s.assigned_agent_id" },
+};
+
+/**
+ * Same book totals as bookTotals(), but grouped per entity at one scope
+ * level instead of narrowed to a single one -- backs the Targets page's
+ * "what would the computed default be" column so admins can see the book
+ * size while setting manual targets, without an N+1 fetch per row.
+ */
+export async function bookTotalsByScope(
+  agencyId: string,
+  month: string, // 'YYYY-MM-01'
+  scopeType: "agency" | "branch" | "team" | "agent",
+): Promise<ScopeBookTotal[]> {
+  const g = SCOPE_GROUP_EXPR[scopeType];
+  if (isCurrentMonth(month.slice(0, 7))) {
+    const { rows } = await pool.query(
+      `SELECT ${g.live} AS scope_id, COUNT(*)::int AS count,
+              COALESCE(SUM(c.emi), 0)::float AS emi_total,
+              COALESCE(SUM(c.pos), 0)::float AS pos_total
+         FROM customers c
+         JOIN companies co ON co.id = c.company_id AND co.agency_id = $1
+         LEFT JOIN teams tm ON tm.id = c.assigned_team_id
+        GROUP BY ${g.live}`,
+      [agencyId],
+    );
+    return rows as ScopeBookTotal[];
+  }
+  const { rows } = await pool.query(
+    `SELECT ${g.snap} AS scope_id, COUNT(*)::int AS count,
+            COALESCE(SUM(s.emi), 0)::float AS emi_total,
+            COALESCE(SUM(s.pos), 0)::float AS pos_total
+       FROM customer_month_snapshots s
+       JOIN companies co ON co.id = s.company_id AND co.agency_id = $1
+       LEFT JOIN teams tm ON tm.id = s.assigned_team_id
+      WHERE s.month = $2::date
+      GROUP BY ${g.snap}`,
+    [agencyId, month],
+  );
+  return rows as ScopeBookTotal[];
 }
 
 /** Is there a next-month allocation file to compare against (transition basis)? */
@@ -188,7 +337,7 @@ function classifiedCtes(conditions: string[]): string {
   const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
   return `
     base AS (
-      SELECT s.customer_id, s.due_amount, s.emi, s.assigned_agent_id, s.assigned_team_id,
+      SELECT s.customer_id, s.due_amount, s.pos, s.emi, s.assigned_agent_id, s.assigned_team_id,
              s.product, s.company_id, s.bucket,
              bm.sort_order AS cur_sort, COALESCE(bm.category, 'normal') AS cur_cat,
              c.status,
@@ -259,18 +408,23 @@ function classifiedCtes(conditions: string[]): string {
     )`;
 }
 
+// Owner feedback round, Phase 2: portfolio-value aggregates (how much book do
+// we have) read SUM(pos) -- principal outstanding -- instead of due_amount;
+// due_amount keeps its narrower "current arrears" meaning, still used by the
+// is_resolved/is_normalized/is_rolled_back classification CASE expressions
+// above (unchanged).
 const AGGREGATE_SELECT = `
   COUNT(*)::int                                                    AS allocated_count,
-  COALESCE(SUM(due_amount), 0)::float                              AS allocated_amount,
+  COALESCE(SUM(pos), 0)::float                                     AS allocated_amount,
   COUNT(*) FILTER (WHERE cur_cat = 'npa')::int                     AS recovery_allocated_count,
-  COALESCE(SUM(due_amount) FILTER (WHERE cur_cat = 'npa'), 0)::float AS recovery_allocated_amount,
+  COALESCE(SUM(pos) FILTER (WHERE cur_cat = 'npa'), 0)::float      AS recovery_allocated_amount,
   COALESCE(SUM(paid), 0)::float                                    AS collected_amount,
   COUNT(*) FILTER (WHERE paid > 0)::int                            AS collected_count,
-  COALESCE(SUM(due_amount) FILTER (WHERE is_resolved), 0)::float   AS resolution_amount,
+  COALESCE(SUM(pos) FILTER (WHERE is_resolved), 0)::float          AS resolution_amount,
   COUNT(*) FILTER (WHERE is_resolved)::int                         AS resolution_count,
-  COALESCE(SUM(due_amount) FILTER (WHERE is_rolled_back), 0)::float AS rollback_amount,
+  COALESCE(SUM(pos) FILTER (WHERE is_rolled_back), 0)::float       AS rollback_amount,
   COUNT(*) FILTER (WHERE is_rolled_back)::int                      AS rollback_count,
-  COALESCE(SUM(due_amount) FILTER (WHERE is_normalized), 0)::float AS normalization_amount,
+  COALESCE(SUM(pos) FILTER (WHERE is_normalized), 0)::float        AS normalization_amount,
   COUNT(*) FILTER (WHERE is_normalized)::int                       AS normalization_count,
   COALESCE(SUM(paid) FILTER (WHERE cur_cat = 'npa'), 0)::float     AS recovery_amount,
   COUNT(*) FILTER (WHERE cur_cat = 'npa' AND paid > 0)::int        AS recovery_count,
@@ -367,8 +521,23 @@ export async function resolveTarget(
     return { target_amount: rows[0].target_amount, target_count: rows[0].target_count };
   };
 
+  /**
+   * Phase 8: when nobody has set a manual collection target at any scope
+   * level above, fall back to the book's own EMI schedule -- SUM(emi) over
+   * the same scope/company/product/bucket filters (never for the other
+   * metrics, which are already POS-denominated via the classified
+   * aggregates). An empty book returns null, not a fabricated 0.
+   */
+  const computedDefault = async (): Promise<TargetValue> => {
+    if (metric !== "collection") return { target_amount: null, target_count: null };
+    const totals = await bookTotals(agencyId, filters);
+    return totals.count === 0
+      ? { target_amount: null, target_count: null }
+      : { target_amount: totals.emi_total, target_count: totals.count };
+  };
+
   if (filters.agent_id) {
-    return (await exact("agent", filters.agent_id)) ?? { target_amount: null, target_count: null };
+    return (await exact("agent", filters.agent_id)) ?? (await computedDefault());
   }
   if (filters.team_id) {
     return (
@@ -377,7 +546,8 @@ export async function resolveTarget(
         "agent",
         "JOIN users u ON u.id = t.scope_id AND u.team_id = $PARENT",
         filters.team_id,
-      )) ?? { target_amount: null, target_count: null }
+      )) ??
+      (await computedDefault())
     );
   }
   if (filters.branch_id) {
@@ -392,14 +562,16 @@ export async function resolveTarget(
         "agent",
         "JOIN users u ON u.id = t.scope_id AND u.branch_id = $PARENT",
         filters.branch_id,
-      )) ?? { target_amount: null, target_count: null }
+      )) ??
+      (await computedDefault())
     );
   }
   return (
     (await exact("agency", null)) ??
     (await childSum("branch")) ??
     (await childSum("team")) ??
-    (await childSum("agent")) ?? { target_amount: null, target_count: null }
+    (await childSum("agent")) ??
+    (await computedDefault())
   );
 }
 
@@ -471,7 +643,10 @@ export async function depositsByRange(
   return { collected, deposited, pending: collected - deposited };
 }
 
-async function depositTotals(agencyId: string, filters: ReportFilters): Promise<DepositTotals> {
+// Exported (not just used by dashboard()) so the branch drill-down (Phase 9)
+// can pull the same collected/deposited/pending math for a branch_id scope
+// without re-deriving the payment-conditions logic.
+export async function depositTotals(agencyId: string, filters: ReportFilters): Promise<DepositTotals> {
   const params: unknown[] = [agencyId, filters.month];
   const conditions = paymentConditions(filters, params);
   const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
@@ -490,6 +665,216 @@ async function depositTotals(agencyId: string, filters: ReportFilters): Promise<
   const collected = rows[0].collected as number;
   const deposited = rows[0].deposited as number;
   return { collected, deposited, pending: collected - deposited };
+}
+
+/**
+ * Phase 12 (Management Dashboard "Collected Today" KPI): money collected
+ * since midnight, assumed UTC for this phase (see task-12 brief -- IST
+ * "today" is a follow-up if the owner wants it later). Shares
+ * paymentConditions() with the MTD figure so both use identical scope
+ * narrowing, just a different time window.
+ */
+export async function collectedToday(agencyId: string, filters: ReportFilters): Promise<number> {
+  const params: unknown[] = [agencyId];
+  const conditions = paymentConditions(filters, params);
+  const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
+  const { rows } = await pool.query(
+    `SELECT COALESCE(SUM(p.amount), 0)::float AS today
+       FROM payments p
+       JOIN customers c ON c.id = p.customer_id
+       JOIN companies co ON co.id = c.company_id AND co.agency_id = $1
+       JOIN users cu ON cu.id = p.collected_by_user_id
+      WHERE p.paid_at >= date_trunc('day', now())
+        AND p.paid_at < date_trunc('day', now()) + interval '1 day'
+        ${where}`,
+    params,
+  );
+  return rows[0].today as number;
+}
+
+export interface PaymentTypeSplit {
+  emi: number;
+  settlement: number;
+}
+
+/** Phase 12 (Management Dashboard "Settlement vs EMI Collections" KPI). */
+export async function collectionByType(
+  agencyId: string,
+  filters: ReportFilters,
+): Promise<PaymentTypeSplit> {
+  const params: unknown[] = [agencyId, filters.month];
+  const conditions = paymentConditions(filters, params);
+  const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
+  const { rows } = await pool.query(
+    `SELECT COALESCE(SUM(p.amount) FILTER (WHERE p.type = 'settlement'), 0)::float AS settlement,
+            COALESCE(SUM(p.amount) FILTER (WHERE p.type = 'emi'), 0)::float AS emi
+       FROM payments p
+       JOIN customers c ON c.id = p.customer_id
+       JOIN companies co ON co.id = c.company_id AND co.agency_id = $1
+       JOIN users cu ON cu.id = p.collected_by_user_id
+      WHERE p.paid_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Kolkata')
+        AND p.paid_at < ((($2::date + interval '1 month')::date)::timestamp AT TIME ZONE 'Asia/Kolkata')
+        ${where}`,
+    params,
+  );
+  return { emi: rows[0].emi as number, settlement: rows[0].settlement as number };
+}
+
+export interface CollectionChannelSplit {
+  field: number;
+  telecalling: number;
+  /** Collected by someone who is neither a field agent nor a telecaller
+   *  (e.g. a TL or admin recording a payment directly) -- not silently
+   *  folded into either bucket. */
+  other: number;
+}
+
+/**
+ * Phase 12 (Management Dashboard "Field vs Telecalling Collections" KPI):
+ * splits the same MTD collected total by the collecting user's capability
+ * flags. A user with both is_field_agent and is_telecaller (unusual but not
+ * disallowed) counts toward "field" -- the flag order used everywhere else
+ * a single-bucket classification is needed (e.g. /tracking "not moving" alert).
+ */
+export async function collectionByChannel(
+  agencyId: string,
+  filters: ReportFilters,
+): Promise<CollectionChannelSplit> {
+  const params: unknown[] = [agencyId, filters.month];
+  const conditions = paymentConditions(filters, params);
+  const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
+  const { rows } = await pool.query(
+    `SELECT
+        COALESCE(SUM(p.amount) FILTER (WHERE cu.is_field_agent), 0)::float AS field,
+        COALESCE(SUM(p.amount) FILTER (WHERE NOT cu.is_field_agent AND cu.is_telecaller), 0)::float AS telecalling,
+        COALESCE(SUM(p.amount) FILTER (WHERE NOT cu.is_field_agent AND NOT cu.is_telecaller), 0)::float AS other
+       FROM payments p
+       JOIN customers c ON c.id = p.customer_id
+       JOIN companies co ON co.id = c.company_id AND co.agency_id = $1
+       JOIN users cu ON cu.id = p.collected_by_user_id
+      WHERE p.paid_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Kolkata')
+        AND p.paid_at < ((($2::date + interval '1 month')::date)::timestamp AT TIME ZONE 'Asia/Kolkata')
+        ${where}`,
+    params,
+  );
+  return {
+    field: rows[0].field as number,
+    telecalling: rows[0].telecalling as number,
+    other: rows[0].other as number,
+  };
+}
+
+export interface TrendPoint {
+  bucket: string; // 'YYYY-MM-DD' (day) or the Monday of the ISO week (week)
+  amount: number;
+}
+
+/**
+ * Phase 12 (Management Dashboard "Recovery Trend" KPI): daily or weekly
+ * collected-amount buckets over a free date range, same payment scope
+ * narrowing as the rest of the payment-side report surface.
+ */
+export async function collectionTrend(
+  agencyId: string,
+  from: string,
+  to: string,
+  granularity: "day" | "week",
+  filters: Omit<ReportFilters, "month">,
+): Promise<TrendPoint[]> {
+  const params: unknown[] = [agencyId, from, to];
+  const conditions = paymentConditions({ ...filters, month: from } as ReportFilters, params);
+  const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
+  const truncUnit = granularity === "week" ? "week" : "day";
+  const { rows } = await pool.query(
+    `SELECT to_char(date_trunc('${truncUnit}', p.paid_at AT TIME ZONE 'Asia/Kolkata'), 'YYYY-MM-DD') AS bucket,
+            COALESCE(SUM(p.amount), 0)::float AS amount
+       FROM payments p
+       JOIN customers c ON c.id = p.customer_id
+       JOIN companies co ON co.id = c.company_id AND co.agency_id = $1
+       JOIN users cu ON cu.id = p.collected_by_user_id
+      WHERE p.paid_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Kolkata')
+        AND p.paid_at < (($3::date + interval '1 day')::timestamp AT TIME ZONE 'Asia/Kolkata')
+        ${where}
+      GROUP BY 1 ORDER BY 1`,
+    params,
+  );
+  return rows as TrendPoint[];
+}
+
+export interface DepositRow {
+  id: string;
+  amount: number;
+  mode: string | null;
+  paid_at: string;
+  deposited_at: string | null;
+  customer_name: string;
+  loan_number: string;
+  company_name: string;
+  collected_by_name: string;
+  deposited_by_name: string | null;
+}
+
+export interface DepositListFilters {
+  deposited?: boolean;
+  month?: string; // 'YYYY-MM-01'
+  agent_id?: string;
+  company_id?: string;
+  branch_id?: string;
+  limit?: number;
+}
+
+/**
+ * Individual payment rows behind the deposit reconciliation UI (Phase 5.4)
+ * and the branch drill-down's Deposits section (Phase 9) -- factored out of
+ * the /payments/deposits route so both share one query instead of drifting.
+ * branch_id filters by the COLLECTING agent's branch (u.branch_id), the same
+ * "credit whoever recorded the payment" semantic paymentConditions() uses.
+ */
+export async function listDeposits(
+  agencyId: string,
+  filters: DepositListFilters,
+): Promise<DepositRow[]> {
+  const conditions = ["co.agency_id = $1"];
+  const params: unknown[] = [agencyId];
+  if (filters.deposited === true) conditions.push("p.deposited_at IS NOT NULL");
+  if (filters.deposited === false) conditions.push("p.deposited_at IS NULL");
+  if (filters.month) {
+    params.push(filters.month);
+    conditions.push(
+      `p.paid_at >= ($${params.length}::date::timestamp AT TIME ZONE 'Asia/Kolkata')
+       AND p.paid_at < ((($${params.length}::date + interval '1 month')::date)::timestamp AT TIME ZONE 'Asia/Kolkata')`,
+    );
+  }
+  if (filters.agent_id) {
+    params.push(filters.agent_id);
+    conditions.push(`p.collected_by_user_id = $${params.length}`);
+  }
+  if (filters.company_id) {
+    params.push(filters.company_id);
+    conditions.push(`c.company_id = $${params.length}`);
+  }
+  if (filters.branch_id) {
+    params.push(filters.branch_id);
+    conditions.push(`u.branch_id = $${params.length}`);
+  }
+  params.push(filters.limit ?? 500);
+
+  const { rows } = await pool.query(
+    `SELECT p.id, p.amount, p.mode, p.paid_at, p.deposited_at,
+            c.customer_name, c.loan_number, co.name AS company_name,
+            u.full_name AS collected_by_name,
+            du.full_name AS deposited_by_name
+       FROM payments p
+       JOIN customers c ON c.id = p.customer_id
+       JOIN companies co ON co.id = c.company_id
+       JOIN users u ON u.id = p.collected_by_user_id
+       LEFT JOIN users du ON du.id = p.deposited_by_user_id
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY p.paid_at DESC
+      LIMIT $${params.length}`,
+    params,
+  );
+  return rows as DepositRow[];
 }
 
 export interface MetricBlock {
@@ -520,6 +905,18 @@ export interface DashboardResult {
     target_pct: number | null;
     run_rate_current: number | null;
     run_rate_required: number | null;
+    /** Phase 8: total principal outstanding of the scope's book -- context
+     *  for the target, never baked into it. */
+    pos_total: number;
+    /** target_amount as a % of pos_total -- how much of the book's
+     *  outstanding principal this month's EMI target represents. */
+    emi_over_pos_pct: number | null;
+    /** Phase 12: money collected since midnight UTC (see collectedToday()). */
+    today_amount: number;
+    /** Phase 12: MTD collected split by payment.type. */
+    by_type: PaymentTypeSplit;
+    /** Phase 12: MTD collected split by the collecting user's capability. */
+    by_channel: CollectionChannelSplit;
   };
   deposits: DepositTotals;
   trail: { allocated_count: number; uploaded_count: number; pct: number | null };
@@ -575,6 +972,12 @@ export async function dashboard(
     collectionTarget.target_amount != null
       ? Math.max(collectionTarget.target_amount - agg.collected_amount, 0)
       : null;
+  const collectionBook = await bookTotals(user.agency_id, filters);
+  const [todayAmount, byType, byChannel] = await Promise.all([
+    collectedToday(user.agency_id, filters),
+    collectionByType(user.agency_id, filters),
+    collectionByChannel(user.agency_id, filters),
+  ]);
 
   return {
     month: filters.month.slice(0, 7),
@@ -622,6 +1025,14 @@ export async function dashboard(
         collectionTarget.target_amount != null
           ? (Math.max(collectionTarget.target_amount - deposits.collected, 0) / Math.max(days.left, 1))
           : null,
+      pos_total: collectionBook.pos_total,
+      emi_over_pos_pct:
+        collectionTarget.target_amount != null
+          ? pct(collectionTarget.target_amount, collectionBook.pos_total)
+          : null,
+      today_amount: todayAmount,
+      by_type: byType,
+      by_channel: byChannel,
     },
     deposits,
     trail: {
@@ -897,7 +1308,14 @@ export interface TrailAnalytics {
   ptps_kept: number;
   ptps_broken: number;
   ptps_pending: number;
+  /** Phase 12 (Management Dashboard "PTP Value" KPI): sum of amount on
+   *  still-pending PTPs created in this range -- money promised but not yet
+   *  due to have resolved either way. */
+  ptps_pending_value: number;
   ptp_conversion_pct: number | null; // kept / (kept + broken)
+  /** Phase 12 (Telecaller dashboard "Escalation Cases" KPI): calls
+   *  dispositioned under the seeded 'ESCALATED CASE' category. */
+  escalated_count: number;
 }
 
 /** Date-range trail/disposition analytics (event-level, so a range fits naturally here). */
@@ -933,11 +1351,13 @@ export async function trailAnalytics(
 
   const [totals, byAction, byResult, ptps] = await Promise.all([
     pool.query(
-      `SELECT COUNT(*)::int AS total, COUNT(DISTINCT cl.customer_id)::int AS unique_customers
+      `SELECT COUNT(*)::int AS total, COUNT(DISTINCT cl.customer_id)::int AS unique_customers,
+              COUNT(*) FILTER (WHERE dc.category = 'ESCALATED CASE')::int AS escalated_count
          FROM call_logs cl
          JOIN customers c ON c.id = cl.customer_id
          JOIN companies co ON co.id = c.company_id
          JOIN users u ON u.id = cl.agent_id
+         LEFT JOIN disposition_codes dc ON dc.id = cl.disposition_code_id
         WHERE ${where}`,
       params,
     ),
@@ -964,7 +1384,7 @@ export async function trailAnalytics(
       params,
     ),
     pool.query(
-      `SELECT p.status, COUNT(*)::int AS count
+      `SELECT p.status, COUNT(*)::int AS count, COALESCE(SUM(p.amount), 0)::float AS amount
          FROM ptps p
          JOIN call_logs cl ON cl.id = p.call_log_id
          JOIN customers c ON c.id = cl.customer_id
@@ -977,7 +1397,11 @@ export async function trailAnalytics(
   ]);
 
   const ptpCounts: Record<string, number> = { pending: 0, kept: 0, broken: 0 };
-  for (const r of ptps.rows) ptpCounts[r.status as string] = r.count as number;
+  const ptpAmounts: Record<string, number> = { pending: 0, kept: 0, broken: 0 };
+  for (const r of ptps.rows) {
+    ptpCounts[r.status as string] = r.count as number;
+    ptpAmounts[r.status as string] = r.amount as number;
+  }
   const ptpsCreated = ptpCounts.pending + ptpCounts.kept + ptpCounts.broken;
 
   return {
@@ -991,7 +1415,9 @@ export async function trailAnalytics(
     ptps_kept: ptpCounts.kept,
     ptps_broken: ptpCounts.broken,
     ptps_pending: ptpCounts.pending,
+    ptps_pending_value: ptpAmounts.pending,
     ptp_conversion_pct: pct(ptpCounts.kept, ptpCounts.kept + ptpCounts.broken),
+    escalated_count: totals.rows[0].escalated_count,
   };
 }
 
@@ -1010,6 +1436,7 @@ export interface RecalledCustomerRow {
   recalled_at: string;
   last_bucket: string | null;
   last_due_amount: number | null;
+  last_pos: number | null;
   last_agent_name: string | null;
 }
 
@@ -1074,6 +1501,7 @@ export async function recallReport(
   const customerRows = await pool.query(
     `SELECT c.id AS customer_id, c.loan_number, c.customer_name, co.name AS company_name,
             c.recalled_at, c.bucket AS last_bucket, c.due_amount::float AS last_due_amount,
+            c.pos::float AS last_pos,
             (SELECT u.full_name FROM allocation_logs al
                JOIN users u ON u.id = al.to_agent_id
               WHERE al.customer_id = c.id

@@ -105,7 +105,7 @@ router.get(
 
     const { rows } = await pool.query(
       `SELECT c.id, c.loan_number, c.customer_name, c.mobile_number,
-              c.product, c.bucket, c.due_amount, c.emi, c.status, c.recalled_at,
+              c.product, c.bucket, c.due_amount, c.pos, c.emi, c.status, c.recalled_at,
               c.custom_fields, c.created_at, c.assigned_agent_id,
               a.full_name AS assigned_agent_name,
               co.name AS company_name, co.id AS company_id
@@ -224,7 +224,7 @@ router.get(
           [id],
         ),
         pool.query(
-          `SELECT month, bucket, due_amount, emi, product
+          `SELECT month, bucket, due_amount, pos, emi, product
              FROM customer_month_snapshots WHERE customer_id = $1 ORDER BY month DESC`,
           [id],
         ),

@@ -57,7 +57,7 @@ router.get(
     params.push(q.limit, (q.page - 1) * q.limit);
     const { rows } = await pool.query(
       `SELECT c.id, c.loan_number, c.customer_name, c.mobile_number,
-              c.product, c.bucket, c.due_amount, c.emi,
+              c.product, c.bucket, c.due_amount, c.pos, c.emi,
               co.name AS company_name
          FROM customers c JOIN companies co ON co.id = c.company_id
         WHERE ${where}

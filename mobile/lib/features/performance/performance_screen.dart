@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/state_views.dart';
 
 /// "My Performance" (Phase 5): the same /reports/dashboard endpoint as the
 /// web — the server clamps the scope to the signed-in user, so this shows
@@ -51,13 +52,9 @@ class PerformanceScreen extends ConsumerWidget {
       ),
       body: data.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Text('Could not load your performance.\n$e',
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.grey)),
-          ),
+        error: (e, _) => ErrorState(
+          message: 'Could not load your performance.\n$e',
+          onRetry: () => ref.invalidate(performanceProvider),
         ),
         data: (d) => RefreshIndicator(
           onRefresh: () async => ref.invalidate(performanceProvider),
@@ -100,16 +97,16 @@ class _PerformanceBody extends StatelessWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('Collection this month',
-                        style: TextStyle(color: Colors.white70, fontSize: 13)),
+                    Text('Collection this month',
+                        style: TextStyle(color: AppColors.onPrimary.withValues(alpha: 0.7), fontSize: 13)),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.12),
+                        color: AppColors.onPrimary.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Text('${days['left']} days left',
-                          style: const TextStyle(color: Colors.white, fontSize: 11)),
+                          style: const TextStyle(color: AppColors.onPrimary, fontSize: 11)),
                     ),
                   ],
                 ),
@@ -117,13 +114,13 @@ class _PerformanceBody extends StatelessWidget {
                 Text(
                   '₹ ${_lakh(mtd)}',
                   style: const TextStyle(
-                      color: AppColors.success, fontSize: 32, fontWeight: FontWeight.bold),
+                      color: AppColors.success, fontSize: 32, fontWeight: FontWeight.bold).tabular,
                 ),
                 Text(
                   target != null
                       ? 'of ₹ ${_lakh(target)} target'
                       : 'No target set for this month',
-                  style: const TextStyle(color: Colors.white70, fontSize: 13),
+                  style: TextStyle(color: AppColors.onPrimary.withValues(alpha: 0.7), fontSize: 13).tabular,
                 ),
                 if (progress != null) ...[
                   const SizedBox(height: 12),
@@ -132,7 +129,7 @@ class _PerformanceBody extends StatelessWidget {
                     child: LinearProgressIndicator(
                       value: progress,
                       minHeight: 10,
-                      backgroundColor: Colors.white.withValues(alpha: 0.15),
+                      backgroundColor: AppColors.onPrimary.withValues(alpha: 0.15),
                       valueColor: const AlwaysStoppedAnimation(AppColors.success),
                     ),
                   ),
@@ -142,7 +139,7 @@ class _PerformanceBody extends StatelessWidget {
                         ? 'Target achieved! 🎉'
                         : '₹ ${_lakh(target - mtd)} to go'
                           ' · need ₹ ${_lakh(collection['run_rate_required'] as num?)} per day',
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                    style: TextStyle(color: AppColors.onPrimary.withValues(alpha: 0.7), fontSize: 12).tabular,
                   ),
                 ],
               ],
@@ -205,8 +202,8 @@ class _StatCard extends StatelessWidget {
           children: [
             Text(label, style: const TextStyle(fontSize: 12, color: AppColors.textTertiary)),
             const SizedBox(height: AppSpacing.xs),
-            Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            Text(sub, style: const TextStyle(fontSize: 12, color: AppColors.textTertiary)),
+            Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold).tabular),
+            Text(sub, style: const TextStyle(fontSize: 12, color: AppColors.textTertiary).tabular),
           ],
         ),
       ),
@@ -243,7 +240,7 @@ class _MetricRow extends StatelessWidget {
                     style: const TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.bold,
-                        color: AppColors.primary)),
+                        color: AppColors.primary).tabular),
               ],
             ),
             const SizedBox(height: 4),
@@ -251,7 +248,7 @@ class _MetricRow extends StatelessWidget {
               target != null
                   ? '₹ ${_lakh(mtd)} of ₹ ${_lakh(target)} target'
                   : '₹ ${_lakh(mtd)} MTD · no target set',
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
+              style: const TextStyle(fontSize: 12, color: AppColors.textTertiary).tabular,
             ),
             if (progress != null) ...[
               const SizedBox(height: 6),

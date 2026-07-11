@@ -4,6 +4,7 @@ import { pool } from "../config/db";
 import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
+import { seedCompanyFieldSettings } from "../services/field-config-service";
 
 const router = Router();
 router.use(authenticate);
@@ -27,11 +28,25 @@ router.post(
   requirePermission("companies.manage"),
   asyncHandler(async (req, res) => {
     const body = bodySchema.parse(req.body);
-    const { rows } = await pool.query(
-      "INSERT INTO companies (agency_id, name) VALUES ($1, $2) RETURNING id, name, created_at",
-      [req.user!.agency_id, body.name],
-    );
-    res.status(201).json({ company: rows[0] });
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query(
+        "INSERT INTO companies (agency_id, name) VALUES ($1, $2) RETURNING id, name, created_at",
+        [req.user!.agency_id, body.name],
+      );
+      // Phase 10: give the new company the agency's full field catalog,
+      // all-enabled, with the historical core fields required -- same
+      // guarantee pre-existing companies got from the Phase 10 migration seed.
+      await seedCompanyFieldSettings(client, rows[0].id, req.user!.agency_id);
+      await client.query("COMMIT");
+      res.status(201).json({ company: rows[0] });
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
   }),
 );
 

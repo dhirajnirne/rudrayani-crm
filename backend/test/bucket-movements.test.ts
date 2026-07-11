@@ -220,13 +220,31 @@ describe("payment-driven movement detection", () => {
 });
 
 describe("allocation-confirmed movement", () => {
-  const MAPPING = { Loan: "loan_number", Name: "customer_name", Bucket: "bucket", POS: "due_amount", EMI: "emi" };
+  // Owner feedback round, Phase 2: mobile_number/product/pos/emi_due_date/
+  // agent_phone are now required-to-map too -- buildSheet() appends synthetic
+  // values for these so the fixtures below (keyed on bucket/due_amount/emi)
+  // don't each need editing.
+  const MAPPING = {
+    Loan: "loan_number",
+    Name: "customer_name",
+    Bucket: "bucket",
+    POS: "due_amount",
+    EMI: "emi",
+    Mobile: "mobile_number",
+    Product: "product",
+    RealPos: "pos",
+    DueDate: "emi_due_date",
+    Agent: "agent_phone",
+  };
 
   async function buildSheet(rows: (string | number)[][]): Promise<Buffer> {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet("Allocation");
-    ws.addRow(["Loan", "Name", "Bucket", "POS", "EMI"]);
-    for (const r of rows) ws.addRow(r);
+    ws.addRow(["Loan", "Name", "Bucket", "POS", "EMI", "Mobile", "Product", "RealPos", "DueDate", "Agent"]);
+    for (const r of rows) {
+      const dueAmount = r[3]; // POS column position -> due_amount, per MAPPING above
+      ws.addRow([...r, "9800000000", "TestProduct", dueAmount, "2026-01-08", ""]);
+    }
     return Buffer.from(await wb.xlsx.writeBuffer());
   }
 

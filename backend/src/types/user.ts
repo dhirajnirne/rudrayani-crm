@@ -13,6 +13,7 @@ export interface UserRow {
   agency_id: string;
   branch_id: string | null;
   team_id: string | null;
+  manager_id: string | null;
   full_name: string;
   phone: string;
   email: string | null;
@@ -42,6 +43,7 @@ export function publicUser(user: UserRow) {
     agency_id: user.agency_id,
     branch_id: user.branch_id,
     team_id: user.team_id,
+    manager_id: user.manager_id,
     full_name: user.full_name,
     phone: user.phone,
     email: user.email,

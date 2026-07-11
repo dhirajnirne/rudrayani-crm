@@ -95,6 +95,18 @@ export const DASHBOARD_WIDGETS: DashboardWidget[] = [
               accent="#ff7a45"
             />
           </Col>
+          <Col xs={12} md={6}>
+            <SummaryStat
+              label="Portfolio (POS)"
+              value={lakh(data.collection.pos_total)}
+              accent={palette.navy}
+              sub={
+                data.collection.emi_over_pos_pct != null
+                  ? `EMI target: ${pctText(data.collection.emi_over_pos_pct)} of POS`
+                  : undefined
+              }
+            />
+          </Col>
         </Row>
       </Card>
     ),

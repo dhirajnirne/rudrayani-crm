@@ -292,17 +292,17 @@ describe("Alpha Finance NBFC (Hero-style columns): full three-file reporting cyc
     // on 001/003/007 (should confirm), no change on most others, and a
     // rollback on 009 (should NOT produce a confirmation event).
     const nextSheet = await sheetFromRows(
-      ["loan_agreement_no", "customername", "Bkt", "PROD", "pos", "emi_amount"],
+      ["loan_agreement_no", "customername", "Bkt", "PROD", "pos", "emi_amount", "Mobile", "RealPos", "Agent"],
       [
-        ["ALPHA-001", "Ramesh Kumar", "X", "CVL", 0, 1500], // 1 -> X: drop, confirms
-        ["ALPHA-002", "Sita Devi", "X", "CVL", 0, 2500],
-        ["ALPHA-003", "Manoj Tiwari", "1", "LPL", 15000, 3000], // NPA -> 1: drop, confirms
-        ["ALPHA-004", "Priya Singh", "1", "CVL", 41000, 4000],
-        ["ALPHA-005", "Ajay Verma", "X", "PBPLF", 0, 1800],
-        ["ALPHA-006", "Kavita Joshi", "NPA", "LPL", 58000, 6000],
-        ["ALPHA-007", "Suresh Nair", "X", "CVL", 0, 2200], // 2 -> X: drop, confirms
-        ["ALPHA-008", "Deepa Menon", "X", "CVL", 19500, 1900],
-        ["ALPHA-009", "Rohit Bhatia", "2", "CVL", 29000, 2800], // 1 -> 2: rollback, no event
+        ["ALPHA-001", "Ramesh Kumar", "X", "CVL", 0, 1500, "9800000001", 0, ""], // 1 -> X: drop, confirms
+        ["ALPHA-002", "Sita Devi", "X", "CVL", 0, 2500, "9800000002", 0, ""],
+        ["ALPHA-003", "Manoj Tiwari", "1", "LPL", 15000, 3000, "9800000003", 15000, ""], // NPA -> 1: drop, confirms
+        ["ALPHA-004", "Priya Singh", "1", "CVL", 41000, 4000, "9800000004", 41000, ""],
+        ["ALPHA-005", "Ajay Verma", "X", "PBPLF", 0, 1800, "9800000005", 0, ""],
+        ["ALPHA-006", "Kavita Joshi", "NPA", "LPL", 58000, 6000, "9800000006", 58000, ""],
+        ["ALPHA-007", "Suresh Nair", "X", "CVL", 0, 2200, "9800000007", 0, ""], // 2 -> X: drop, confirms
+        ["ALPHA-008", "Deepa Menon", "X", "CVL", 19500, 1900, "9800000008", 19500, ""],
+        ["ALPHA-009", "Rohit Bhatia", "2", "CVL", 29000, 2800, "9800000009", 29000, ""], // 1 -> 2: rollback, no event
       ],
     );
     const res = await uploadAndCommit(alphaCompanyId, nextSheet, ALPHA_MAPPING, NEXT_MONTH);

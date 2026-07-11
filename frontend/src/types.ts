@@ -10,6 +10,7 @@ export interface User {
   agency_id: string;
   branch_id: string | null;
   team_id: string | null;
+  manager_id: string | null;
   full_name: string;
   phone: string;
   email: string | null;
@@ -18,6 +19,30 @@ export interface User {
 
 export interface Employee extends User {
   is_active: boolean;
+}
+
+/** A node in the org-chart tree (GET /employees/org-hierarchy). */
+export interface OrgAgent extends Employee {
+  manager_name: string | null;
+}
+
+export interface OrgTeam {
+  id: string;
+  name: string;
+  agents: OrgAgent[];
+}
+
+export interface OrgBranch {
+  id: string;
+  name: string;
+  teams: OrgTeam[];
+  unassigned_agents: OrgAgent[];
+}
+
+export interface OrgHierarchy {
+  agency: { id: string; name: string } | null;
+  branches: OrgBranch[];
+  unassigned_agents: OrgAgent[];
 }
 
 export interface Branch {
@@ -73,6 +98,9 @@ export interface DispositionCode {
   result_code: string | null;
   description: string;
   remark_template: string | null;
+  // FV (field visit) or OC (on-call) -- NULL for legacy/custom codes an
+  // admin hasn't tagged yet.
+  channel: "FV" | "OC" | null;
   needs_amount: boolean;
   needs_date: boolean;
   needs_time: boolean;
@@ -90,6 +118,7 @@ export interface Customer {
   product: string | null;
   bucket: string | null;
   due_amount: string | null;
+  pos: string | null;
   emi: string | null;
   status: "active" | "closed" | "recalled";
   assigned_agent_id: string | null;
@@ -116,6 +145,7 @@ export interface WorklistCustomer {
   product: string | null;
   bucket: string | null;
   due_amount: string | null;
+  pos: string | null;
   emi: string | null;
   custom_fields: Record<string, unknown>;
   company_name: string;
@@ -153,6 +183,7 @@ export interface ReviewItem {
     product?: string | null;
     bucket?: string | null;
     due_amount?: number | null;
+    pos?: number | null;
     emi?: number | null;
     agent_phone?: string | null;
     custom_fields?: Record<string, string>;
@@ -166,6 +197,7 @@ export interface ReviewItem {
   current_customer_name: string | null;
   current_bucket: string | null;
   current_due_amount: string | null;
+  current_pos: string | null;
   current_status: string | null;
   current_agent_name: string | null;
 }
@@ -183,6 +215,7 @@ export interface ReallocationRequest {
   loan_number: string;
   customer_name: string;
   due_amount: string | null;
+  pos: string | null;
   company_name: string;
   requested_by_id: string;
   requested_by_name: string;
@@ -204,5 +237,6 @@ export const SYSTEM_FIELD_LABELS: Record<string, string> = {
   product: "Product",
   bucket: "Bucket",
   due_amount: "Due Amount",
+  pos: "POS (Principal Outstanding)",
   emi: "EMI Amount",
 };

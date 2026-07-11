@@ -41,8 +41,13 @@ async function sheetFromRows(headers: string[], rows: (string | number | null)[]
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
-export const ALPHA_HEADERS = ["loan_agreement_no", "customername", "Bkt", "PROD", "pos", "emi_amount"];
-export const ALPHA_HEADERS_WITH_DUE_DATE = [...ALPHA_HEADERS, "due_date"];
+// Owner feedback round, Phase 2: mobile_number/pos(real)/agent_phone are now
+// required-to-map too (product was already present for Alpha via PROD).
+// appendRequired() below adds synthetic values for these to every row so the
+// ~24 hand-crafted scenario rows across both companies' three months don't
+// each need individual edits.
+export const ALPHA_HEADERS = ["loan_agreement_no", "customername", "Bkt", "PROD", "pos", "emi_amount", "Mobile", "RealPos", "Agent"];
+export const ALPHA_HEADERS_WITH_DUE_DATE = ["loan_agreement_no", "customername", "Bkt", "PROD", "pos", "emi_amount", "due_date", "Mobile", "RealPos", "Agent"];
 export const ALPHA_MAPPING = {
   loan_agreement_no: "loan_number",
   customername: "customer_name",
@@ -50,11 +55,22 @@ export const ALPHA_MAPPING = {
   PROD: "product",
   pos: "due_amount",
   emi_amount: "emi",
+  Mobile: "mobile_number",
+  RealPos: "pos",
+  Agent: "agent_phone",
 };
 export const ALPHA_MAPPING_WITH_DUE_DATE = { ...ALPHA_MAPPING, due_date: "emi_due_date" };
 
+/** Appends synthetic Mobile/RealPos(=same as due_amount)/Agent values to every row. */
+function appendRequired(
+  rows: (string | number | null)[][],
+  dueAmountColIndex: number,
+): (string | number | null)[][] {
+  return rows.map((r, i) => [...r, `98${String(i).padStart(8, "0")}`, r[dueAmountColIndex], ""]);
+}
+
 export async function alphaMonth1(): Promise<Buffer> {
-  return sheetFromRows(ALPHA_HEADERS, [
+  return sheetFromRows(ALPHA_HEADERS, appendRequired([
     ["ALPHA-001", "Ramesh Kumar", "X", "CVL", 15000, 1500],
     ["ALPHA-002", "Sita Devi", "1", "CVL", 25000, 2500],
     ["ALPHA-003", "Manoj Tiwari", "1", "LPL", 30000, 3000],
@@ -63,12 +79,12 @@ export async function alphaMonth1(): Promise<Buffer> {
     ["ALPHA-006", "Kavita Joshi", "NPA", "LPL", 60000, 6000],
     ["ALPHA-007", "Suresh Nair", "1", "CVL", 22000, 2200],
     ["ALPHA-008", "Deepa Menon", "X", "CVL", 19000, 1900],
-  ]);
+  ], 4));
 }
 
 /** Repeat import for the same month: ALPHA-004 drops off (-> removal), ALPHA-009 is new (-> addition), rest transition buckets. */
 export async function alphaMonth2(): Promise<Buffer> {
-  return sheetFromRows(ALPHA_HEADERS, [
+  return sheetFromRows(ALPHA_HEADERS, appendRequired([
     ["ALPHA-001", "Ramesh Kumar", "X", "CVL", 15000, 1500],
     ["ALPHA-002", "Sita Devi", "X", "CVL", 24000, 2500], // 1 -> X: normalized
     ["ALPHA-003", "Manoj Tiwari", "2", "LPL", 31000, 3000], // 1 -> 2: rolled forward
@@ -78,7 +94,7 @@ export async function alphaMonth2(): Promise<Buffer> {
     ["ALPHA-007", "Suresh Nair", "1", "CVL", 22500, 2200],
     ["ALPHA-008", "Deepa Menon", "X", "CVL", 19200, 1900],
     ["ALPHA-009", "Rohit Bhatia", "1", "CVL", 28000, 2800], // brand new -> addition
-  ]);
+  ], 4));
 }
 
 /**
@@ -89,7 +105,7 @@ export async function alphaMonth2(): Promise<Buffer> {
  * column for the first time (a company can start sharing due dates any time).
  */
 export async function alphaMonth3(): Promise<Buffer> {
-  return sheetFromRows(ALPHA_HEADERS_WITH_DUE_DATE, [
+  return sheetFromRows(ALPHA_HEADERS_WITH_DUE_DATE, appendRequired([
     ["ALPHA-001", "Ramesh Kumar", "1", "CVL", 15500, 1500, dueDateDaysAgo(40)], // X -> 1, agrees (30-59d)
     ["ALPHA-002", "Sita Devi", "X", "CVL", 0, 2500, dueDateDaysAgo(0)],
     ["ALPHA-003", "Manoj Tiwari", "NPA", "LPL", 32000, 3000, dueDateDaysAgo(95)],
@@ -101,34 +117,49 @@ export async function alphaMonth3(): Promise<Buffer> {
     // but the due date implies 75 days overdue (canonical 2).
     ["ALPHA-008", "Deepa Menon", "X", "CVL", 19500, 1900, dueDateDaysAgo(75)],
     ["ALPHA-009", "Rohit Bhatia", "1", "CVL", 28500, 2800, dueDateDaysAgo(45)],
-  ]);
+  ], 4));
 }
 
-export const BETA_HEADERS = ["App Id", "Promoter Name", "Updated Bucket", "POS", "EMI"];
-export const BETA_HEADERS_WITH_DUE_DATE = [...BETA_HEADERS, "Next EMI Date"];
+// Beta never had a product column at all (unlike Alpha's PROD) -- Phase 2
+// adds one (fixed "PersonalLoan" for every row, via appendBetaRequired)
+// alongside the same mobile_number/pos(real)/agent_phone additions.
+export const BETA_HEADERS = ["App Id", "Promoter Name", "Updated Bucket", "POS", "EMI", "Product", "Mobile", "RealPos", "Agent"];
+export const BETA_HEADERS_WITH_DUE_DATE = ["App Id", "Promoter Name", "Updated Bucket", "POS", "EMI", "Next EMI Date", "Product", "Mobile", "RealPos", "Agent"];
 export const BETA_MAPPING = {
   "App Id": "loan_number",
   "Promoter Name": "customer_name",
   "Updated Bucket": "bucket",
   POS: "due_amount",
   EMI: "emi",
+  Product: "product",
+  Mobile: "mobile_number",
+  RealPos: "pos",
+  Agent: "agent_phone",
 };
 export const BETA_MAPPING_WITH_DUE_DATE = { ...BETA_MAPPING, "Next EMI Date": "emi_due_date" };
 
+/** Appends synthetic Product/Mobile/RealPos(=same as due_amount)/Agent values to every row. */
+function appendBetaRequired(
+  rows: (string | number | null)[][],
+  dueAmountColIndex: number,
+): (string | number | null)[][] {
+  return rows.map((r, i) => [...r, "PersonalLoan", `98${String(i).padStart(8, "0")}`, r[dueAmountColIndex], ""]);
+}
+
 export async function betaMonth1(): Promise<Buffer> {
-  return sheetFromRows(BETA_HEADERS, [
+  return sheetFromRows(BETA_HEADERS, appendBetaRequired([
     ["BETA-101", "Naveen Kumar", "Current", 50000, 5000],
     ["BETA-102", "Sunita Rao", "30-60", 35000, 3500],
     ["BETA-103", "Vikas Malhotra", "60-90", 60000, 6000],
     ["BETA-104", "Anjali Gupta", "Current", 22000, 2200],
     ["BETA-105", "Rajesh Pillai", "NPA", 90000, 9000],
     ["BETA-106", "Meena Iyer", "30-60", 40000, 4000],
-  ]);
+  ], 3));
 }
 
 /** Repeat import for the same month: BETA-103 drops off (-> removal), BETA-107 is new (-> addition). */
 export async function betaMonth2(): Promise<Buffer> {
-  return sheetFromRows(BETA_HEADERS, [
+  return sheetFromRows(BETA_HEADERS, appendBetaRequired([
     ["BETA-101", "Naveen Kumar", "Current", 50000, 5000],
     ["BETA-102", "Sunita Rao", "Current", 34000, 3500], // paid up
     // BETA-103 absent -> removal
@@ -136,12 +167,12 @@ export async function betaMonth2(): Promise<Buffer> {
     ["BETA-105", "Rajesh Pillai", "NPA", 89000, 9000],
     ["BETA-106", "Meena Iyer", "60-90", 41000, 4000],
     ["BETA-107", "Priya Shah", "Current", 27000, 2700], // brand new -> addition
-  ]);
+  ], 3));
 }
 
 /** Repeat import again: bucket transitions plus a deliberate DPD mismatch on BETA-106. */
 export async function betaMonth3(): Promise<Buffer> {
-  return sheetFromRows(BETA_HEADERS_WITH_DUE_DATE, [
+  return sheetFromRows(BETA_HEADERS_WITH_DUE_DATE, appendBetaRequired([
     ["BETA-101", "Naveen Kumar", "30-60", 50500, 5000, dueDateDaysAgo(42)],
     ["BETA-102", "Sunita Rao", "Current", 0, 3500, dueDateDaysAgo(0)],
     ["BETA-104", "Anjali Gupta", "60-90", 23000, 2200, dueDateDaysAgo(70)],
@@ -150,5 +181,5 @@ export async function betaMonth3(): Promise<Buffer> {
     // due date implies only 20 days overdue (canonical 0 -- not even 30d yet).
     ["BETA-106", "Meena Iyer", "60-90", 42000, 4000, dueDateDaysAgo(20)],
     ["BETA-107", "Priya Shah", "Current", 27500, 2700, dueDateDaysAgo(10)],
-  ]);
+  ], 3));
 }

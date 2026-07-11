@@ -48,7 +48,7 @@ class _AttachmentsSectionState extends ConsumerState<AttachmentsSection> {
                   ? 'Photo uploaded'
                   : 'No network — will sync automatically',
             ),
-            backgroundColor: synced ? Colors.green : Colors.orange,
+            backgroundColor: synced ? AppColors.success : AppColors.warning,
           ),
         );
       }
@@ -57,7 +57,7 @@ class _AttachmentsSectionState extends ConsumerState<AttachmentsSection> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Upload failed: $e'),
-            backgroundColor: Colors.red,
+            backgroundColor: AppColors.error,
           ),
         );
       }
@@ -83,7 +83,7 @@ class _AttachmentsSectionState extends ConsumerState<AttachmentsSection> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Document uploaded'),
-            backgroundColor: Colors.green,
+            backgroundColor: AppColors.success,
           ),
         );
       }
@@ -93,7 +93,7 @@ class _AttachmentsSectionState extends ConsumerState<AttachmentsSection> {
           : 'Upload failed: $e';
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(msg), backgroundColor: Colors.red),
+          SnackBar(content: Text(msg), backgroundColor: AppColors.error),
         );
       }
     } finally {
@@ -139,14 +139,14 @@ class _AttachmentsSectionState extends ConsumerState<AttachmentsSection> {
               ),
               error: (e, _) => Text(
                 'Could not load documents: $e',
-                style: const TextStyle(fontSize: 12, color: Colors.red),
+                style: const TextStyle(fontSize: 12, color: AppColors.error),
               ),
               data: (list) => list.isEmpty
                   ? const Padding(
                       padding: EdgeInsets.symmetric(vertical: 8),
                       child: Text(
                         'No documents uploaded yet',
-                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                        style: TextStyle(fontSize: 12, color: AppColors.textTertiary),
                       ),
                     )
                   : Column(
@@ -170,7 +170,7 @@ class _AttachmentsSectionState extends ConsumerState<AttachmentsSection> {
                             '${(a['note'] as String?)?.isNotEmpty == true ? ' · ${a['note']}' : ''}',
                             style: const TextStyle(
                               fontSize: 11,
-                              color: Colors.grey,
+                              color: AppColors.textTertiary,
                             ),
                           ),
                         );
@@ -188,7 +188,9 @@ class _AttachmentsSectionState extends ConsumerState<AttachmentsSection> {
                         ? null
                         : () => _uploadPhoto(ImageSource.camera),
                     style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(0, 36),
+                      // Design brief: 48px strict minimum tap target — this
+                      // previously shrank to 36px.
+                      minimumSize: const Size(0, AppDimens.tapTarget),
                     ),
                   ),
                 ),
@@ -204,7 +206,7 @@ class _AttachmentsSectionState extends ConsumerState<AttachmentsSection> {
                         ? null
                         : () => _uploadPhoto(ImageSource.gallery),
                     style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(0, 36),
+                      minimumSize: const Size(0, AppDimens.tapTarget),
                     ),
                   ),
                 ),
@@ -215,7 +217,7 @@ class _AttachmentsSectionState extends ConsumerState<AttachmentsSection> {
                     label: const Text('PDF', style: TextStyle(fontSize: 12)),
                     onPressed: _uploading ? null : _uploadPdf,
                     style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(0, 36),
+                      minimumSize: const Size(0, AppDimens.tapTarget),
                     ),
                   ),
                 ),

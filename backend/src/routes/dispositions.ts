@@ -16,7 +16,7 @@ router.get(
     const { rows } = await pool.query(
       `SELECT id, action_code, category, result_code, description, remark_template,
               needs_amount, needs_date, needs_time, needs_mode, needs_reason,
-              needs_name_relation, is_active
+              needs_name_relation, is_active, channel
          FROM disposition_codes
         WHERE agency_id = $1
           ${includeInactive ? "" : "AND is_active = true"}
@@ -33,6 +33,7 @@ const dispositionBody = z.object({
   result_code: z.string().trim().min(1).max(20).nullable().optional(),
   description: z.string().trim().min(1).max(200),
   remark_template: z.string().trim().nullable().optional(),
+  channel: z.enum(["FV", "OC"]),
   needs_amount: z.boolean().default(false),
   needs_date: z.boolean().default(false),
   needs_time: z.boolean().default(false),
@@ -48,9 +49,9 @@ router.post(
     const body = dispositionBody.parse(req.body);
     const { rows } = await pool.query(
       `INSERT INTO disposition_codes
-         (agency_id, action_code, category, result_code, description, remark_template,
+         (agency_id, action_code, category, result_code, description, remark_template, channel,
           needs_amount, needs_date, needs_time, needs_mode, needs_reason, needs_name_relation)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
        RETURNING *`,
       [
         req.user!.agency_id,
@@ -59,6 +60,7 @@ router.post(
         body.result_code ?? null,
         body.description,
         body.remark_template ?? null,
+        body.channel,
         body.needs_amount,
         body.needs_date,
         body.needs_time,
@@ -98,6 +100,7 @@ router.patch(
       "result_code",
       "description",
       "remark_template",
+      "channel",
       "needs_amount",
       "needs_date",
       "needs_time",

@@ -22,14 +22,17 @@ let templateId: string;
 async function buildTestSheet(): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Ledger");
-  ws.addRow(["Loan No", "Cust Name", "Mobile", "Prod", "BKT", "Total Due", "EMI Amt", "Vehicle No"]);
-  ws.addRow(["LN001", "Ramesh Kumar", "9800000001", "HL", "B1", "1,25,000", 5200, "MH10AB1234"]);
-  ws.addRow(["LN002", "Suresh Patil", "9800000002", "Home Loan", "B2", 78000, 3100, ""]);
-  ws.addRow(["LN003", "Ganesh Jadhav", "9800000003", "PL", "B1", 56000, 2500, "MH09XY7777"]);
-  ws.addRow(["LN004", "Mahesh Pawar", "9800000004", "PL", "B3", 91000, 4100, ""]);
-  ws.addRow(["", "No LoanNumber", "9800000005", "PL", "B1", 10000, 500, ""]); // missing required
-  ws.addRow(["LN001", "Dup LoanNumber", "9800000006", "HL", "B1", 20000, 900, ""]); // in-file dup
-  ws.addRow(["LN005", "Bad Amount", "9800000007", "HL", "B2", "not-a-number", 700, ""]); // malformed
+  ws.addRow([
+    "Loan No", "Cust Name", "Mobile", "Prod", "BKT", "Total Due", "POS", "EMI Amt",
+    "Due Date", "Agent Ph", "Vehicle No",
+  ]);
+  ws.addRow(["LN001", "Ramesh Kumar", "9800000001", "HL", "B1", "1,25,000", 150000, 5200, "2026-01-08", "", "MH10AB1234"]);
+  ws.addRow(["LN002", "Suresh Patil", "9800000002", "Home Loan", "B2", 78000, 90000, 3100, "2026-01-08", "", ""]);
+  ws.addRow(["LN003", "Ganesh Jadhav", "9800000003", "PL", "B1", 56000, 65000, 2500, "2026-01-08", "", "MH09XY7777"]);
+  ws.addRow(["LN004", "Mahesh Pawar", "9800000004", "PL", "B3", 91000, 105000, 4100, "2026-01-08", "", ""]);
+  ws.addRow(["", "No LoanNumber", "9800000005", "PL", "B1", 10000, 12000, 500, "2026-01-08", "", ""]); // missing required
+  ws.addRow(["LN001", "Dup LoanNumber", "9800000006", "HL", "B1", 20000, 24000, 900, "2026-01-08", "", ""]); // in-file dup
+  ws.addRow(["LN005", "Bad Amount", "9800000007", "HL", "B2", "not-a-number", 70000, 700, "2026-01-08", "", ""]); // malformed
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
@@ -40,7 +43,10 @@ const MAPPING = {
   Prod: "product",
   BKT: "bucket",
   "Total Due": "due_amount",
+  POS: "pos",
   "EMI Amt": "emi",
+  "Due Date": "emi_due_date",
+  "Agent Ph": "agent_phone",
   // "Vehicle No" deliberately unmapped -> custom_fields
 };
 
@@ -67,9 +73,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await pool.query("DELETE FROM import_runs WHERE company_id = $1", [companyId]);
   await pool.query("DELETE FROM products WHERE company_id = $1", [companyId]);
   await pool.query("DELETE FROM customers WHERE company_id = $1", [companyId]);
+  await pool.query("DELETE FROM import_runs WHERE company_id = $1", [companyId]);
   await pool.query("DELETE FROM import_templates WHERE company_id = $1", [companyId]);
   await pool.query("DELETE FROM companies WHERE id = $1", [companyId]);
   await pool.query("DELETE FROM users WHERE agency_id = $1", [agencyId]);
@@ -91,7 +97,10 @@ describe("Excel import pipeline (brief §4)", () => {
       "Prod",
       "BKT",
       "Total Due",
+      "POS",
       "EMI Amt",
+      "Due Date",
+      "Agent Ph",
       "Vehicle No",
     ]);
     expect(res.body.row_count).toBe(7);
@@ -171,6 +180,64 @@ describe("Excel import pipeline (brief §4)", () => {
     expect(rows[0].customer_name).toBe("Ramesh Kumar");
     expect(Number(rows[0].due_amount)).toBe(125000); // "1,25,000" parsed
     expect(rows[0].custom_fields["Vehicle No"]).toBe("MH10AB1234"); // nothing lost
+  });
+
+  it("commit stores a mapped POS column separately from due_amount", async () => {
+    // Own company so this doesn't add an extra import_runs row to companyId's
+    // history, which the later "records the import history" test counts exactly.
+    const posCompany = await pool.query(
+      "INSERT INTO companies (agency_id, name) VALUES ($1, 'Pos Test FinCorp') RETURNING id",
+      [agencyId],
+    );
+    const posCompanyId = posCompany.rows[0].id;
+
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Ledger");
+    ws.addRow(["Loan No", "Cust Name", "Mobile", "Prod", "BKT", "Total Due", "POS", "EMI Amt", "Due Date", "Agent Ph"]);
+    ws.addRow(["LN900", "Pos Test Customer", "9800000099", "HL", "B1", "5,000", "1,25,000", 500, "2026-01-08", ""]);
+    const buffer = Buffer.from(await wb.xlsx.writeBuffer());
+
+    const upload = await request(app)
+      .post("/api/imports/upload")
+      .set("Authorization", `Bearer ${token}`)
+      .attach("file", buffer, "pos_test.xlsx");
+    expect(upload.status).toBe(201);
+
+    const commit = await request(app)
+      .post("/api/imports/commit")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        upload_key: upload.body.upload_key,
+        company_id: posCompanyId,
+        column_mapping: {
+          "Loan No": "loan_number",
+          "Cust Name": "customer_name",
+          Mobile: "mobile_number",
+          Prod: "product",
+          BKT: "bucket",
+          "Total Due": "due_amount",
+          POS: "pos",
+          "EMI Amt": "emi",
+          "Due Date": "emi_due_date",
+          "Agent Ph": "agent_phone",
+        },
+        file_name: "pos_test.xlsx",
+      });
+    expect(commit.status).toBe(201);
+    expect(commit.body.inserted_rows).toBe(1);
+
+    const { rows } = await pool.query(
+      "SELECT due_amount, pos FROM customers WHERE company_id = $1 AND loan_number = 'LN900'",
+      [posCompanyId],
+    );
+    expect(Number(rows[0].due_amount)).toBe(5000);
+    expect(Number(rows[0].pos)).toBe(125000);
+
+    await pool.query("DELETE FROM products WHERE company_id = $1", [posCompanyId]);
+    await pool.query("DELETE FROM buckets WHERE company_id = $1", [posCompanyId]);
+    await pool.query("DELETE FROM customers WHERE company_id = $1", [posCompanyId]);
+    await pool.query("DELETE FROM import_runs WHERE company_id = $1", [posCompanyId]);
+    await pool.query("DELETE FROM companies WHERE id = $1", [posCompanyId]);
   });
 
   it("re-importing the same file flags all rows as DB duplicates, inserts none", async () => {
@@ -259,5 +326,84 @@ describe("Products & buckets derivation (brief §4)", () => {
       .set("Authorization", `Bearer ${login.body.access_token}`)
       .send({ upload_key: uploadKey, company_id: companyId, template_id: templateId });
     expect(res.status).toBe(403);
+  });
+});
+
+describe("all system fields required (owner feedback round, Phase 2)", () => {
+  const FULL_MAPPING = {
+    "Loan No": "loan_number",
+    "Cust Name": "customer_name",
+    Mobile: "mobile_number",
+    Prod: "product",
+    BKT: "bucket",
+    "Total Due": "due_amount",
+    POS: "pos",
+    "EMI Amt": "emi",
+    "Due Date": "emi_due_date",
+    "Agent Ph": "agent_phone",
+  };
+
+  it("commit rejects a mapping missing a newly-required field (e.g. pos)", async () => {
+    const missingPos = Object.fromEntries(
+      Object.entries(FULL_MAPPING).filter(([, field]) => field !== "pos"),
+    );
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Ledger");
+    ws.addRow(Object.keys(missingPos));
+    ws.addRow(["LN800", "Full Fields", "9800000010", "HL", "B1", "5000", 500, "2026-01-08", ""]);
+    const buffer = Buffer.from(await wb.xlsx.writeBuffer());
+
+    const upload = await request(app)
+      .post("/api/imports/upload")
+      .set("Authorization", `Bearer ${token}`)
+      .attach("file", buffer, "missing_pos.xlsx");
+
+    const preview = await request(app)
+      .post("/api/imports/preview")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        upload_key: upload.body.upload_key,
+        company_id: companyId,
+        column_mapping: missingPos,
+      });
+    expect(preview.status).toBe(400);
+    expect(preview.body.error).toContain('must map a column to "pos"');
+  });
+
+  it("commit accepts a mapping with every system field mapped", async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Ledger");
+    ws.addRow(Object.keys(FULL_MAPPING));
+    ws.addRow(["LN801", "Full Fields", "9800000011", "HL", "B1", "5000", "125000", 500, "2026-01-08", ""]);
+    const buffer = Buffer.from(await wb.xlsx.writeBuffer());
+
+    const upload = await request(app)
+      .post("/api/imports/upload")
+      .set("Authorization", `Bearer ${token}`)
+      .attach("file", buffer, "full_fields.xlsx");
+
+    const commit = await request(app)
+      .post("/api/imports/commit")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        upload_key: upload.body.upload_key,
+        company_id: companyId,
+        column_mapping: FULL_MAPPING,
+        file_name: "full_fields.xlsx",
+      });
+    expect(commit.status).toBe(201);
+    expect(commit.body.inserted_rows).toBe(1);
+  });
+
+  it("saving a template missing a newly-required field is rejected", async () => {
+    const missingPos = Object.fromEntries(
+      Object.entries(FULL_MAPPING).filter(([, field]) => field !== "pos"),
+    );
+    const res = await request(app)
+      .post("/api/import-templates")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ company_id: companyId, name: "Missing POS Template", column_mapping: missingPos });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('must map a column to "pos"');
   });
 });

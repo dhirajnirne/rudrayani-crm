@@ -4,12 +4,15 @@ import { pool } from "../config/db";
 import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
-import { SYSTEM_FIELDS } from "../services/import-service";
+import { resolveFieldCatalog } from "../services/field-config-service";
 
 const router = Router();
 router.use(authenticate, requirePermission("imports.manage"));
 
-const mappingSchema = z.record(z.string().min(1), z.enum(SYSTEM_FIELDS));
+// Phase 10: field keys are per-agency data now (system_field_definitions),
+// not a compile-time enum -- Zod checks shape only, the required-mapped
+// check below validates against that company's runtime catalog.
+const mappingSchema = z.record(z.string().min(1), z.string().min(1));
 
 const createSchema = z.object({
   company_id: z.string().uuid(),
@@ -52,10 +55,11 @@ router.post(
     ]);
     if (company.rows.length === 0) throw new HttpError(404, "Company not found in this agency");
 
+    const catalog = await resolveFieldCatalog(body.company_id);
     const mappedFields = Object.values(body.column_mapping);
-    for (const required of ["loan_number", "customer_name"] as const) {
-      if (!mappedFields.includes(required)) {
-        throw new HttpError(400, `The template must map a column to "${required}"`);
+    for (const entry of catalog) {
+      if (entry.is_enabled && entry.is_required && !mappedFields.includes(entry.field_key)) {
+        throw new HttpError(400, `The template must map a column to "${entry.field_key}"`);
       }
     }
 

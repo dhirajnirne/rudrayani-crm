@@ -30,13 +30,25 @@ const MAPPING = {
   POS: "due_amount",
   EMI: "emi",
   Agent: "agent_phone",
+  // Owner feedback round, Phase 2: mobile_number/product/pos/emi_due_date are
+  // now required-to-map too. buildSheet() below appends synthetic values for
+  // these to every row so the ~15 existing (rows-per-test) fixtures below
+  // don't each need individual edits -- their tested numbers (bucket/"POS"
+  // i.e. due_amount/emi/agent) are unaffected.
+  Mobile: "mobile_number",
+  Product: "product",
+  RealPos: "pos",
+  DueDate: "emi_due_date",
 };
 
 async function buildSheet(rows: (string | number)[][]): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Allocation");
-  ws.addRow(["Loan", "Name", "Bucket", "POS", "EMI", "Agent"]);
-  for (const r of rows) ws.addRow(r);
+  ws.addRow(["Loan", "Name", "Bucket", "POS", "EMI", "Agent", "Mobile", "Product", "RealPos", "DueDate"]);
+  for (const r of rows) {
+    const dueAmount = r[3]; // POS column position -> due_amount, per MAPPING above
+    ws.addRow([...r, "9800000000", "TestProduct", dueAmount, "2026-01-08"]);
+  }
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
@@ -464,8 +476,8 @@ describe("monthly allocation import", () => {
   it("maps an EMI due date column (DD-MM-YYYY) through to customers.due_date, for the DPD cross-check", async () => {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet("Allocation");
-    ws.addRow(["Loan", "Name", "Bucket", "POS", "EMI", "DueDate"]);
-    ws.addRow(["DUE-001", "Due Date Guy", "1", 10000, 500, "08-07-2026"]);
+    ws.addRow(["Loan", "Name", "Mobile", "Product", "Bucket", "POS", "RealPos", "EMI", "DueDate", "Agent"]);
+    ws.addRow(["DUE-001", "Due Date Guy", "9800000001", "TestProduct", "1", 10000, 10000, 500, "08-07-2026", ""]);
     const buffer = Buffer.from(await wb.xlsx.writeBuffer());
 
     const up = await request(app)
@@ -481,10 +493,14 @@ describe("monthly allocation import", () => {
         column_mapping: {
           Loan: "loan_number",
           Name: "customer_name",
+          Mobile: "mobile_number",
+          Product: "product",
           Bucket: "bucket",
           POS: "due_amount",
+          RealPos: "pos",
           EMI: "emi",
           DueDate: "emi_due_date",
+          Agent: "agent_phone",
         },
         mode: "allocation",
         allocation_month: "2027-01-01", // fresh month, unused elsewhere in this file
@@ -510,8 +526,8 @@ describe("monthly allocation import", () => {
   it("rejects an unparseable EMI due date instead of silently dropping it", async () => {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet("Allocation");
-    ws.addRow(["Loan", "Name", "Bucket", "POS", "EMI", "DueDate"]);
-    ws.addRow(["DUE-BAD", "Bad Date Guy", "1", 10000, 500, "not-a-date"]);
+    ws.addRow(["Loan", "Name", "Mobile", "Product", "Bucket", "POS", "RealPos", "EMI", "DueDate", "Agent"]);
+    ws.addRow(["DUE-BAD", "Bad Date Guy", "9800000002", "TestProduct", "1", 10000, 10000, 500, "not-a-date", ""]);
     const buffer = Buffer.from(await wb.xlsx.writeBuffer());
 
     const up = await request(app)
@@ -527,15 +543,190 @@ describe("monthly allocation import", () => {
         column_mapping: {
           Loan: "loan_number",
           Name: "customer_name",
+          Mobile: "mobile_number",
+          Product: "product",
           Bucket: "bucket",
           POS: "due_amount",
+          RealPos: "pos",
           EMI: "emi",
           DueDate: "emi_due_date",
+          Agent: "agent_phone",
         },
         mode: "new",
       });
     expect(res.status).toBe(200);
     expect(res.body.error_rows).toBe(1);
     expect(res.body.errors[0].problems[0]).toMatch(/unrecognized date/);
+  });
+});
+
+/**
+ * Owner feedback round, Phase 4: GET /customers already accepted branch_id/
+ * team_id query params (an earlier, unrelated correction round wired them
+ * up), but no test exercised them. Uses its own agency/company/branch/team
+ * fixtures — isolated from the shared fixtures above — so customer counts
+ * here can't leak into or be affected by the other describe block's tests.
+ */
+describe("GET /customers - branch_id / team_id filtering", () => {
+  const PASSWORD_2 = "Secret@123";
+  const ADMIN_PHONE_2 = "7920000090";
+
+  let agencyId2: string;
+  let companyId2: string;
+  let branchA: string;
+  let branchB: string;
+  let teamA1: string;
+  let teamA2: string;
+  let teamB1: string;
+  let token2: string;
+
+  beforeAll(async () => {
+    const agency = await pool.query(
+      "INSERT INTO agencies (name) VALUES ('Branch Filter Agency') RETURNING id",
+    );
+    agencyId2 = agency.rows[0].id;
+    const company = await pool.query(
+      "INSERT INTO companies (agency_id, name) VALUES ($1, 'Branch Filter NBFC') RETURNING id",
+      [agencyId2],
+    );
+    companyId2 = company.rows[0].id;
+
+    const brA = await pool.query(
+      "INSERT INTO branches (agency_id, name) VALUES ($1, 'Branch A') RETURNING id",
+      [agencyId2],
+    );
+    branchA = brA.rows[0].id;
+    const brB = await pool.query(
+      "INSERT INTO branches (agency_id, name) VALUES ($1, 'Branch B') RETURNING id",
+      [agencyId2],
+    );
+    branchB = brB.rows[0].id;
+
+    // Two teams under branch A, one under branch B -- lets us tell "matches
+    // this exact team" apart from "matches any team in this branch".
+    const tA1 = await pool.query(
+      "INSERT INTO teams (branch_id, name) VALUES ($1, 'Team A1') RETURNING id",
+      [branchA],
+    );
+    teamA1 = tA1.rows[0].id;
+    const tA2 = await pool.query(
+      "INSERT INTO teams (branch_id, name) VALUES ($1, 'Team A2') RETURNING id",
+      [branchA],
+    );
+    teamA2 = tA2.rows[0].id;
+    const tB1 = await pool.query(
+      "INSERT INTO teams (branch_id, name) VALUES ($1, 'Team B1') RETURNING id",
+      [branchB],
+    );
+    teamB1 = tB1.rows[0].id;
+
+    const hash = await hashPassword(PASSWORD_2);
+    await pool.query(
+      `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin)
+       VALUES ($1, 'Branch Filter Admin', $2, $3, true)`,
+      [agencyId2, ADMIN_PHONE_2, hash],
+    );
+    const agentA1 = await pool.query(
+      `INSERT INTO users (agency_id, full_name, phone, password_hash, is_telecaller, team_id)
+       VALUES ($1, 'Agent A1', '7920000091', $2, true, $3) RETURNING id`,
+      [agencyId2, hash, teamA1],
+    );
+    const agentA2 = await pool.query(
+      `INSERT INTO users (agency_id, full_name, phone, password_hash, is_telecaller, team_id)
+       VALUES ($1, 'Agent A2', '7920000092', $2, true, $3) RETURNING id`,
+      [agencyId2, hash, teamA2],
+    );
+    const agentB1 = await pool.query(
+      `INSERT INTO users (agency_id, full_name, phone, password_hash, is_telecaller, team_id)
+       VALUES ($1, 'Agent B1', '7920000093', $2, true, $3) RETURNING id`,
+      [agencyId2, hash, teamB1],
+    );
+
+    // assigned_agent_id/assigned_team_id mirror what POST /allocations/assign
+    // writes (team_id copied from the target agent at assignment time).
+    await pool.query(
+      `INSERT INTO customers (company_id, loan_number, customer_name, status, assigned_agent_id, assigned_team_id)
+       VALUES ($1, 'BF-A1', 'Customer A1', 'active', $2, $3)`,
+      [companyId2, agentA1.rows[0].id, teamA1],
+    );
+    await pool.query(
+      `INSERT INTO customers (company_id, loan_number, customer_name, status, assigned_agent_id, assigned_team_id)
+       VALUES ($1, 'BF-A2', 'Customer A2', 'active', $2, $3)`,
+      [companyId2, agentA2.rows[0].id, teamA2],
+    );
+    await pool.query(
+      `INSERT INTO customers (company_id, loan_number, customer_name, status, assigned_agent_id, assigned_team_id)
+       VALUES ($1, 'BF-B1', 'Customer B1', 'active', $2, $3)`,
+      [companyId2, agentB1.rows[0].id, teamB1],
+    );
+    await pool.query(
+      `INSERT INTO customers (company_id, loan_number, customer_name, status)
+       VALUES ($1, 'BF-UNASSIGNED', 'Unassigned Customer', 'active')`,
+      [companyId2],
+    );
+
+    const login = await request(app)
+      .post("/api/auth/login")
+      .send({ phone: ADMIN_PHONE_2, password: PASSWORD_2 });
+    token2 = login.body.access_token;
+  });
+
+  afterAll(async () => {
+    await pool.query("DELETE FROM customers WHERE company_id = $1", [companyId2]);
+    await pool.query("DELETE FROM companies WHERE id = $1", [companyId2]);
+    await pool.query("DELETE FROM users WHERE agency_id = $1", [agencyId2]);
+    await pool.query("DELETE FROM teams WHERE branch_id = ANY($1)", [[branchA, branchB]]);
+    await pool.query("DELETE FROM branches WHERE id = ANY($1)", [[branchA, branchB]]);
+    await pool.query("DELETE FROM agencies WHERE id = $1", [agencyId2]);
+  });
+
+  it("filters by team_id: only customers whose assigned agent is on that team", async () => {
+    const res = await request(app)
+      .get("/api/customers")
+      .query({ team_id: teamA1 })
+      .set("Authorization", `Bearer ${token2}`);
+    expect(res.status).toBe(200);
+    expect(res.body.customers.map((c: { loan_number: string }) => c.loan_number)).toEqual(["BF-A1"]);
+  });
+
+  it("filters by branch_id: customers whose assigned agent's team belongs to that branch", async () => {
+    const res = await request(app)
+      .get("/api/customers")
+      .query({ branch_id: branchA })
+      .set("Authorization", `Bearer ${token2}`);
+    expect(res.status).toBe(200);
+    const loanNumbers = res.body.customers
+      .map((c: { loan_number: string }) => c.loan_number)
+      .sort();
+    expect(loanNumbers).toEqual(["BF-A1", "BF-A2"]); // both A-teams, not B1 or the unassigned one
+  });
+
+  it("combining branch_id and team_id narrows further than either alone", async () => {
+    const res = await request(app)
+      .get("/api/customers")
+      .query({ branch_id: branchA, team_id: teamA2 })
+      .set("Authorization", `Bearer ${token2}`);
+    expect(res.status).toBe(200);
+    expect(res.body.customers.map((c: { loan_number: string }) => c.loan_number)).toEqual(["BF-A2"]);
+  });
+
+  it("an unmatched (but well-formed) team_id returns an empty list, not an error", async () => {
+    const res = await request(app)
+      .get("/api/customers")
+      .query({ team_id: "00000000-0000-0000-0000-000000000000" })
+      .set("Authorization", `Bearer ${token2}`);
+    expect(res.status).toBe(200);
+    expect(res.body.customers).toEqual([]);
+    expect(res.body.total).toBe(0);
+  });
+
+  it("an unmatched (but well-formed) branch_id returns an empty list, not an error", async () => {
+    const res = await request(app)
+      .get("/api/customers")
+      .query({ branch_id: "00000000-0000-0000-0000-000000000000" })
+      .set("Authorization", `Bearer ${token2}`);
+    expect(res.status).toBe(200);
+    expect(res.body.customers).toEqual([]);
+    expect(res.body.total).toBe(0);
   });
 });

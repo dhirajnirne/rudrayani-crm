@@ -1,12 +1,17 @@
-import { HttpError } from "../middleware/error-handler";
-
 /**
  * Visibility scope (brief Section 3): Agency Admin / Ops Manager see the
  * whole agency; a Team Leader sees their own team. Returns SQL filter parts
  * to AND onto a query already filtered by agency_id — callers substitute the
  * `$SCOPE` placeholder for the next positional parameter.
+ *
+ * Phase 12: telecaller/field_agent now also hold tracking.view (self only —
+ * their mobile dashboards need their own attendance/GPS/route), so instead of
+ * failing shut for "neither admin/ops nor TL" this falls back to a self-only
+ * clause (`u.id = $SCOPE`) rather than a 403. Nothing about the admin/ops/TL
+ * branches above changes.
  */
 export function scopeFilter(user: {
+  id: string;
   is_agency_admin: boolean;
   is_operations_manager: boolean;
   is_team_leader: boolean;
@@ -22,5 +27,5 @@ export function scopeFilter(user: {
       param: user.team_id ?? "00000000-0000-0000-0000-000000000000",
     };
   }
-  throw new HttpError(403, "Only managers and team leaders can view this");
+  return { clause: "AND u.id = $SCOPE", param: user.id };
 }

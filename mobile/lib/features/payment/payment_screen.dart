@@ -22,6 +22,9 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
   final _amountCtrl = TextEditingController();
   final _dateCtrl = TextEditingController();
   String? _mode;
+  // Phase 12 (Management Dashboard "Settlement vs EMI Collections" KPI):
+  // captured at collection time, defaults to the overwhelmingly common case.
+  String _type = 'emi';
   File? _photo;
   bool _closeCustomer = false;
   bool _loading = false;
@@ -74,6 +77,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
       final payload = <String, dynamic>{
         'customer_id': widget.customerId,
         'amount': amount,
+        'type': _type,
         if (_mode != null) 'mode': _mode,
         if (_dateCtrl.text.isNotEmpty) 'paid_at': _dateCtrl.text,
         'close_customer': _closeCustomer.toString(),
@@ -104,7 +108,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('No network — payment saved offline, will sync automatically'),
-              backgroundColor: Colors.orange,
+              backgroundColor: AppColors.warning,
             ),
           );
           context.pop();
@@ -115,8 +119,9 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
 
       if (mounted) {
         ref.invalidate(worklistProvider);
+        ref.invalidate(dispositionCodesProvider);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Payment recorded!'), backgroundColor: Colors.green),
+          const SnackBar(content: Text('Payment recorded!'), backgroundColor: AppColors.success),
         );
         context.pop();
         if (_closeCustomer) context.pop(); // also pop customer detail
@@ -137,7 +142,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
+        foregroundColor: AppColors.onPrimary,
         title: Text(
           customerAsync.maybeWhen(
             data: (c) => 'Record Payment — ${c.customerName}',
@@ -153,6 +158,8 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
             TextField(
               controller: _amountCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              // Tabular-nums (MANDATORY, design brief) even while typing.
+              style: const TextStyle().tabular,
               decoration: const InputDecoration(
                 labelText: 'Amount Collected (₹) *',
                 border: OutlineInputBorder(),
@@ -173,7 +180,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
                   children: [
                     Text(
                       'This is more than what\'s owed (₹${dueAmount.toStringAsFixed(0)} due). Double-check the amount.',
-                      style: const TextStyle(fontSize: 12, color: AppColors.warning),
+                      style: const TextStyle(fontSize: 12, color: AppColors.warningStrong).tabular,
                     ),
                     CheckboxListTile(
                       contentPadding: EdgeInsets.zero,
@@ -203,6 +210,19 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
               onChanged: (v) => setState(() => _mode = v),
             ),
             const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: _type,
+              decoration: const InputDecoration(
+                labelText: 'Collection Type',
+                border: OutlineInputBorder(),
+              ),
+              items: const [
+                DropdownMenuItem(value: 'emi', child: Text('EMI Collection')),
+                DropdownMenuItem(value: 'settlement', child: Text('Settlement')),
+              ],
+              onChanged: (v) => setState(() => _type = v ?? 'emi'),
+            ),
+            const SizedBox(height: 12),
             TextField(
               controller: _dateCtrl,
               readOnly: true,
@@ -228,7 +248,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
                 icon: const Icon(Icons.delete),
                 label: const Text('Remove photo'),
                 onPressed: () => setState(() => _photo = null),
-                style: TextButton.styleFrom(foregroundColor: Colors.red),
+                style: TextButton.styleFrom(foregroundColor: AppColors.error),
               ),
             ] else ...[
               Row(
@@ -238,7 +258,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
                       icon: const Icon(Icons.camera_alt),
                       label: const Text('Camera'),
                       onPressed: () => _pickPhoto(ImageSource.camera),
-                      style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
+                      style: OutlinedButton.styleFrom(minimumSize: const Size(0, AppDimens.tapTarget)),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -247,7 +267,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
                       icon: const Icon(Icons.photo_library),
                       label: const Text('Gallery'),
                       onPressed: () => _pickPhoto(ImageSource.gallery),
-                      style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
+                      style: OutlinedButton.styleFrom(minimumSize: const Size(0, AppDimens.tapTarget)),
                     ),
                   ),
                 ],
@@ -266,20 +286,20 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
-                child: Text(_error!, style: const TextStyle(color: Colors.red)),
+                child: Text(_error!, style: const TextStyle(color: AppColors.error)),
               ),
             const SizedBox(height: 8),
             SizedBox(
-              height: 48,
+              height: AppDimens.tapTarget,
               child: ElevatedButton.icon(
                 icon: _loading
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.onPrimary))
                     : const Icon(Icons.save),
                 label: Text(_loading ? 'Saving…' : 'Record Payment'),
                 onPressed: _loading ? null : _submit,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
+                  foregroundColor: AppColors.onPrimary,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
               ),

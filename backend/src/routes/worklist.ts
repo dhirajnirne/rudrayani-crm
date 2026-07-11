@@ -18,7 +18,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const { rows } = await pool.query(
       `SELECT c.id, c.loan_number, c.customer_name, c.mobile_number,
-              c.product, c.bucket, c.due_amount, c.emi, c.custom_fields,
+              c.product, c.bucket, c.due_amount, c.pos, c.emi, c.custom_fields,
               co.name AS company_name,
               (c.assigned_agent_id = $1) AS is_primary_for_me,
               (c.assigned_field_agent_id = $1) AS is_field_agent_for_me,
@@ -74,7 +74,7 @@ router.get(
 
     const { rows } = await pool.query(
       `SELECT c.id, c.loan_number, c.customer_name, c.mobile_number,
-              c.product, c.bucket, c.due_amount, c.emi, c.custom_fields,
+              c.product, c.bucket, c.due_amount, c.pos, c.emi, c.custom_fields,
               co.name AS company_name,
               (c.assigned_agent_id = $1) AS is_primary_for_me,
               (c.assigned_field_agent_id = $1) AS is_field_agent_for_me,

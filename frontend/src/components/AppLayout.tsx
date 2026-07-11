@@ -4,9 +4,11 @@ import {
   ApartmentOutlined,
   AuditOutlined,
   BankOutlined,
+  BarChartOutlined,
   CalendarOutlined,
   DashboardOutlined,
   AimOutlined,
+  ClusterOutlined,
   EnvironmentOutlined,
   FilterOutlined,
   WalletOutlined,
@@ -16,6 +18,7 @@ import {
   LogoutOutlined,
   MoonOutlined,
   ScheduleOutlined,
+  SettingOutlined,
   ShopOutlined,
   SunOutlined,
   TeamOutlined,
@@ -48,6 +51,11 @@ export default function AppLayout() {
       icon: <DashboardOutlined />,
       label: <Link to="/">{hasPermission("reports.view") ? "Dashboard" : "My Performance"}</Link>,
     },
+    hasPermission("reports.view") && {
+      key: "/management-dashboard",
+      icon: <BarChartOutlined />,
+      label: <Link to="/management-dashboard">Management Dashboard</Link>,
+    },
     isIndividualContributor && {
       key: "/my-worklist",
       icon: <UnorderedListOutlined />,
@@ -62,6 +70,11 @@ export default function AppLayout() {
       key: "/employees",
       icon: <UserOutlined />,
       label: <Link to="/employees">Employees</Link>,
+    },
+    hasPermission("employees.view") && {
+      key: "/org-chart",
+      icon: <ClusterOutlined />,
+      label: <Link to="/org-chart">Org Chart</Link>,
     },
     hasPermission("branches.manage") && {
       key: "/branches",
@@ -82,6 +95,11 @@ export default function AppLayout() {
       key: "/buckets",
       icon: <FilterOutlined />,
       label: <Link to="/buckets">Buckets</Link>,
+    },
+    hasPermission("companies.manage") && {
+      key: "/field-config",
+      icon: <SettingOutlined />,
+      label: <Link to="/field-config">Field Config</Link>,
     },
     hasPermission("imports.manage") && {
       key: "/import",

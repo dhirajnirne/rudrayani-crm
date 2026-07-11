@@ -129,9 +129,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             Align(
               alignment: Alignment.topRight,
               child: IconButton(
-                icon: const Icon(
+                icon: Icon(
                   Icons.settings_outlined,
-                  color: Colors.white54,
+                  color: AppColors.onPrimary.withValues(alpha: 0.54),
                 ),
                 tooltip: 'Server address',
                 onPressed: _showServerUrlDialog,
@@ -151,7 +151,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ),
                       child: const Icon(
                         Icons.account_balance,
-                        color: Colors.white,
+                        color: AppColors.onPrimary,
                         size: 48,
                       ),
                     ),
@@ -160,16 +160,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       'Rudrayani CRM',
                       style: Theme.of(context).textTheme.headlineSmall
                           ?.copyWith(
-                            color: Colors.white,
+                            color: AppColors.onPrimary,
                             fontWeight: FontWeight.bold,
                           ),
                     ),
                     const SizedBox(height: 8),
                     Text(
                       'Collection Management',
-                      style: Theme.of(
-                        context,
-                      ).textTheme.bodyMedium?.copyWith(color: Colors.white54),
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: AppColors.onPrimary.withValues(alpha: 0.54),
+                      ),
                     ),
                     const SizedBox(height: 40),
                     Card(
@@ -216,18 +216,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 const SizedBox(height: 12),
                                 Text(
                                   _error!,
-                                  style: const TextStyle(color: Colors.red),
+                                  style: const TextStyle(color: AppColors.error),
                                   textAlign: TextAlign.center,
                                 ),
                               ],
                               const SizedBox(height: 24),
                               SizedBox(
-                                height: 48,
+                                height: AppDimens.tapTarget,
                                 child: ElevatedButton(
                                   onPressed: _loading ? null : _submit,
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: AppColors.primary,
-                                    foregroundColor: Colors.white,
+                                    foregroundColor: AppColors.onPrimary,
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(8),
                                     ),
@@ -238,7 +238,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                           width: 20,
                                           child: CircularProgressIndicator(
                                             strokeWidth: 2,
-                                            color: Colors.white,
+                                            color: AppColors.onPrimary,
                                           ),
                                         )
                                       : const Text(

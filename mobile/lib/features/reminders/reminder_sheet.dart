@@ -90,7 +90,7 @@ class _ReminderSheetState extends ConsumerState<_ReminderSheet> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Could not set reminder: $e'),
-            backgroundColor: Colors.red,
+            backgroundColor: AppColors.error,
           ),
         );
       }
@@ -137,12 +137,12 @@ class _ReminderSheetState extends ConsumerState<_ReminderSheet> {
           ),
           const SizedBox(height: 8),
           SizedBox(
-            height: 48,
+            height: AppDimens.tapTarget,
             child: ElevatedButton(
               onPressed: _saving ? null : _save,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
+                foregroundColor: AppColors.onPrimary,
               ),
               child: _saving
                   ? const SizedBox(
@@ -150,7 +150,7 @@ class _ReminderSheetState extends ConsumerState<_ReminderSheet> {
                       width: 20,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        color: Colors.white,
+                        color: AppColors.onPrimary,
                       ),
                     )
                   : const Text('Save Reminder'),

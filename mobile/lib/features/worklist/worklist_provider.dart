@@ -21,7 +21,7 @@ final customerByIdProvider =
   return Customer.fromJson(res.data!['customer'] as Map<String, dynamic>);
 });
 
-final dispositionCodesProvider = FutureProvider((ref) async {
+final dispositionCodesProvider = FutureProvider.autoDispose((ref) async {
   final api = ref.watch(apiClientProvider);
   final res = await api.get<Map<String, dynamic>>('/dispositions');
   // Backend responds with { disposition_codes: [...] } (backend/src/routes/dispositions.ts) --

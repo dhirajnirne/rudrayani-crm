@@ -8,6 +8,7 @@ import '../../core/offline/offline_queue.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/tracking/attendance_provider.dart';
 import '../../core/tracking/tracking_service.dart';
+import '../../core/widgets/state_views.dart';
 import 'worklist_provider.dart';
 
 final _rupee = NumberFormat.currency(
@@ -51,14 +52,20 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
             ),
             Text(
               userName,
-              style: const TextStyle(fontSize: 12, color: Colors.white70),
+              style: TextStyle(
+                fontSize: 12,
+                color: AppColors.onPrimary.withValues(alpha: 0.7),
+              ),
             ),
           ],
         ),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: () => ref.invalidate(worklistProvider),
+            onPressed: () {
+              ref.invalidate(worklistProvider);
+              ref.invalidate(dispositionCodesProvider);
+            },
           ),
           IconButton(
             icon: const Icon(Icons.logout),
@@ -90,24 +97,12 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
           Expanded(
             child: wl.when(
               loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      Icons.error_outline,
-                      size: 48,
-                      color: Colors.red,
-                    ),
-                    const SizedBox(height: 8),
-                    Text('Error: $e'),
-                    const SizedBox(height: 8),
-                    ElevatedButton(
-                      onPressed: () => ref.invalidate(worklistProvider),
-                      child: const Text('Retry'),
-                    ),
-                  ],
-                ),
+              error: (e, _) => ErrorState(
+                message: 'Could not load your worklist.\n$e',
+                onRetry: () {
+                  ref.invalidate(worklistProvider);
+                  ref.invalidate(dispositionCodesProvider);
+                },
               ),
               data: (customers) {
                 final filtered = _search.isEmpty
@@ -124,13 +119,18 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
                           .toList();
 
                 if (filtered.isEmpty) {
-                  return const Center(
-                    child: Text('No customers assigned today.'),
+                  return const EmptyState(
+                    icon: Icons.people_outline,
+                    message: 'No customers assigned today.',
+                    hint: 'Pull down to refresh once new accounts land.',
                   );
                 }
 
                 return RefreshIndicator(
-                  onRefresh: () async => ref.invalidate(worklistProvider),
+                  onRefresh: () async {
+                    ref.invalidate(worklistProvider);
+                    ref.invalidate(dispositionCodesProvider);
+                  },
                   child: ListView.builder(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     itemCount: filtered.length,
@@ -198,8 +198,8 @@ class _SyncBanner extends ConsumerWidget {
                 : Icons.cloud_upload_outlined,
             size: 16,
             color: q.lastError != null
-                ? Colors.red.shade700
-                : Colors.orange.shade800,
+                ? AppColors.errorStrong
+                : AppColors.warningStrong,
           ),
           const SizedBox(width: 8),
           Expanded(
@@ -211,8 +211,8 @@ class _SyncBanner extends ConsumerWidget {
               style: TextStyle(
                 fontSize: 12,
                 color: q.lastError != null
-                    ? Colors.red.shade700
-                    : Colors.orange.shade900,
+                    ? AppColors.errorStrong
+                    : AppColors.warningStrong,
               ),
             ),
           ),
@@ -257,7 +257,9 @@ class _DutyBanner extends ConsumerWidget {
               Icon(
                 onDuty ? Icons.gps_fixed : Icons.gps_off,
                 size: 18,
-                color: onDuty ? Colors.green.shade800 : Colors.grey.shade700,
+                color: onDuty
+                    ? AppColors.successStrong
+                    : AppColors.textSecondary,
               ),
               const SizedBox(width: 8),
               Expanded(
@@ -272,23 +274,25 @@ class _DutyBanner extends ConsumerWidget {
                         fontSize: 13,
                         fontWeight: FontWeight.bold,
                         color: onDuty
-                            ? Colors.green.shade800
-                            : Colors.grey.shade800,
+                            ? AppColors.successStrong
+                            : AppColors.textSecondary,
                       ),
                     ),
                     if (onDuty && att.punchInAt != null)
                       Text(
                         'Punched in at ${DateFormat('HH:mm').format(att.punchInAt!.toLocal())}',
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontSize: 11,
-                          color: Colors.green.shade700,
-                        ),
+                          color: AppColors.successStrong,
+                        ).tabular,
                       ),
                   ],
                 ),
               ),
               SizedBox(
-                height: 36,
+                // Explicit tap-target height (design brief: 48px strict
+                // minimum on all buttons) — do not shrink below this.
+                height: AppDimens.tapTarget,
                 child: att.busy
                     ? const Padding(
                         padding: EdgeInsets.symmetric(horizontal: 16),
@@ -304,9 +308,9 @@ class _DutyBanner extends ConsumerWidget {
                             : notifier.punchIn,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: onDuty
-                              ? Colors.red.shade700
+                              ? AppColors.error
                               : AppColors.primary,
-                          foregroundColor: Colors.white,
+                          foregroundColor: AppColors.onPrimary,
                           padding: const EdgeInsets.symmetric(horizontal: 16),
                         ),
                         child: Text(onDuty ? 'Punch Out' : 'Punch In'),
@@ -319,7 +323,7 @@ class _DutyBanner extends ConsumerWidget {
               padding: const EdgeInsets.only(top: 4),
               child: Text(
                 att.error!,
-                style: const TextStyle(fontSize: 12, color: Colors.red),
+                style: const TextStyle(fontSize: 12, color: AppColors.error),
               ),
             ),
         ],
@@ -342,64 +346,76 @@ class _CustomerCard extends StatelessWidget {
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        leading: CircleAvatar(
-          backgroundColor: ptpDue ? Colors.orange : AppColors.primary,
-          child: Icon(
-            ptpDue ? Icons.schedule : Icons.person,
-            color: Colors.white,
-            size: 20,
+      child: ConstrainedBox(
+        // Anti-misclick (design brief): every tappable list row ≥56px tall.
+        constraints: const BoxConstraints(minHeight: AppDimens.listRow),
+        child: ListTile(
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 8,
           ),
-        ),
-        title: Text(
-          customer.customerName,
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '${customer.loanNumber} · ${customer.companyName}',
-              style: const TextStyle(fontSize: 12),
+          leading: CircleAvatar(
+            backgroundColor: ptpDue ? AppColors.warning : AppColors.primary,
+            child: Icon(
+              ptpDue ? Icons.schedule : Icons.person,
+              color: AppColors.onPrimary,
+              size: 20,
             ),
-            if (customer.dueAmount != null)
+          ),
+          title: Text(
+            customer.customerName,
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+          ),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
               Text(
-                'Due: ${_rupee.format(customer.dueAmount)}',
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
+                '${customer.loanNumber} · ${customer.companyName}',
+                style: const TextStyle(fontSize: 12),
               ),
-            if (customer.lastResultCode != null)
-              Text(
-                'Last: ${customer.lastResultCode}',
-                style: const TextStyle(fontSize: 11, color: Colors.grey),
-              ),
-            if (hasPtp)
-              Text(
-                'PTP: ${_rupee.format(customer.ptpAmount)} on ${DateFormat('dd MMM').format(customer.ptpDate!)}',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: ptpDue ? Colors.orange : Colors.green,
-                ),
-              ),
-            if (customer.normalizedPending)
-              const Padding(
-                padding: EdgeInsets.only(top: 2),
-                child: Text(
-                  'Normalized this month (pending lender confirmation)',
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: Colors.blue,
+              if (customer.dueAmount != null)
+                Text(
+                  'Due: ${_rupee.format(customer.dueAmount)}',
+                  style: const TextStyle(
+                    fontSize: 12,
                     fontWeight: FontWeight.w600,
+                  ).tabular,
+                ),
+              if (customer.lastResultCode != null)
+                Text(
+                  'Last: ${customer.lastResultCode}',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: AppColors.textTertiary,
                   ),
                 ),
-              ),
-          ],
+              if (hasPtp)
+                Text(
+                  'PTP: ${_rupee.format(customer.ptpAmount)} on ${DateFormat('dd MMM').format(customer.ptpDate!)}',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: ptpDue
+                        ? AppColors.warningStrong
+                        : AppColors.successStrong,
+                  ).tabular,
+                ),
+              if (customer.normalizedPending)
+                const Padding(
+                  padding: EdgeInsets.only(top: 2),
+                  child: Text(
+                    'Normalized this month (pending lender confirmation)',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: AppColors.info,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => context.push('/customer/${customer.id}'),
         ),
-        trailing: const Icon(Icons.chevron_right),
-        onTap: () => context.push('/customer/${customer.id}'),
       ),
     );
   }

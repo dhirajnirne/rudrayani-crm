@@ -6,7 +6,6 @@ import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
 import {
-  SYSTEM_FIELDS,
   commitImport,
   computeAllocationDiff,
   hasExistingAllocationForMonth,
@@ -15,6 +14,7 @@ import {
   validateRows,
   type ColumnMapping,
 } from "../services/import-service";
+import { resolveFieldCatalog } from "../services/field-config-service";
 import { getStorage } from "../services/storage/storage-provider";
 
 const router = Router();
@@ -25,7 +25,11 @@ const upload = multer({
   limits: { fileSize: 15 * 1024 * 1024 }, // 15 MB
 });
 
-const mappingSchema = z.record(z.string().min(1), z.enum(SYSTEM_FIELDS));
+// Owner feedback round, Phase 10: field keys are no longer a compile-time
+// enum (they're per-agency data now, see field-config-service.ts) -- Zod can
+// only check shape here, unknown/disabled field keys are rejected against
+// the runtime catalog inside validateRows().
+const mappingSchema = z.record(z.string().min(1), z.string().min(1));
 const uploadKeySchema = z
   .string()
   .regex(/^imports\/[a-f0-9-]+\.xlsx$/, "Invalid upload reference");
@@ -60,9 +64,19 @@ async function resolveMapping(
   throw new HttpError(400, "Provide either template_id or column_mapping");
 }
 
+const uploadQuerySchema = z.object({ company_id: z.string().uuid().optional() });
+
 /**
  * Step 1 — upload the raw .xlsx. Returns the detected columns plus an
  * upload_key used by preview/commit (file is kept via the StorageProvider).
+ *
+ * Phase 10: accepts an optional ?company_id= so the mapping-step field list
+ * (`system_fields`) reflects that company's actual enabled/required catalog
+ * instead of the old agency-wide constant. The frontend's Step 0 already
+ * collects company_id before this call (ImportPage.tsx) -- optional here
+ * only so existing callers that don't send it yet keep working; without it,
+ * mapping still validates fully at /preview and /commit (which always
+ * require company_id), this only affects what the wizard offers up front.
  */
 router.post(
   "/upload",
@@ -72,6 +86,12 @@ router.post(
     if (!req.file.originalname.toLowerCase().endsWith(".xlsx")) {
       throw new HttpError(400, "Only .xlsx files are supported");
     }
+    const query = uploadQuerySchema.parse(req.query);
+    let systemFields: Awaited<ReturnType<typeof resolveFieldCatalog>> = [];
+    if (query.company_id) {
+      await assertCompanyInAgency(query.company_id, req.user!.agency_id);
+      systemFields = (await resolveFieldCatalog(query.company_id)).filter((f) => f.is_enabled);
+    }
     const sheet = await parseWorkbook(req.file.buffer);
     const key = await getStorage().save("imports", "xlsx", req.file.buffer);
     res.status(201).json({
@@ -79,7 +99,7 @@ router.post(
       file_name: req.file.originalname,
       columns: sheet.columns,
       row_count: sheet.rows.length,
-      system_fields: SYSTEM_FIELDS,
+      system_fields: systemFields,
     });
   }),
 );
@@ -140,12 +160,21 @@ router.post(
     const removalCustomerIds = diff.removals.map((r) => r.customerId);
     const removalDetails = removalCustomerIds.length
       ? await pool.query(
-          `SELECT c.id, c.customer_name, c.bucket, c.due_amount, u.full_name AS agent_name
+          `SELECT c.id, c.customer_name, c.bucket, c.due_amount, c.pos, u.full_name AS agent_name
              FROM customers c LEFT JOIN users u ON u.id = c.assigned_agent_id
             WHERE c.id = ANY($1)`,
           [removalCustomerIds],
         )
-      : { rows: [] as { id: string; customer_name: string; bucket: string | null; due_amount: string | null; agent_name: string | null }[] };
+      : {
+          rows: [] as {
+            id: string;
+            customer_name: string;
+            bucket: string | null;
+            due_amount: string | null;
+            pos: string | null;
+            agent_name: string | null;
+          }[],
+        };
     const removalById = new Map(removalDetails.rows.map((r) => [r.id, r]));
 
     res.json({
@@ -161,6 +190,7 @@ router.post(
           customer_name: a.row.customer_name,
           bucket: a.row.bucket,
           due_amount: a.row.due_amount,
+          pos: a.row.pos,
         })),
       },
       removals: {
@@ -170,6 +200,7 @@ router.post(
           customer_name: removalById.get(r.customerId)?.customer_name ?? null,
           bucket: removalById.get(r.customerId)?.bucket ?? null,
           due_amount: removalById.get(r.customerId)?.due_amount ?? null,
+          pos: removalById.get(r.customerId)?.pos ?? null,
           agent_name: removalById.get(r.customerId)?.agent_name ?? null,
         })),
       },

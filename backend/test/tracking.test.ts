@@ -136,15 +136,21 @@ describe("permission audit (brief Section 3)", () => {
     expect(rows.map((r) => r.key).sort()).toEqual(["billing.view", "ops_managers.create"]);
   });
 
-  it("team_leader has tracking.view; agents do not", async () => {
+  // Phase 12: telecaller/field_agent were added so their mobile dashboards
+  // can read their own attendance/GPS/route via the same tracking.view-gated
+  // routes -- scope.ts's self-only fallback (see "rejects agents" below)
+  // keeps this from widening what they can actually see.
+  it("team_leader has tracking.view; so do telecaller/field_agent (self-scoped)", async () => {
     const { rows } = await pool.query(
       `SELECT capability FROM capability_permissions WHERE permission_key = 'tracking.view'
         ORDER BY capability`,
     );
     expect(rows.map((r) => r.capability)).toEqual([
       "agency_admin",
+      "field_agent",
       "operations_manager",
       "team_leader",
+      "telecaller",
     ]);
   });
 });
@@ -167,11 +173,15 @@ describe("live view scoping", () => {
     for (let m = 28; m >= 0; m -= 4) await ping(userIds.tele, m, 5000 + (m % 3));
   });
 
-  it("rejects agents (no tracking.view)", async () => {
+  // Phase 12: agentA (field_agent) now holds tracking.view, but is clamped to
+  // self only -- sees their own live ping, never the rest of the team.
+  it("an agent sees only themselves, never the rest of the team", async () => {
     const res = await request(app)
       .get("/api/tracking/live")
       .set("Authorization", `Bearer ${tokens.agentA}`);
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
+    const ids = res.body.agents.map((a: { user_id: string }) => a.user_id);
+    expect(ids).toEqual([userIds.agentA]);
   });
 
   it("admin sees all on-duty agents of the agency, never other agencies", async () => {

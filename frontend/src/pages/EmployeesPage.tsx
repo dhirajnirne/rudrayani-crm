@@ -26,6 +26,7 @@ interface EmployeeFormValues {
   password?: string;
   branch_id?: string | null;
   team_id?: string | null;
+  manager_id?: string | null;
   is_operations_manager?: boolean;
   is_team_leader?: boolean;
   is_telecaller?: boolean;
@@ -52,6 +53,7 @@ export default function EmployeesPage() {
   const [resetForm] = Form.useForm<{ new_password: string }>();
 
   const selectedBranch = Form.useWatch("branch_id", form);
+  const selectedTeam = Form.useWatch("team_id", form);
   const teamOptions = useMemo(
     () =>
       teams
@@ -59,6 +61,24 @@ export default function EmployeesPage() {
         .map((t) => ({ value: t.id, label: `${t.name} (${t.branch_name ?? ""})` })),
     [teams, selectedBranch],
   );
+
+  // "Reports to" candidates: plausible managers only -- same branch or team
+  // as the employee being edited, active, and never the employee themself.
+  // manager_id has no permission meaning (informational only), so this is
+  // just a sane default list, not a hard server-side restriction.
+  const managerOptions = useMemo(() => {
+    const selfId = editing && editing !== "new" ? editing.id : undefined;
+    return employees
+      .filter((e) => e.is_active && e.id !== selfId)
+      .filter((e) => {
+        if (!selectedBranch && !selectedTeam) return true;
+        return (
+          (!!selectedBranch && e.branch_id === selectedBranch) ||
+          (!!selectedTeam && e.team_id === selectedTeam)
+        );
+      })
+      .map((e) => ({ value: e.id, label: e.full_name }));
+  }, [employees, selectedBranch, selectedTeam, editing]);
 
   const filteredEmployees = useMemo(() => {
     return employees.filter((e) => {
@@ -106,6 +126,7 @@ export default function EmployeesPage() {
       email: e.email ?? undefined,
       branch_id: e.branch_id,
       team_id: e.team_id,
+      manager_id: e.manager_id,
       is_operations_manager: e.capabilities.includes("operations_manager"),
       is_team_leader: e.capabilities.includes("team_leader"),
       is_telecaller: e.capabilities.includes("telecaller"),
@@ -132,6 +153,7 @@ export default function EmployeesPage() {
           password: v.password,
           branch_id: v.branch_id ?? null,
           team_id: v.team_id ?? null,
+          manager_id: v.manager_id ?? null,
           capabilities,
         });
         message.success("Employee created");
@@ -141,6 +163,7 @@ export default function EmployeesPage() {
           email: v.email || null,
           branch_id: v.branch_id ?? null,
           team_id: v.team_id ?? null,
+          manager_id: v.manager_id ?? null,
           is_active: v.is_active,
           capabilities,
         });
@@ -334,6 +357,15 @@ export default function EmployeesPage() {
           </Form.Item>
           <Form.Item name="team_id" label="Team">
             <Select allowClear options={teamOptions} />
+          </Form.Item>
+          <Form.Item name="manager_id" label="Reports to">
+            <Select
+              allowClear
+              showSearch
+              placeholder="No manager"
+              optionFilterProp="label"
+              options={managerOptions}
+            />
           </Form.Item>
           <Typography.Text strong>Capabilities</Typography.Text>
           <div style={{ display: "grid", gap: 4, margin: "8px 0 16px" }}>

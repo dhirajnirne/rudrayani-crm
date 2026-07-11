@@ -114,6 +114,7 @@ describe("Disposition codes master (brief §7)", () => {
         result_code: "RTP",
         description: "Refused to Pay",
         remark_template: "Customer refused: {reason}",
+        channel: "FV",
         needs_reason: true,
       });
     expect(res.status).toBe(201);

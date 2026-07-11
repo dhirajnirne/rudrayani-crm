@@ -27,6 +27,7 @@ const createSchema = z.object({
   password: z.string().min(8),
   branch_id: z.string().uuid().optional().nullable(),
   team_id: z.string().uuid().optional().nullable(),
+  manager_id: z.string().uuid().optional().nullable(),
   capabilities: capabilitySchema.default({}),
 });
 
@@ -35,6 +36,7 @@ const updateSchema = z.object({
   email: z.string().email().optional().nullable(),
   branch_id: z.string().uuid().optional().nullable(),
   team_id: z.string().uuid().optional().nullable(),
+  manager_id: z.string().uuid().optional().nullable(),
   is_active: z.boolean().optional(),
   capabilities: capabilitySchema.optional(),
 });
@@ -95,6 +97,28 @@ async function assertBranchAndTeam(
   }
 }
 
+/**
+ * manager_id is informational only (brief: no permission implications), but
+ * it must still resolve to a real employee in the same agency -- otherwise
+ * the org chart could point at a manager from another tenant. Self-reference
+ * is also rejected: an employee cannot report to themselves.
+ */
+async function assertManager(
+  agencyId: string,
+  managerId: string | null | undefined,
+  selfId?: string,
+): Promise<void> {
+  if (!managerId) return;
+  if (selfId && managerId === selfId) {
+    throw new HttpError(400, "An employee cannot be their own manager");
+  }
+  const { rows } = await pool.query("SELECT 1 FROM users WHERE id = $1 AND agency_id = $2", [
+    managerId,
+    agencyId,
+  ]);
+  if (rows.length === 0) throw new HttpError(400, "Manager not found in this agency");
+}
+
 router.get(
   "/",
   requirePermission("employees.view"),
@@ -102,14 +126,20 @@ router.get(
     const q = (req.query.q as string | undefined)?.trim();
     const branchId = req.query.branch_id as string | undefined;
     const teamId = req.query.team_id as string | undefined;
+    // Phase 12 (Management Dashboard "Active Agents" KPI): lets the client
+    // get a pre-filtered count instead of fetching everyone and filtering
+    // client-side. Omitted -> unfiltered (unchanged pre-Phase-12 behavior).
+    const isActiveRaw = req.query.is_active as string | undefined;
+    const isActive = isActiveRaw === undefined ? null : isActiveRaw === "true";
     const { rows } = await pool.query<UserRow>(
       `SELECT u.* FROM users u
         WHERE u.agency_id = $1
           AND ($2::uuid IS NULL OR u.branch_id = $2)
           AND ($3::uuid IS NULL OR u.team_id = $3)
           AND ($4::text IS NULL OR u.full_name ILIKE '%' || $4 || '%' OR u.phone LIKE $4 || '%')
+          AND ($5::boolean IS NULL OR u.is_active = $5)
         ORDER BY u.full_name`,
-      [req.user!.agency_id, branchId ?? null, teamId ?? null, q || null],
+      [req.user!.agency_id, branchId ?? null, teamId ?? null, q || null, isActive],
     );
     res.json({
       employees: rows.map((u) => ({ ...publicUser(u), is_active: u.is_active })),
@@ -124,13 +154,14 @@ router.post(
     const body = createSchema.parse(req.body);
     if (body.capabilities.is_operations_manager) await assertCanEditOpsManager(req.user!);
     await assertBranchAndTeam(req.user!.agency_id, body.branch_id, body.team_id);
+    await assertManager(req.user!.agency_id, body.manager_id);
 
     const passwordHash = await hashPassword(body.password);
     const { rows } = await pool.query<UserRow>(
       `INSERT INTO users
-         (agency_id, full_name, phone, email, password_hash, branch_id, team_id,
+         (agency_id, full_name, phone, email, password_hash, branch_id, team_id, manager_id,
           is_operations_manager, is_team_leader, is_telecaller, is_field_agent)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
        RETURNING *`,
       [
         req.user!.agency_id,
@@ -140,6 +171,7 @@ router.post(
         passwordHash,
         body.branch_id ?? null,
         body.team_id ?? null,
+        body.manager_id ?? null,
         body.capabilities.is_operations_manager ?? false,
         body.capabilities.is_team_leader ?? false,
         body.capabilities.is_telecaller ?? false,
@@ -148,6 +180,70 @@ router.post(
     );
     await notifyCredentials(body.phone, body.password, false);
     res.status(201).json({ employee: { ...publicUser(rows[0]), is_active: rows[0].is_active } });
+  }),
+);
+
+/**
+ * Org chart data: agency -> branches -> teams -> agents, with each agent's
+ * manager_id/manager_name attached so the frontend can draw report-to edges
+ * within a team (or a branch's/agency's "unassigned" bucket). Registered
+ * ahead of GET /:id so "org-hierarchy" isn't swallowed as a :id param.
+ */
+router.get(
+  "/org-hierarchy",
+  requirePermission("employees.view"),
+  asyncHandler(async (req, res) => {
+    const agencyId = req.user!.agency_id;
+
+    const { rows: agencyRows } = await pool.query<{ id: string; name: string }>(
+      "SELECT id, name FROM agencies WHERE id = $1",
+      [agencyId],
+    );
+    const { rows: branches } = await pool.query<{ id: string; name: string }>(
+      "SELECT id, name FROM branches WHERE agency_id = $1 ORDER BY name",
+      [agencyId],
+    );
+    const { rows: teams } = await pool.query<{ id: string; name: string; branch_id: string }>(
+      `SELECT t.id, t.name, t.branch_id FROM teams t
+         JOIN branches b ON b.id = t.branch_id
+        WHERE b.agency_id = $1
+        ORDER BY t.name`,
+      [agencyId],
+    );
+    const { rows: users } = await pool.query<UserRow>(
+      "SELECT * FROM users WHERE agency_id = $1 ORDER BY full_name",
+      [agencyId],
+    );
+
+    const nameById = new Map(users.map((u) => [u.id, u.full_name]));
+    const toAgent = (u: UserRow) => ({
+      ...publicUser(u),
+      is_active: u.is_active,
+      manager_name: u.manager_id ? (nameById.get(u.manager_id) ?? null) : null,
+    });
+
+    const branchTree = branches.map((b) => ({
+      id: b.id,
+      name: b.name,
+      teams: teams
+        .filter((t) => t.branch_id === b.id)
+        .map((t) => ({
+          id: t.id,
+          name: t.name,
+          agents: users.filter((u) => u.team_id === t.id).map(toAgent),
+        })),
+      unassigned_agents: users
+        .filter((u) => u.branch_id === b.id && !u.team_id)
+        .map(toAgent),
+    }));
+
+    const agencyUnassigned = users.filter((u) => !u.branch_id).map(toAgent);
+
+    res.json({
+      agency: agencyRows[0] ?? null,
+      branches: branchTree,
+      unassigned_agents: agencyUnassigned,
+    });
   }),
 );
 
@@ -197,6 +293,9 @@ router.patch(
       body.branch_id ?? existing.branch_id,
       body.team_id ?? existing.team_id,
     );
+    if (body.manager_id !== undefined) {
+      await assertManager(req.user!.agency_id, body.manager_id, existing.id);
+    }
 
     const caps = body.capabilities ?? {};
     const { rows } = await pool.query<UserRow>(
@@ -205,6 +304,7 @@ router.patch(
           email = COALESCE($4, email),
           branch_id = CASE WHEN $5::boolean THEN $6::uuid ELSE branch_id END,
           team_id = CASE WHEN $7::boolean THEN $8::uuid ELSE team_id END,
+          manager_id = CASE WHEN $14::boolean THEN $15::uuid ELSE manager_id END,
           is_active = COALESCE($9, is_active),
           is_operations_manager = COALESCE($10, is_operations_manager),
           is_team_leader = COALESCE($11, is_team_leader),
@@ -226,6 +326,8 @@ router.patch(
         caps.is_team_leader ?? null,
         caps.is_telecaller ?? null,
         caps.is_field_agent ?? null,
+        body.manager_id !== undefined,
+        body.manager_id ?? null,
       ],
     );
 

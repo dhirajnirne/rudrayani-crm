@@ -57,6 +57,13 @@ const baseColumns = [
     align: "right" as const,
     render: (v: string | null) => <span className="money">{fmtAmount(v)}</span>,
   },
+  {
+    title: "POS",
+    dataIndex: "pos",
+    width: 130,
+    align: "right" as const,
+    render: (v: string | null) => <span className="money">{fmtAmount(v)}</span>,
+  },
 ];
 
 interface Branch { id: string; name: string }
@@ -156,6 +163,26 @@ function FilterRow({
           options={filters.companies.map((c) => ({ value: c.id, label: c.name }))}
         />
       </Col>
+      <Col xs={12} sm={3}>
+        <Select
+          style={{ width: "100%" }}
+          placeholder={agentPickerLabel ? "Branch (agent filter)" : "All branches"}
+          allowClear
+          value={branchTeam.branchId}
+          onChange={(v) => { branchTeam.setBranchId(v ?? null); branchTeam.setTeamId(null); }}
+          options={branchTeam.branches.map((b) => ({ value: b.id, label: b.name }))}
+        />
+      </Col>
+      <Col xs={12} sm={3}>
+        <Select
+          style={{ width: "100%" }}
+          placeholder={agentPickerLabel ? "Team (agent filter)" : "All teams"}
+          allowClear
+          value={branchTeam.teamId}
+          onChange={(v) => branchTeam.setTeamId(v ?? null)}
+          options={branchTeam.teams.map((t) => ({ value: t.id, label: t.name }))}
+        />
+      </Col>
       <Col xs={12} sm={5}>
         <Select
           style={{ width: "100%" }}
@@ -179,26 +206,6 @@ function FilterRow({
           onChange={(v) => filters.setBucket(v ?? null)}
           disabled={!filters.companyId}
           options={filters.buckets.map((b) => ({ value: b, label: b }))}
-        />
-      </Col>
-      <Col xs={12} sm={3}>
-        <Select
-          style={{ width: "100%" }}
-          placeholder={agentPickerLabel ? "Branch (agent filter)" : "All branches"}
-          allowClear
-          value={branchTeam.branchId}
-          onChange={(v) => { branchTeam.setBranchId(v ?? null); branchTeam.setTeamId(null); }}
-          options={branchTeam.branches.map((b) => ({ value: b.id, label: b.name }))}
-        />
-      </Col>
-      <Col xs={12} sm={3}>
-        <Select
-          style={{ width: "100%" }}
-          placeholder={agentPickerLabel ? "Team (agent filter)" : "All teams"}
-          allowClear
-          value={branchTeam.teamId}
-          onChange={(v) => branchTeam.setTeamId(v ?? null)}
-          options={branchTeam.teams.map((t) => ({ value: t.id, label: t.name }))}
         />
       </Col>
     </Row>

@@ -3,6 +3,7 @@ import '../../../core/theme/app_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
+import '../../core/widgets/state_views.dart';
 
 final _rupee = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 
@@ -43,7 +44,7 @@ class TeamScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
+        foregroundColor: AppColors.onPrimary,
         title: const Text('My Team'),
         actions: [
           IconButton(icon: const Icon(Icons.refresh), onPressed: () => _refresh(ref)),
@@ -56,7 +57,10 @@ class TeamScreen extends ConsumerWidget {
           children: [
             requests.when(
               loading: () => const SizedBox.shrink(),
-              error: (e, _) => _ErrorTile('Approvals: $e'),
+              error: (e, _) => _ErrorTile(
+                'Approvals: $e',
+                onRetry: () => ref.invalidate(pendingRequestsProvider),
+              ),
               data: (reqs) => reqs.isEmpty
                   ? const SizedBox.shrink()
                   : _ApprovalsSection(requests: reqs, onDecided: () => _refresh(ref)),
@@ -70,8 +74,16 @@ class TeamScreen extends ConsumerWidget {
             day.when(
               loading: () => const Center(
                   child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator())),
-              error: (e, _) => _ErrorTile('Team: $e'),
-              data: (members) => Column(
+              error: (e, _) => _ErrorTile(
+                'Team: $e',
+                onRetry: () => ref.invalidate(teamDayProvider),
+              ),
+              data: (members) => members.isEmpty
+                  ? const EmptyState(
+                      icon: Icons.groups_outlined,
+                      message: 'No team members found.',
+                    )
+                  : Column(
                 children: [
                   for (final m in members)
                     _MemberCard(
@@ -103,16 +115,16 @@ class _MemberCard extends StatelessWidget {
     Color chipColor;
     String chipText;
     if (!onDuty) {
-      chipColor = Colors.grey;
+      chipColor = AppColors.textSecondary;
       chipText = member['first_in'] != null ? 'Punched out' : 'Off duty';
     } else if (status == 'stationary') {
-      chipColor = Colors.red;
+      chipColor = AppColors.error;
       chipText = 'Stationary ${live?['stationary_minutes']} min';
     } else if (status == 'no_signal') {
-      chipColor = Colors.orange;
+      chipColor = AppColors.warning;
       chipText = 'No signal';
     } else {
-      chipColor = Colors.green;
+      chipColor = AppColors.success;
       chipText = 'On duty';
     }
 
@@ -147,12 +159,12 @@ class _MemberCard extends StatelessWidget {
               '${minutes ~/ 60}h ${minutes % 60}m worked · '
               '${member['calls']} calls · ${member['ptps']} PTPs · '
               '${member['payments_count']} payments (${_rupee.format(payTotal)})',
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
+              style: const TextStyle(fontSize: 12, color: AppColors.textSecondary).tabular,
             ),
             if (live?['last_ping_at'] != null)
               Text(
                 'Last ping ${DateFormat('HH:mm').format(DateTime.parse(live!['last_ping_at'] as String).toLocal())}',
-                style: const TextStyle(fontSize: 11, color: Colors.grey),
+                style: const TextStyle(fontSize: 11, color: AppColors.textSecondary).tabular,
               ),
           ],
         ),
@@ -189,16 +201,23 @@ class _ApprovalsSection extends ConsumerWidget {
                 child: Text('Assign to…',
                     style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
               ),
-              ListTile(
-                leading: const Icon(Icons.inbox),
-                title: const Text('Return to unallocated pool'),
-                onTap: () => Navigator.pop(ctx, ''),
+              // Anti-misclick: every tappable sheet row ≥56px tall.
+              ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: AppDimens.listRow),
+                child: ListTile(
+                  leading: const Icon(Icons.inbox),
+                  title: const Text('Return to unallocated pool'),
+                  onTap: () => Navigator.pop(ctx, ''),
+                ),
               ),
               for (final m in candidates)
-                ListTile(
-                  leading: const Icon(Icons.person),
-                  title: Text(m['full_name'] as String),
-                  onTap: () => Navigator.pop(ctx, m['user_id'] as String),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: AppDimens.listRow),
+                  child: ListTile(
+                    leading: const Icon(Icons.person),
+                    title: Text(m['full_name'] as String),
+                    onTap: () => Navigator.pop(ctx, m['user_id'] as String),
+                  ),
                 ),
             ],
           ),
@@ -219,14 +238,14 @@ class _ApprovalsSection extends ConsumerWidget {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(approve ? 'Request approved' : 'Request rejected'),
-          backgroundColor: approve ? Colors.green : Colors.grey,
+          backgroundColor: approve ? AppColors.success : AppColors.textSecondary,
         ));
       }
       onDecided();
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red));
+            .showSnackBar(SnackBar(content: Text('Failed: $e'), backgroundColor: AppColors.error));
       }
     }
   }
@@ -253,7 +272,7 @@ class _ApprovalsSection extends ConsumerWidget {
                   Text('${r['customer_name']} · ${r['loan_number']}',
                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                   Text('Requested by ${r['requested_by_name']}',
-                      style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                      style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
                   const SizedBox(height: 4),
                   Text('"${r['reason']}"', style: const TextStyle(fontSize: 13)),
                   const SizedBox(height: 8),
@@ -264,7 +283,7 @@ class _ApprovalsSection extends ConsumerWidget {
                           onPressed: () => _decide(context, ref, r, true),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: AppColors.primary,
-                            foregroundColor: Colors.white,
+                            foregroundColor: AppColors.onPrimary,
                           ),
                           child: const Text('Approve'),
                         ),
@@ -273,7 +292,7 @@ class _ApprovalsSection extends ConsumerWidget {
                       Expanded(
                         child: OutlinedButton(
                           onPressed: () => _decide(context, ref, r, false),
-                          style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
+                          style: OutlinedButton.styleFrom(foregroundColor: AppColors.error),
                           child: const Text('Reject'),
                         ),
                       ),
@@ -290,11 +309,12 @@ class _ApprovalsSection extends ConsumerWidget {
 
 class _ErrorTile extends StatelessWidget {
   final String message;
-  const _ErrorTile(this.message);
+  final VoidCallback? onRetry;
+  const _ErrorTile(this.message, {this.onRetry});
 
   @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.all(8),
-        child: Text(message, style: const TextStyle(color: Colors.red, fontSize: 12)),
+  Widget build(BuildContext context) => InlineErrorNote(
+        message: message,
+        onRetry: onRetry,
       );
 }

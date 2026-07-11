@@ -264,7 +264,12 @@ router.get(
               COALESCE(acts.calls, 0) AS calls,
               COALESCE(acts.ptps, 0) AS ptps,
               COALESCE(pays.n, 0) AS payments_count,
-              COALESCE(pays.total, 0) AS payments_total
+              COALESCE(pays.total, 0) AS payments_total,
+              COALESCE(pays.cash_total, 0) AS cash_total,
+              COALESCE(pays.online_total, 0) AS online_total,
+              COALESCE(visits.n, 0) AS field_visits,
+              COALESCE(visits.with_photo, 0) AS field_visits_with_photo,
+              COALESCE(visits.with_signature, 0) AS field_visits_with_signature
          FROM users u
          LEFT JOIN teams t ON t.id = u.team_id
          LEFT JOIN LATERAL (
@@ -284,11 +289,27 @@ router.get(
                  AND cl.created_at >= ${dayStart} AND cl.created_at < ${dayEnd}
          ) acts ON true
          LEFT JOIN LATERAL (
-              SELECT count(*)::int AS n, COALESCE(sum(amount), 0) AS total
+              -- Cash/Online Collections KPI (Team Leader dashboard, Phase 12):
+              -- "Cash" is the literal mode value; every other non-null mode
+              -- (NEFT/RTGS/UPI/Cheque/DD) is bucketed as "online".
+              SELECT count(*)::int AS n, COALESCE(sum(amount), 0) AS total,
+                     COALESCE(sum(amount) FILTER (WHERE lower(mode) = 'cash'), 0) AS cash_total,
+                     COALESCE(sum(amount) FILTER (WHERE mode IS NOT NULL AND lower(mode) <> 'cash'), 0) AS online_total
                 FROM payments
                WHERE collected_by_user_id = u.id
                  AND created_at >= ${dayStart} AND created_at < ${dayEnd}
          ) pays ON true
+         LEFT JOIN LATERAL (
+              -- Receipts Generated / Documents Uploaded KPI (Team Leader +
+              -- Field Executive dashboards, Phase 12): field_visits has no
+              -- boolean has_photo/has_signature column, only the URL itself.
+              SELECT count(*)::int AS n,
+                     count(*) FILTER (WHERE photo_url IS NOT NULL)::int AS with_photo,
+                     count(*) FILTER (WHERE signature_url IS NOT NULL)::int AS with_signature
+                FROM field_visits
+               WHERE agent_id = u.id
+                 AND created_at >= ${dayStart} AND created_at < ${dayEnd}
+         ) visits ON true
         WHERE u.agency_id = $1 AND u.is_active = true
           ${scopeClause}
         ORDER BY u.full_name`,
@@ -300,6 +321,8 @@ router.get(
       members: rows.map((r) => ({
         ...r,
         payments_total: Number(r.payments_total),
+        cash_total: Number(r.cash_total),
+        online_total: Number(r.online_total),
         on_duty: r.on_duty === true,
       })),
     });
