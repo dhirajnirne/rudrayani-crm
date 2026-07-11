@@ -45,7 +45,7 @@ List<_HistoryEntry> _merge(Map<String, dynamic> detail) {
       _HistoryEntry(
         at: DateTime.parse(m['created_at'] as String),
         icon: Icons.phone_in_talk,
-        color: Colors.blue,
+        color: AppColors.info,
         title:
             [
               m['result_code'],
@@ -72,7 +72,7 @@ List<_HistoryEntry> _merge(Map<String, dynamic> detail) {
       _HistoryEntry(
         at: DateTime.parse(m['paid_at'] as String),
         icon: Icons.currency_rupee,
-        color: Colors.green,
+        color: AppColors.success,
         title: 'Payment: ${_rupee.format((m['amount'] as num).toDouble())}',
         subtitle: m['mode'] as String?,
         correctableRecordType: 'payment',
@@ -91,7 +91,7 @@ List<_HistoryEntry> _merge(Map<String, dynamic> detail) {
       _HistoryEntry(
         at: DateTime.parse(m['created_at'] as String),
         icon: Icons.location_on,
-        color: Colors.orange,
+        color: AppColors.warning,
         title: 'Field visit${m['has_photo'] == true ? ' (photo)' : ''}',
         subtitle: [
           m['agent_name'],
@@ -106,7 +106,7 @@ List<_HistoryEntry> _merge(Map<String, dynamic> detail) {
       _HistoryEntry(
         at: DateTime.parse(m['created_at'] as String),
         icon: Icons.calendar_today,
-        color: Colors.purple,
+        color: AppColors.accent,
         title:
             'PTP: ${_rupee.format((m['amount'] as num).toDouble())} '
             '(${m['status']})',
@@ -183,7 +183,7 @@ class HistoryTimeline extends ConsumerWidget {
                 padding: EdgeInsets.symmetric(vertical: 8),
                 child: Text(
                   'History unavailable offline',
-                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                  style: TextStyle(fontSize: 12, color: AppColors.textTertiary),
                 ),
               ),
               data: (d) {
@@ -193,7 +193,7 @@ class HistoryTimeline extends ConsumerWidget {
                     padding: EdgeInsets.symmetric(vertical: 8),
                     child: Text(
                       'No history yet',
-                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                      style: TextStyle(fontSize: 12, color: AppColors.textTertiary),
                     ),
                   );
                 }
@@ -206,7 +206,7 @@ class HistoryTimeline extends ConsumerWidget {
                           leading: Icon(e.icon, size: 18, color: e.color),
                           title: Text(
                             e.title,
-                            style: const TextStyle(fontSize: 13),
+                            style: const TextStyle(fontSize: 13).tabular,
                           ),
                           subtitle: Text(
                             [
@@ -216,8 +216,8 @@ class HistoryTimeline extends ConsumerWidget {
                             ].join(' — '),
                             style: const TextStyle(
                               fontSize: 11,
-                              color: Colors.grey,
-                            ),
+                              color: AppColors.textTertiary,
+                            ).tabular,
                           ),
                           trailing: e.correctableRecordType != null
                               ? IconButton(

@@ -3,6 +3,7 @@ import '../../../core/theme/app_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
+import '../../core/widgets/state_views.dart';
 import '../worklist/worklist_provider.dart';
 
 final _rupee = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
@@ -19,9 +20,9 @@ class PtpsScreen extends ConsumerWidget {
   const PtpsScreen({super.key, required this.customerId});
 
   Color _statusColor(String status) => switch (status) {
-        'kept' => Colors.green,
-        'broken' => Colors.red,
-        _ => Colors.orange,
+        'kept' => AppColors.success,
+        'broken' => AppColors.error,
+        _ => AppColors.warning,
       };
 
   @override
@@ -32,7 +33,7 @@ class PtpsScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
+        foregroundColor: AppColors.onPrimary,
         title: Text(
           customerAsync.maybeWhen(
             data: (c) => 'PTPs — ${c.customerName}',
@@ -48,18 +49,15 @@ class PtpsScreen extends ConsumerWidget {
       ),
       body: ptps.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error: $e')),
+        error: (e, _) => ErrorState(
+          message: 'Could not load PTPs.\n$e',
+          onRetry: () => ref.invalidate(ptpListProvider(customerId)),
+        ),
         data: (list) {
           if (list.isEmpty) {
-            return const Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.calendar_today, size: 48, color: Colors.grey),
-                  SizedBox(height: 8),
-                  Text('No PTPs for this customer'),
-                ],
-              ),
+            return const EmptyState(
+              icon: Icons.calendar_today,
+              message: 'No PTPs for this customer',
             );
           }
           return ListView.builder(
@@ -107,15 +105,15 @@ class PtpsScreen extends ConsumerWidget {
                             if (amount != null)
                               Text(
                                 _rupee.format(amount),
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16).tabular,
                               ),
                             if (promised != null)
                               Text(
                                 'Due: ${_date.format(promised)}${isOverdue ? ' ⚠ Overdue' : ''}',
                                 style: TextStyle(
                                   fontSize: 12,
-                                  color: isOverdue ? Colors.red : Colors.grey,
-                                ),
+                                  color: isOverdue ? AppColors.error : AppColors.textTertiary,
+                                ).tabular,
                               ),
                             if (ptp['mode'] != null)
                               Text('Mode: ${ptp["mode"]}', style: const TextStyle(fontSize: 12)),

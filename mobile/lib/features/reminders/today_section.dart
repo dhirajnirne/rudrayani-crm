@@ -211,7 +211,7 @@ class _PtpTile extends StatelessWidget {
           color: heroMode
               ? AppColors.onPrimary.withValues(alpha: 0.65)
               : (overdue ? AppColors.error : AppColors.textTertiary),
-        ),
+        ).tabular,
       ),
     );
   }

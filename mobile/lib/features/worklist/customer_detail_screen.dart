@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/api/api_client.dart';
 import '../../core/models/customer.dart';
+import '../../core/widgets/state_views.dart';
 import '../attachments/attachments_section.dart';
 import '../reminders/reminder_sheet.dart';
 import 'customer_detail_provider.dart';
@@ -45,29 +46,18 @@ class CustomerDetailScreen extends ConsumerWidget {
       loading: () => Scaffold(
         appBar: AppBar(
           backgroundColor: AppColors.primary,
-          foregroundColor: Colors.white,
+          foregroundColor: AppColors.onPrimary,
         ),
         body: const Center(child: CircularProgressIndicator()),
       ),
       error: (err, _) => Scaffold(
         appBar: AppBar(
           backgroundColor: AppColors.primary,
-          foregroundColor: Colors.white,
+          foregroundColor: AppColors.onPrimary,
         ),
-        body: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.error_outline, size: 40, color: Colors.grey),
-              const SizedBox(height: 8),
-              const Text('Could not load this customer'),
-              const SizedBox(height: 12),
-              OutlinedButton(
-                onPressed: () => ref.invalidate(customerByIdProvider(customerId)),
-                child: const Text('Retry'),
-              ),
-            ],
-          ),
+        body: ErrorState(
+          message: 'Could not load this customer.\n$err',
+          onRetry: () => ref.invalidate(customerByIdProvider(customerId)),
         ),
       ),
     );
@@ -165,7 +155,7 @@ class _CustomerDetailBody extends ConsumerWidget {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Request sent — your team leader will review it'),
-            backgroundColor: Colors.green,
+            backgroundColor: AppColors.success,
           ),
         );
       }
@@ -175,7 +165,7 @@ class _CustomerDetailBody extends ConsumerWidget {
             ? 'A request is already pending for this customer'
             : 'Could not send the request — check your connection';
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(msg), backgroundColor: Colors.red),
+          SnackBar(content: Text(msg), backgroundColor: AppColors.error),
         );
       }
     }
@@ -186,7 +176,7 @@ class _CustomerDetailBody extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
+        foregroundColor: AppColors.onPrimary,
         title: Text(customer.customerName),
         actions: [
           PopupMenuButton<String>(
@@ -231,9 +221,9 @@ class _CustomerDetailBody extends ConsumerWidget {
                           : null,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.success,
-                        foregroundColor: Colors.white,
-                        disabledBackgroundColor: Colors.grey.shade300,
-                        disabledForegroundColor: Colors.grey.shade600,
+                        foregroundColor: AppColors.onPrimary,
+                        disabledBackgroundColor: AppColors.border,
+                        disabledForegroundColor: AppColors.textTertiary,
                       ),
                     ),
                   ),
@@ -315,20 +305,20 @@ class _CustomerDetailBody extends ConsumerWidget {
                     vertical: 8,
                   ),
                   decoration: BoxDecoration(
-                    color: Colors.blue.withValues(alpha: 0.08),
+                    color: AppColors.info.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: Colors.blue.withValues(alpha: 0.3),
+                      color: AppColors.info.withValues(alpha: 0.3),
                     ),
                   ),
                   child: const Row(
                     children: [
-                      Icon(Icons.info_outline, size: 16, color: Colors.blue),
+                      Icon(Icons.info_outline, size: 16, color: AppColors.info),
                       SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           'Normalized this month, pending lender confirmation. The lender\'s bucket stays authoritative until their next file confirms it.',
-                          style: TextStyle(fontSize: 12, color: Colors.blue),
+                          style: TextStyle(fontSize: 12, color: AppColors.info),
                         ),
                       ),
                     ],
@@ -344,9 +334,13 @@ class _CustomerDetailBody extends ConsumerWidget {
                     _Row('Product', customer.product!),
                   if (customer.bucket != null) _Row('Bucket', customer.bucket!),
                   if (customer.dueAmount != null)
-                    _Row('Due Amount', _rupee.format(customer.dueAmount)),
+                    _Row(
+                      'Due Amount',
+                      _rupee.format(customer.dueAmount),
+                      isMonetary: true,
+                    ),
                   if (customer.emi != null)
-                    _Row('EMI', _rupee.format(customer.emi)),
+                    _Row('EMI', _rupee.format(customer.emi), isMonetary: true),
                 ],
               ),
               const SizedBox(height: 12),
@@ -378,7 +372,11 @@ class _CustomerDetailBody extends ConsumerWidget {
                 _SectionCard(
                   title: 'Active PTP',
                   children: [
-                    _Row('Amount', _rupee.format(customer.ptpAmount)),
+                    _Row(
+                      'Amount',
+                      _rupee.format(customer.ptpAmount),
+                      isMonetary: true,
+                    ),
                     _Row(
                       'Promised Date',
                       DateFormat('dd MMM yyyy').format(customer.ptpDate!),
@@ -435,14 +433,20 @@ class _SectionCard extends StatelessWidget {
   );
 }
 
+/// A label/value line inside a [_SectionCard]. Also backs the Phase 3
+/// "Additional Fields" block, which can render an arbitrary number of
+/// imported custom-field rows — the vertical padding here is the row's only
+/// breathing room, so keep it generous rather than cramped even though these
+/// rows aren't individually tappable.
 class _Row extends StatelessWidget {
   final String label;
   final String value;
-  const _Row(this.label, this.value);
+  final bool isMonetary;
+  const _Row(this.label, this.value, {this.isMonetary = false});
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 2),
+    padding: const EdgeInsets.symmetric(vertical: 6),
     child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -450,10 +454,26 @@ class _Row extends StatelessWidget {
           width: 120,
           child: Text(
             label,
-            style: const TextStyle(color: Colors.grey, fontSize: 12),
+            style: const TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 12,
+            ),
           ),
         ),
-        Expanded(child: Text(value, style: const TextStyle(fontSize: 13))),
+        Expanded(
+          child: Text(
+            value,
+            // MANDATORY tabular-nums for every financial figure — labels
+            // like loan number / dates pass isMonetary: false and are
+            // unaffected.
+            style: isMonetary
+                ? const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ).tabular
+                : const TextStyle(fontSize: 13),
+          ),
+        ),
       ],
     ),
   );

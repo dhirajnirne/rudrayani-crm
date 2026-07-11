@@ -95,7 +95,7 @@ class _FieldVisitScreenState extends ConsumerState<FieldVisitScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('No network — visit saved offline, will sync automatically'),
-              backgroundColor: Colors.orange,
+              backgroundColor: AppColors.warning,
             ),
           );
           context.pop();
@@ -105,7 +105,7 @@ class _FieldVisitScreenState extends ConsumerState<FieldVisitScreen> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Field visit recorded!'), backgroundColor: Colors.green),
+          const SnackBar(content: Text('Field visit recorded!'), backgroundColor: AppColors.success),
         );
         context.pop();
       }
@@ -122,7 +122,7 @@ class _FieldVisitScreenState extends ConsumerState<FieldVisitScreen> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
+        foregroundColor: AppColors.onPrimary,
         title: Text(
           customerAsync.maybeWhen(
             data: (c) => 'Field Visit — ${c.customerName}',
@@ -147,7 +147,7 @@ class _FieldVisitScreenState extends ConsumerState<FieldVisitScreen> {
                 icon: const Icon(Icons.delete),
                 label: const Text('Remove photo'),
                 onPressed: () => setState(() => _photo = null),
-                style: TextButton.styleFrom(foregroundColor: Colors.red),
+                style: TextButton.styleFrom(foregroundColor: AppColors.error),
               ),
             ] else
               Row(
@@ -157,7 +157,7 @@ class _FieldVisitScreenState extends ConsumerState<FieldVisitScreen> {
                       icon: const Icon(Icons.camera_alt),
                       label: const Text('Camera'),
                       onPressed: () => _pickPhoto(ImageSource.camera),
-                      style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
+                      style: OutlinedButton.styleFrom(minimumSize: const Size(0, AppDimens.tapTarget)),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -166,7 +166,7 @@ class _FieldVisitScreenState extends ConsumerState<FieldVisitScreen> {
                       icon: const Icon(Icons.photo_library),
                       label: const Text('Gallery'),
                       onPressed: () => _pickPhoto(ImageSource.gallery),
-                      style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
+                      style: OutlinedButton.styleFrom(minimumSize: const Size(0, AppDimens.tapTarget)),
                     ),
                   ),
                 ],
@@ -184,21 +184,21 @@ class _FieldVisitScreenState extends ConsumerState<FieldVisitScreen> {
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
-                child: Text(_error!, style: const TextStyle(color: Colors.red)),
+                child: Text(_error!, style: const TextStyle(color: AppColors.error)),
               ),
             SizedBox(
-              height: 48,
+              height: AppDimens.tapTarget,
               child: ElevatedButton.icon(
                 icon: _loading
                     ? const SizedBox(
                         width: 18, height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.onPrimary))
                     : const Icon(Icons.save),
                 label: Text(_loading ? 'Saving…' : 'Save Visit'),
                 onPressed: _loading ? null : _submit,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
+                  foregroundColor: AppColors.onPrimary,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
               ),

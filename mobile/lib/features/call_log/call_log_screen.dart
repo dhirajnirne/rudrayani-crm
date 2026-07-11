@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
 import '../../core/models/disposition_code.dart';
 import '../../core/offline/offline_queue.dart';
+import '../../core/widgets/state_views.dart';
 import '../worklist/worklist_provider.dart';
 
 /// Result codes available for a given channel — step 2 of the 4-step flow
@@ -206,7 +207,7 @@ class _CallLogScreenState extends ConsumerState<CallLogScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('No network — call log saved offline, will sync automatically'),
-              backgroundColor: Colors.orange,
+              backgroundColor: AppColors.warning,
             ),
           );
           context.pop();
@@ -218,7 +219,7 @@ class _CallLogScreenState extends ConsumerState<CallLogScreen> {
         ref.invalidate(worklistProvider);
         ref.invalidate(dispositionCodesProvider);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Call log saved!'), backgroundColor: Colors.green),
+          const SnackBar(content: Text('Call log saved!'), backgroundColor: AppColors.success),
         );
         context.pop();
       }
@@ -238,7 +239,7 @@ class _CallLogScreenState extends ConsumerState<CallLogScreen> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
+        foregroundColor: AppColors.onPrimary,
         title: Text(
           customerAsync.maybeWhen(
             data: (c) => 'Log Call — ${c.customerName}',
@@ -246,8 +247,11 @@ class _CallLogScreenState extends ConsumerState<CallLogScreen> {
           ),
         ),
       ),
+      // 24px input safe zones (design brief §4 — high-velocity disposition
+      // entry): this 4-step flow is the highest density-risk screen in the
+      // app, so give each step's controls extra breathing room.
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -255,6 +259,9 @@ class _CallLogScreenState extends ConsumerState<CallLogScreen> {
             const _StepLabel(step: 1, label: 'Channel'),
             const SizedBox(height: 8),
             SegmentedButton<String>(
+              style: SegmentedButton.styleFrom(
+                minimumSize: const Size(64, AppDimens.tapTarget),
+              ),
               segments: const [
                 ButtonSegment(
                   value: 'FV',
@@ -282,7 +289,10 @@ class _CallLogScreenState extends ConsumerState<CallLogScreen> {
               const SizedBox(height: 8),
               codesAsync.when(
                 loading: () => const Center(child: CircularProgressIndicator()),
-                error: (e, _) => Text('Error loading codes: $e'),
+                error: (e, _) => InlineErrorNote(
+                  message: 'Could not load result codes: $e',
+                  onRetry: () => ref.invalidate(dispositionCodesProvider),
+                ),
                 data: (_) {
                   final channelCodes = _channelCodes;
                   return DropdownButtonFormField<String>(
@@ -323,6 +333,8 @@ class _CallLogScreenState extends ConsumerState<CallLogScreen> {
                 TextField(
                   controller: _amountCtrl,
                   keyboardType: TextInputType.number,
+                  // Tabular-nums (MANDATORY, design brief) even while typing.
+                  style: const TextStyle().tabular,
                   decoration: const InputDecoration(
                     labelText: 'Amount (₹) *',
                     border: OutlineInputBorder(),
@@ -417,16 +429,18 @@ class _CallLogScreenState extends ConsumerState<CallLogScreen> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.teal.shade50,
+                    color: AppColors.successContainer,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.teal.shade200),
+                    border: Border.all(
+                      color: AppColors.success.withValues(alpha: 0.3),
+                    ),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Remark Preview', style: TextStyle(fontSize: 11, color: Colors.teal, fontWeight: FontWeight.bold)),
+                      const Text('Remark Preview', style: TextStyle(fontSize: 11, color: AppColors.successStrong, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 4),
-                      Text(_remarkPreview, style: const TextStyle(fontSize: 13)),
+                      Text(_remarkPreview, style: const TextStyle(fontSize: 13).tabular),
                     ],
                   ),
                 ),
@@ -436,19 +450,19 @@ class _CallLogScreenState extends ConsumerState<CallLogScreen> {
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
-                child: Text(_error!, style: const TextStyle(color: Colors.red)),
+                child: Text(_error!, style: const TextStyle(color: AppColors.error)),
               ),
             SizedBox(
-              height: 48,
+              height: AppDimens.tapTarget,
               child: ElevatedButton.icon(
                 icon: _loading
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.onPrimary))
                     : const Icon(Icons.save),
                 label: Text(_loading ? 'Saving…' : 'Save Call Log'),
                 onPressed: _loading ? null : _submit,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
+                  foregroundColor: AppColors.onPrimary,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
               ),
