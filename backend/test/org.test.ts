@@ -182,6 +182,27 @@ describe("Org structure", () => {
     expect(relogin.status).toBe(401);
   });
 
+  // Phase 12 (Management Dashboard "Active Agents" KPI): ?is_active=true/false
+  // filters server-side instead of the client fetching everyone.
+  it("is_active query param filters the employee list", async () => {
+    const withPhone = await request(app)
+      .get(`/api/employees?q=${AGENT_PHONE}`)
+      .set("Authorization", `Bearer ${adminToken}`);
+    // Deactivated by the previous test.
+    expect(withPhone.body.employees[0].is_active).toBe(false);
+
+    const activeOnly = await request(app)
+      .get(`/api/employees?q=${AGENT_PHONE}&is_active=true`)
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(activeOnly.body.employees).toEqual([]);
+
+    const inactiveOnly = await request(app)
+      .get(`/api/employees?q=${AGENT_PHONE}&is_active=false`)
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(inactiveOnly.body.employees.length).toBe(1);
+    expect(inactiveOnly.body.employees[0].phone).toBe(AGENT_PHONE);
+  });
+
   it("duplicate phone returns 409, not a 500", async () => {
     const res = await request(app)
       .post("/api/employees")

@@ -33,6 +33,12 @@ export interface DashboardData {
     pos_total: number;
     /** target_amount as a % of pos_total. */
     emi_over_pos_pct: number | null;
+    /** Phase 12: money collected since midnight UTC. */
+    today_amount: number;
+    /** Phase 12: MTD collected split by payment.type. */
+    by_type: { emi: number; settlement: number };
+    /** Phase 12: MTD collected split by the collecting user's capability. */
+    by_channel: { field: number; telecalling: number; other: number };
   };
   deposits: { collected: number; deposited: number; pending: number };
   trail: { allocated_count: number; uploaded_count: number; pct: number | null };

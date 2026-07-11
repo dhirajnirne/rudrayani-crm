@@ -4,6 +4,7 @@ import {
   ApartmentOutlined,
   AuditOutlined,
   BankOutlined,
+  BarChartOutlined,
   CalendarOutlined,
   DashboardOutlined,
   AimOutlined,
@@ -49,6 +50,11 @@ export default function AppLayout() {
       key: "/",
       icon: <DashboardOutlined />,
       label: <Link to="/">{hasPermission("reports.view") ? "Dashboard" : "My Performance"}</Link>,
+    },
+    hasPermission("reports.view") && {
+      key: "/management-dashboard",
+      icon: <BarChartOutlined />,
+      label: <Link to="/management-dashboard">Management Dashboard</Link>,
     },
     isIndividualContributor && {
       key: "/my-worklist",

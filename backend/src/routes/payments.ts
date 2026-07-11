@@ -33,6 +33,9 @@ const paymentBody = z.object({
   customer_id: z.string().uuid(),
   amount: z.coerce.number().positive(),
   mode: z.string().trim().min(1).max(60).optional(),
+  // Phase 12 (Management Dashboard "Settlement vs EMI Collections" KPI):
+  // captured at collection time, defaults to the overwhelmingly common case.
+  type: z.enum(["emi", "settlement"]).default("emi"),
   paid_at: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD").optional(),
   close_customer: z
     .union([z.boolean(), z.enum(["true", "false"]).transform((v) => v === "true")])
@@ -95,8 +98,8 @@ router.post(
     try {
       await client.query("BEGIN");
       const payRes = await client.query(
-        `INSERT INTO payments (customer_id, collected_by_user_id, amount, mode, photo_proof_url, paid_at, client_key, exceeds_due_amount)
-         VALUES ($1, $2, $3, $4, $5, COALESCE($6::date, now()), $7, $8)
+        `INSERT INTO payments (customer_id, collected_by_user_id, amount, mode, photo_proof_url, paid_at, client_key, exceeds_due_amount, type)
+         VALUES ($1, $2, $3, $4, $5, COALESCE($6::date, now()), $7, $8, $9)
          RETURNING *`,
         [
           body.customer_id,
@@ -107,6 +110,7 @@ router.post(
           body.paid_at ?? null,
           body.client_key ?? null,
           exceedsDueAmount,
+          body.type,
         ],
       );
 
@@ -152,7 +156,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const customerId = z.string().uuid().parse(req.query.customer_id);
     const { rows } = await pool.query(
-      `SELECT p.id, p.amount, p.mode, p.paid_at, p.created_at,
+      `SELECT p.id, p.amount, p.mode, p.type, p.paid_at, p.created_at,
               (p.photo_proof_url IS NOT NULL) AS has_photo,
               u.full_name AS collected_by_name
          FROM payments p

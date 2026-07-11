@@ -283,10 +283,15 @@ describe("team day summary", () => {
     expect(names).toContain("Field TL");
   });
 
-  it("agents cannot read the team summary", async () => {
+  // Phase 12: agents (telecaller/field_agent) now hold tracking.view too, so
+  // their own mobile dashboard can call /tracking/team-day for their own
+  // attendance -- but scope.ts clamps them to just their own row.
+  it("agents see only their own row, never the rest of the team", async () => {
     const res = await request(app)
       .get("/api/tracking/team-day")
       .set("Authorization", `Bearer ${agentToken}`);
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
+    const ids = res.body.members.map((m: { user_id: string }) => m.user_id);
+    expect(ids).toEqual([agentId]);
   });
 });

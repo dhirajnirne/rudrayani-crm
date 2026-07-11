@@ -498,6 +498,88 @@ describe("report engine", () => {
   });
 });
 
+// Phase 12 (Management Dashboard): today_amount, by_type, by_channel all
+// read the LIVE clock (paid_at compared against now()/date_trunc('month',
+// now())), unlike the rest of this file's fixed May/June-2026 fixtures --
+// so this block seeds its own customer/payments against the real current
+// month instead of reusing the May/June snapshots.
+describe("Phase 12 Management Dashboard KPIs (today/type/channel/trend)", () => {
+  let kpiCustomerId: string;
+  let teleId: string;
+  const TELE_PHONE = "7950000024";
+  const now = new Date();
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+
+  beforeAll(async () => {
+    const cust = await pool.query(
+      `INSERT INTO customers (company_id, loan_number, customer_name, product, due_amount, emi)
+       VALUES ($1, 'RPT-P12-01', 'P12 Customer', 'CVL', 1, 1) RETURNING id`,
+      [companyId],
+    );
+    kpiCustomerId = cust.rows[0].id;
+
+    const hash = await hashPassword(PASSWORD);
+    const tele = await pool.query(
+      `INSERT INTO users (agency_id, branch_id, team_id, full_name, phone, password_hash, is_telecaller)
+       VALUES ($1, $2, $3, 'Reports Tele', $4, $5, true) RETURNING id`,
+      [agencyId, branchId, teamId, TELE_PHONE, hash],
+    );
+    teleId = tele.rows[0].id;
+
+    // Today, field agent, Cash, EMI.
+    await pool.query(
+      `INSERT INTO payments (customer_id, collected_by_user_id, amount, mode, type, paid_at)
+       VALUES ($1, $2, 4000, 'Cash', 'emi', now())`,
+      [kpiCustomerId, agentId],
+    );
+    // Earlier this month (not today), telecaller, UPI, settlement.
+    await pool.query(
+      `INSERT INTO payments (customer_id, collected_by_user_id, amount, mode, type, paid_at)
+       VALUES ($1, $2, 6000, 'UPI', 'settlement', date_trunc('month', now()) + interval '10 hours')`,
+      [kpiCustomerId, teleId],
+    );
+  });
+
+  afterAll(async () => {
+    await pool.query("DELETE FROM payments WHERE customer_id = $1", [kpiCustomerId]);
+    await pool.query("DELETE FROM customers WHERE id = $1", [kpiCustomerId]);
+    await pool.query("DELETE FROM users WHERE id = $1", [teleId]);
+  });
+
+  it("dashboard splits MTD collection into today/type/channel", async () => {
+    const res = await request(app)
+      .get(`/api/reports/dashboard?month=${currentMonth}`)
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.collection.mtd_amount).toBe(10000);
+    expect(res.body.collection.today_amount).toBe(4000);
+    expect(res.body.collection.by_type).toEqual({ emi: 4000, settlement: 6000 });
+    expect(res.body.collection.by_channel).toEqual({ field: 4000, telecalling: 6000, other: 0 });
+  });
+
+  it("/reports/trend buckets collected amounts by day and sums to the range total", async () => {
+    const from = `${currentMonth}-01`;
+    const to = now.toISOString().slice(0, 10);
+    const res = await request(app)
+      .get(`/api/reports/trend?from=${from}&to=${to}&granularity=day`)
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    const total = res.body.points.reduce((s: number, p: { amount: number }) => s + p.amount, 0);
+    expect(total).toBe(10000);
+  });
+
+  it("an agent's own trend request is scope-clamped to themselves, not 403'd", async () => {
+    const from = `${currentMonth}-01`;
+    const to = now.toISOString().slice(0, 10);
+    const res = await request(app)
+      .get(`/api/reports/trend?from=${from}&to=${to}`)
+      .set("Authorization", `Bearer ${agentToken}`);
+    expect(res.status).toBe(200);
+    const total = res.body.points.reduce((s: number, p: { amount: number }) => s + p.amount, 0);
+    expect(total).toBe(4000); // only agentId's own payment, not the telecaller's
+  });
+});
+
 describe("trail analytics", () => {
   let trailCustomerId: string;
   let ptpCallLogId: string;
@@ -520,6 +602,13 @@ describe("trail analytics", () => {
        VALUES ($1, 'OC', 'RNR', 'Ringing not responding') RETURNING id`,
       [agencyId],
     );
+    // Phase 12 (Telecaller dashboard "Escalation Cases" KPI): the seeded
+    // Trail_Codes.xlsx category value, confirmed via the source file.
+    const dc3 = await pool.query(
+      `INSERT INTO disposition_codes (agency_id, action_code, category, result_code, description)
+       VALUES ($1, 'OC', 'ESCALATED CASE', 'ESCN', 'Escalated to legal') RETURNING id`,
+      [agencyId],
+    );
 
     const call1 = await pool.query(
       `INSERT INTO call_logs (customer_id, agent_id, disposition_code_id, remark, created_at)
@@ -533,10 +622,22 @@ describe("trail analytics", () => {
        VALUES ($1, $2, $3, 'no answer', ('2026-05-21 10:00:00'::timestamp AT TIME ZONE 'Asia/Kolkata'))`,
       [trailCustomerId, agentId, dc2.rows[0].id],
     );
+    await pool.query(
+      `INSERT INTO call_logs (customer_id, agent_id, disposition_code_id, remark, created_at)
+       VALUES ($1, $2, $3, 'escalating', ('2026-05-22 10:00:00'::timestamp AT TIME ZONE 'Asia/Kolkata'))`,
+      [trailCustomerId, agentId, dc3.rows[0].id],
+    );
 
     await pool.query(
       `INSERT INTO ptps (customer_id, call_log_id, agent_id, amount, promised_date, status)
        VALUES ($1, $2, $3, 5000, '2026-05-25', 'kept')`,
+      [trailCustomerId, ptpCallLogId, agentId],
+    );
+    // A second, still-pending PTP created in the same window -- backs
+    // ptps_pending_value (Management Dashboard "PTP Value" KPI).
+    await pool.query(
+      `INSERT INTO ptps (customer_id, call_log_id, agent_id, amount, promised_date, status)
+       VALUES ($1, $2, $3, 7500, '2026-06-01', 'pending')`,
       [trailCustomerId, ptpCallLogId, agentId],
     );
   });
@@ -553,20 +654,24 @@ describe("trail analytics", () => {
       .get("/api/reports/trail?from=2026-05-01&to=2026-05-31")
       .set("Authorization", `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
-    // 2 dispositioned calls from this block + the 1 un-dispositioned call from
-    // the May fixture (RPT-01) -- total_trails counts every call_log row.
-    expect(res.body.total_trails).toBe(3);
+    // 3 dispositioned calls from this block (PTP, RNR, ESCN) + the 1
+    // un-dispositioned call from the May fixture (RPT-01) -- total_trails
+    // counts every call_log row.
+    expect(res.body.total_trails).toBe(4);
     expect(res.body.unique_customers_contacted).toBe(2); // trailCustomerId + RPT-01
 
     const ptpAction = res.body.by_action_code.find((r: { action_code: string }) => r.action_code === "OC");
-    expect(ptpAction.count).toBe(2); // only the two dispositioned calls have an action_code
+    expect(ptpAction.count).toBe(3); // the three dispositioned calls all have action_code OC
     const ptpResult = res.body.by_result_code.find((r: { result_code: string }) => r.result_code === "PTP");
     expect(ptpResult.count).toBe(1);
 
-    expect(res.body.ptps_created).toBe(1);
+    expect(res.body.ptps_created).toBe(2); // 1 kept + 1 pending
     expect(res.body.ptps_kept).toBe(1);
     expect(res.body.ptps_broken).toBe(0);
     expect(res.body.ptp_conversion_pct).toBe(100); // 1 kept / (1 kept + 0 broken)
+    // Phase 12 additions:
+    expect(res.body.ptps_pending_value).toBe(7500);
+    expect(res.body.escalated_count).toBe(1);
   });
 
   it("an agent's own trail request is scope-clamped, not 403'd, when they don't try to widen", async () => {
@@ -574,7 +679,7 @@ describe("trail analytics", () => {
       .get("/api/reports/trail?from=2026-05-01&to=2026-05-31")
       .set("Authorization", `Bearer ${agentToken}`);
     expect(res.status).toBe(200);
-    expect(res.body.total_trails).toBe(3); // all logged by agentId
+    expect(res.body.total_trails).toBe(4); // all logged by agentId
 
     const widen = await request(app)
       .get(`/api/reports/trail?from=2026-05-01&to=2026-05-31&agent_id=${agent2Id}`)

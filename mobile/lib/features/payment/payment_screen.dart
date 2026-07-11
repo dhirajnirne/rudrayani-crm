@@ -22,6 +22,9 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
   final _amountCtrl = TextEditingController();
   final _dateCtrl = TextEditingController();
   String? _mode;
+  // Phase 12 (Management Dashboard "Settlement vs EMI Collections" KPI):
+  // captured at collection time, defaults to the overwhelmingly common case.
+  String _type = 'emi';
   File? _photo;
   bool _closeCustomer = false;
   bool _loading = false;
@@ -74,6 +77,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
       final payload = <String, dynamic>{
         'customer_id': widget.customerId,
         'amount': amount,
+        'type': _type,
         if (_mode != null) 'mode': _mode,
         if (_dateCtrl.text.isNotEmpty) 'paid_at': _dateCtrl.text,
         'close_customer': _closeCustomer.toString(),
@@ -204,6 +208,19 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
                   .map((m) => DropdownMenuItem(value: m, child: Text(m)))
                   .toList(),
               onChanged: (v) => setState(() => _mode = v),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: _type,
+              decoration: const InputDecoration(
+                labelText: 'Collection Type',
+                border: OutlineInputBorder(),
+              ),
+              items: const [
+                DropdownMenuItem(value: 'emi', child: Text('EMI Collection')),
+                DropdownMenuItem(value: 'settlement', child: Text('Settlement')),
+              ],
+              onChanged: (v) => setState(() => _type = v ?? 'emi'),
             ),
             const SizedBox(height: 12),
             TextField(

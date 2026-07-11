@@ -667,6 +667,140 @@ export async function depositTotals(agencyId: string, filters: ReportFilters): P
   return { collected, deposited, pending: collected - deposited };
 }
 
+/**
+ * Phase 12 (Management Dashboard "Collected Today" KPI): money collected
+ * since midnight, assumed UTC for this phase (see task-12 brief -- IST
+ * "today" is a follow-up if the owner wants it later). Shares
+ * paymentConditions() with the MTD figure so both use identical scope
+ * narrowing, just a different time window.
+ */
+export async function collectedToday(agencyId: string, filters: ReportFilters): Promise<number> {
+  const params: unknown[] = [agencyId];
+  const conditions = paymentConditions(filters, params);
+  const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
+  const { rows } = await pool.query(
+    `SELECT COALESCE(SUM(p.amount), 0)::float AS today
+       FROM payments p
+       JOIN customers c ON c.id = p.customer_id
+       JOIN companies co ON co.id = c.company_id AND co.agency_id = $1
+       JOIN users cu ON cu.id = p.collected_by_user_id
+      WHERE p.paid_at >= date_trunc('day', now())
+        AND p.paid_at < date_trunc('day', now()) + interval '1 day'
+        ${where}`,
+    params,
+  );
+  return rows[0].today as number;
+}
+
+export interface PaymentTypeSplit {
+  emi: number;
+  settlement: number;
+}
+
+/** Phase 12 (Management Dashboard "Settlement vs EMI Collections" KPI). */
+export async function collectionByType(
+  agencyId: string,
+  filters: ReportFilters,
+): Promise<PaymentTypeSplit> {
+  const params: unknown[] = [agencyId, filters.month];
+  const conditions = paymentConditions(filters, params);
+  const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
+  const { rows } = await pool.query(
+    `SELECT COALESCE(SUM(p.amount) FILTER (WHERE p.type = 'settlement'), 0)::float AS settlement,
+            COALESCE(SUM(p.amount) FILTER (WHERE p.type = 'emi'), 0)::float AS emi
+       FROM payments p
+       JOIN customers c ON c.id = p.customer_id
+       JOIN companies co ON co.id = c.company_id AND co.agency_id = $1
+       JOIN users cu ON cu.id = p.collected_by_user_id
+      WHERE p.paid_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Kolkata')
+        AND p.paid_at < ((($2::date + interval '1 month')::date)::timestamp AT TIME ZONE 'Asia/Kolkata')
+        ${where}`,
+    params,
+  );
+  return { emi: rows[0].emi as number, settlement: rows[0].settlement as number };
+}
+
+export interface CollectionChannelSplit {
+  field: number;
+  telecalling: number;
+  /** Collected by someone who is neither a field agent nor a telecaller
+   *  (e.g. a TL or admin recording a payment directly) -- not silently
+   *  folded into either bucket. */
+  other: number;
+}
+
+/**
+ * Phase 12 (Management Dashboard "Field vs Telecalling Collections" KPI):
+ * splits the same MTD collected total by the collecting user's capability
+ * flags. A user with both is_field_agent and is_telecaller (unusual but not
+ * disallowed) counts toward "field" -- the flag order used everywhere else
+ * a single-bucket classification is needed (e.g. /tracking "not moving" alert).
+ */
+export async function collectionByChannel(
+  agencyId: string,
+  filters: ReportFilters,
+): Promise<CollectionChannelSplit> {
+  const params: unknown[] = [agencyId, filters.month];
+  const conditions = paymentConditions(filters, params);
+  const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
+  const { rows } = await pool.query(
+    `SELECT
+        COALESCE(SUM(p.amount) FILTER (WHERE cu.is_field_agent), 0)::float AS field,
+        COALESCE(SUM(p.amount) FILTER (WHERE NOT cu.is_field_agent AND cu.is_telecaller), 0)::float AS telecalling,
+        COALESCE(SUM(p.amount) FILTER (WHERE NOT cu.is_field_agent AND NOT cu.is_telecaller), 0)::float AS other
+       FROM payments p
+       JOIN customers c ON c.id = p.customer_id
+       JOIN companies co ON co.id = c.company_id AND co.agency_id = $1
+       JOIN users cu ON cu.id = p.collected_by_user_id
+      WHERE p.paid_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Kolkata')
+        AND p.paid_at < ((($2::date + interval '1 month')::date)::timestamp AT TIME ZONE 'Asia/Kolkata')
+        ${where}`,
+    params,
+  );
+  return {
+    field: rows[0].field as number,
+    telecalling: rows[0].telecalling as number,
+    other: rows[0].other as number,
+  };
+}
+
+export interface TrendPoint {
+  bucket: string; // 'YYYY-MM-DD' (day) or the Monday of the ISO week (week)
+  amount: number;
+}
+
+/**
+ * Phase 12 (Management Dashboard "Recovery Trend" KPI): daily or weekly
+ * collected-amount buckets over a free date range, same payment scope
+ * narrowing as the rest of the payment-side report surface.
+ */
+export async function collectionTrend(
+  agencyId: string,
+  from: string,
+  to: string,
+  granularity: "day" | "week",
+  filters: Omit<ReportFilters, "month">,
+): Promise<TrendPoint[]> {
+  const params: unknown[] = [agencyId, from, to];
+  const conditions = paymentConditions({ ...filters, month: from } as ReportFilters, params);
+  const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
+  const truncUnit = granularity === "week" ? "week" : "day";
+  const { rows } = await pool.query(
+    `SELECT to_char(date_trunc('${truncUnit}', p.paid_at AT TIME ZONE 'Asia/Kolkata'), 'YYYY-MM-DD') AS bucket,
+            COALESCE(SUM(p.amount), 0)::float AS amount
+       FROM payments p
+       JOIN customers c ON c.id = p.customer_id
+       JOIN companies co ON co.id = c.company_id AND co.agency_id = $1
+       JOIN users cu ON cu.id = p.collected_by_user_id
+      WHERE p.paid_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Kolkata')
+        AND p.paid_at < (($3::date + interval '1 day')::timestamp AT TIME ZONE 'Asia/Kolkata')
+        ${where}
+      GROUP BY 1 ORDER BY 1`,
+    params,
+  );
+  return rows as TrendPoint[];
+}
+
 export interface DepositRow {
   id: string;
   amount: number;
@@ -777,6 +911,12 @@ export interface DashboardResult {
     /** target_amount as a % of pos_total -- how much of the book's
      *  outstanding principal this month's EMI target represents. */
     emi_over_pos_pct: number | null;
+    /** Phase 12: money collected since midnight UTC (see collectedToday()). */
+    today_amount: number;
+    /** Phase 12: MTD collected split by payment.type. */
+    by_type: PaymentTypeSplit;
+    /** Phase 12: MTD collected split by the collecting user's capability. */
+    by_channel: CollectionChannelSplit;
   };
   deposits: DepositTotals;
   trail: { allocated_count: number; uploaded_count: number; pct: number | null };
@@ -833,6 +973,11 @@ export async function dashboard(
       ? Math.max(collectionTarget.target_amount - agg.collected_amount, 0)
       : null;
   const collectionBook = await bookTotals(user.agency_id, filters);
+  const [todayAmount, byType, byChannel] = await Promise.all([
+    collectedToday(user.agency_id, filters),
+    collectionByType(user.agency_id, filters),
+    collectionByChannel(user.agency_id, filters),
+  ]);
 
   return {
     month: filters.month.slice(0, 7),
@@ -885,6 +1030,9 @@ export async function dashboard(
         collectionTarget.target_amount != null
           ? pct(collectionTarget.target_amount, collectionBook.pos_total)
           : null,
+      today_amount: todayAmount,
+      by_type: byType,
+      by_channel: byChannel,
     },
     deposits,
     trail: {
@@ -1160,7 +1308,14 @@ export interface TrailAnalytics {
   ptps_kept: number;
   ptps_broken: number;
   ptps_pending: number;
+  /** Phase 12 (Management Dashboard "PTP Value" KPI): sum of amount on
+   *  still-pending PTPs created in this range -- money promised but not yet
+   *  due to have resolved either way. */
+  ptps_pending_value: number;
   ptp_conversion_pct: number | null; // kept / (kept + broken)
+  /** Phase 12 (Telecaller dashboard "Escalation Cases" KPI): calls
+   *  dispositioned under the seeded 'ESCALATED CASE' category. */
+  escalated_count: number;
 }
 
 /** Date-range trail/disposition analytics (event-level, so a range fits naturally here). */
@@ -1196,11 +1351,13 @@ export async function trailAnalytics(
 
   const [totals, byAction, byResult, ptps] = await Promise.all([
     pool.query(
-      `SELECT COUNT(*)::int AS total, COUNT(DISTINCT cl.customer_id)::int AS unique_customers
+      `SELECT COUNT(*)::int AS total, COUNT(DISTINCT cl.customer_id)::int AS unique_customers,
+              COUNT(*) FILTER (WHERE dc.category = 'ESCALATED CASE')::int AS escalated_count
          FROM call_logs cl
          JOIN customers c ON c.id = cl.customer_id
          JOIN companies co ON co.id = c.company_id
          JOIN users u ON u.id = cl.agent_id
+         LEFT JOIN disposition_codes dc ON dc.id = cl.disposition_code_id
         WHERE ${where}`,
       params,
     ),
@@ -1227,7 +1384,7 @@ export async function trailAnalytics(
       params,
     ),
     pool.query(
-      `SELECT p.status, COUNT(*)::int AS count
+      `SELECT p.status, COUNT(*)::int AS count, COALESCE(SUM(p.amount), 0)::float AS amount
          FROM ptps p
          JOIN call_logs cl ON cl.id = p.call_log_id
          JOIN customers c ON c.id = cl.customer_id
@@ -1240,7 +1397,11 @@ export async function trailAnalytics(
   ]);
 
   const ptpCounts: Record<string, number> = { pending: 0, kept: 0, broken: 0 };
-  for (const r of ptps.rows) ptpCounts[r.status as string] = r.count as number;
+  const ptpAmounts: Record<string, number> = { pending: 0, kept: 0, broken: 0 };
+  for (const r of ptps.rows) {
+    ptpCounts[r.status as string] = r.count as number;
+    ptpAmounts[r.status as string] = r.amount as number;
+  }
   const ptpsCreated = ptpCounts.pending + ptpCounts.kept + ptpCounts.broken;
 
   return {
@@ -1254,7 +1415,9 @@ export async function trailAnalytics(
     ptps_kept: ptpCounts.kept,
     ptps_broken: ptpCounts.broken,
     ptps_pending: ptpCounts.pending,
+    ptps_pending_value: ptpAmounts.pending,
     ptp_conversion_pct: pct(ptpCounts.kept, ptpCounts.kept + ptpCounts.broken),
+    escalated_count: totals.rows[0].escalated_count,
   };
 }
 

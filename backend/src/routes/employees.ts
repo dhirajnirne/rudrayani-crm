@@ -126,14 +126,20 @@ router.get(
     const q = (req.query.q as string | undefined)?.trim();
     const branchId = req.query.branch_id as string | undefined;
     const teamId = req.query.team_id as string | undefined;
+    // Phase 12 (Management Dashboard "Active Agents" KPI): lets the client
+    // get a pre-filtered count instead of fetching everyone and filtering
+    // client-side. Omitted -> unfiltered (unchanged pre-Phase-12 behavior).
+    const isActiveRaw = req.query.is_active as string | undefined;
+    const isActive = isActiveRaw === undefined ? null : isActiveRaw === "true";
     const { rows } = await pool.query<UserRow>(
       `SELECT u.* FROM users u
         WHERE u.agency_id = $1
           AND ($2::uuid IS NULL OR u.branch_id = $2)
           AND ($3::uuid IS NULL OR u.team_id = $3)
           AND ($4::text IS NULL OR u.full_name ILIKE '%' || $4 || '%' OR u.phone LIKE $4 || '%')
+          AND ($5::boolean IS NULL OR u.is_active = $5)
         ORDER BY u.full_name`,
-      [req.user!.agency_id, branchId ?? null, teamId ?? null, q || null],
+      [req.user!.agency_id, branchId ?? null, teamId ?? null, q || null, isActive],
     );
     res.json({
       employees: rows.map((u) => ({ ...publicUser(u), is_active: u.is_active })),

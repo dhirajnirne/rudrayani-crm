@@ -172,11 +172,16 @@ describe("GET /api/day-plan", () => {
     expect(ids).not.toContain(userIds.agentB);
   });
 
-  it("a plain agent (no tracking.view) is forbidden", async () => {
+  // Phase 12: telecaller/field_agent now hold tracking.view too (their mobile
+  // dashboards need their own attendance/GPS/route), but scope.ts clamps them
+  // to self only -- not a 403, and not their team's data either.
+  it("a plain agent sees only their own day-plan row, not the team's", async () => {
     const res = await request(app)
       .get(`/api/day-plan?date=${today}`)
       .set("Authorization", `Bearer ${tokens.agentC}`);
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
+    const ids = res.body.agents.map((a: { user_id: string }) => a.user_id);
+    expect(ids).toEqual([userIds.agentC]);
   });
 
   it("team_id filter narrows the agency-wide view", async () => {
