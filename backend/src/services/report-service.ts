@@ -241,6 +241,59 @@ export async function bookTotals(agencyId: string, filters: ReportFilters): Prom
   return { count: rows[0].n, emi_total: rows[0].emi_total, pos_total: rows[0].pos_total };
 }
 
+export interface ScopeBookTotal {
+  scope_id: string | null;
+  count: number;
+  emi_total: number;
+  pos_total: number;
+}
+
+const SCOPE_GROUP_EXPR: Record<"agency" | "branch" | "team" | "agent", { live: string; snap: string }> = {
+  agency: { live: "NULL::uuid", snap: "NULL::uuid" },
+  branch: { live: "tm.branch_id", snap: "tm.branch_id" },
+  team: { live: "c.assigned_team_id", snap: "s.assigned_team_id" },
+  agent: { live: "c.assigned_agent_id", snap: "s.assigned_agent_id" },
+};
+
+/**
+ * Same book totals as bookTotals(), but grouped per entity at one scope
+ * level instead of narrowed to a single one -- backs the Targets page's
+ * "what would the computed default be" column so admins can see the book
+ * size while setting manual targets, without an N+1 fetch per row.
+ */
+export async function bookTotalsByScope(
+  agencyId: string,
+  month: string, // 'YYYY-MM-01'
+  scopeType: "agency" | "branch" | "team" | "agent",
+): Promise<ScopeBookTotal[]> {
+  const g = SCOPE_GROUP_EXPR[scopeType];
+  if (isCurrentMonth(month.slice(0, 7))) {
+    const { rows } = await pool.query(
+      `SELECT ${g.live} AS scope_id, COUNT(*)::int AS count,
+              COALESCE(SUM(c.emi), 0)::float AS emi_total,
+              COALESCE(SUM(c.pos), 0)::float AS pos_total
+         FROM customers c
+         JOIN companies co ON co.id = c.company_id AND co.agency_id = $1
+         LEFT JOIN teams tm ON tm.id = c.assigned_team_id
+        GROUP BY ${g.live}`,
+      [agencyId],
+    );
+    return rows as ScopeBookTotal[];
+  }
+  const { rows } = await pool.query(
+    `SELECT ${g.snap} AS scope_id, COUNT(*)::int AS count,
+            COALESCE(SUM(s.emi), 0)::float AS emi_total,
+            COALESCE(SUM(s.pos), 0)::float AS pos_total
+       FROM customer_month_snapshots s
+       JOIN companies co ON co.id = s.company_id AND co.agency_id = $1
+       LEFT JOIN teams tm ON tm.id = s.assigned_team_id
+      WHERE s.month = $2::date
+      GROUP BY ${g.snap}`,
+    [agencyId, month],
+  );
+  return rows as ScopeBookTotal[];
+}
+
 /** Is there a next-month allocation file to compare against (transition basis)? */
 async function hasNextMonthSnapshot(
   agencyId: string,
