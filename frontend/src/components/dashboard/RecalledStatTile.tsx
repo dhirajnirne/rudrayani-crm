@@ -1,9 +1,8 @@
-import { Card, Modal, Table, Tabs, Typography, message } from "antd";
+import { Card, Modal, Table, Tabs, theme, Typography, message } from "antd";
 import dayjs from "dayjs";
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../../api/client";
 import { lakh, compactCount } from "./format";
-import { palette } from "../../theme/tokens";
 import type { DashboardFilters } from "./types";
 
 interface RecallRow {
@@ -34,6 +33,7 @@ interface RecallReport {
 
 /** Cases the lender pulled back this month -- distinct from `closed`, so a healthy book doesn't read as churn. */
 export default function RecalledStatTile({ filters }: { filters: DashboardFilters }) {
+  const { token } = theme.useToken();
   const [data, setData] = useState<RecallReport | null>(null);
   const [open, setOpen] = useState(false);
 
@@ -52,12 +52,12 @@ export default function RecalledStatTile({ filters }: { filters: DashboardFilter
         size="small"
         hoverable
         onClick={() => setOpen(true)}
-        style={{ background: palette.background, border: "none", cursor: "pointer" }}
+        style={{ background: token.colorFillTertiary, border: "none", cursor: "pointer" }}
       >
         <Typography.Text type="secondary" style={{ fontSize: 13 }}>
           Recalled This Month
         </Typography.Text>
-        <div className="money" style={{ fontSize: 20, fontWeight: 700 }}>
+        <div className="money" style={{ fontSize: 20, fontWeight: 700, color: token.colorText }}>
           {compactCount(data?.total_recalled_count ?? 0)}
         </div>
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>

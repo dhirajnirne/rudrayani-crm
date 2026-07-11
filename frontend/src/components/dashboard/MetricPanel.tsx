@@ -1,14 +1,17 @@
-import { Card, Col, Row, Tooltip, Typography } from "antd";
+import { Card, Col, Row, theme, Tooltip, Typography } from "antd";
 import { InfoCircleOutlined } from "@ant-design/icons";
 import { lakh, metricValue, pctText } from "./format";
-import { palette } from "../../theme/tokens";
 import type { MetricBlock } from "./types";
 
+// Uses antd's resolved theme tokens (not the static light-only `palette`
+// import) so the tile background actually flips with light/dark mode --
+// see SummaryStat.tsx for the same fix and the bug it addresses.
 function Stat({ label, value, info }: { label: string; value: string; info?: string }) {
+  const { token } = theme.useToken();
   return (
     <div
       style={{
-        background: palette.background,
+        background: token.colorFillTertiary,
         borderRadius: 8,
         padding: "10px 14px",
         height: "100%",
@@ -23,7 +26,7 @@ function Stat({ label, value, info }: { label: string; value: string; info?: str
           </Tooltip>
         )}
       </Typography.Text>
-      <div className="money" style={{ fontSize: 20, fontWeight: 700 }}>
+      <div className="money" style={{ fontSize: 20, fontWeight: 700, color: token.colorText }}>
         {value}
       </div>
     </div>
@@ -45,6 +48,7 @@ export default function MetricPanel({
   amountMode: boolean;
   compact?: boolean;
 }) {
+  const { token } = theme.useToken();
   const basisInfo =
     metric.basis === "transition"
       ? "Computed from bucket movement against next month's allocation file."
@@ -57,7 +61,7 @@ export default function MetricPanel({
         <span>
           {title} Metrics{" "}
           <Tooltip title={basisInfo}>
-            <InfoCircleOutlined style={{ fontSize: 13, color: palette.textMuted }} />
+            <InfoCircleOutlined style={{ fontSize: 13, color: token.colorTextSecondary }} />
           </Tooltip>
         </span>
       }

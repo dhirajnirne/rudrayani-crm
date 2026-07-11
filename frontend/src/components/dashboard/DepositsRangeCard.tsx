@@ -1,4 +1,4 @@
-import { Card, Col, DatePicker, Row, Spin, Typography, message } from "antd";
+import { Card, Col, DatePicker, Row, Spin, theme, Typography, message } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../../api/client";
@@ -14,13 +14,17 @@ interface DepositTotals {
   pending: number;
 }
 
+// Uses antd's resolved theme tokens (not the static light-only `palette`
+// import) so the tile background actually flips with light/dark mode --
+// see SummaryStat.tsx for the same fix and the bug it addresses.
 function Stat({ label, value, accent }: { label: string; value: string; accent?: string }) {
+  const { token } = theme.useToken();
   return (
-    <div style={{ background: palette.background, borderRadius: 8, padding: "10px 14px", borderLeft: `3px solid ${accent ?? palette.navy}` }}>
+    <div style={{ background: token.colorFillTertiary, borderRadius: 8, padding: "10px 14px", borderLeft: `3px solid ${accent ?? palette.navy}` }}>
       <Typography.Text type="secondary" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.04em" }}>
         {label}
       </Typography.Text>
-      <div className="money" style={{ fontSize: 20, fontWeight: 700, color: palette.navy, marginTop: 2 }}>
+      <div className="money" style={{ fontSize: 20, fontWeight: 700, color: token.colorText, marginTop: 2 }}>
         {value}
       </div>
     </div>

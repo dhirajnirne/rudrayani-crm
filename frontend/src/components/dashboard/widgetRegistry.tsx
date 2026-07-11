@@ -50,7 +50,7 @@ export const DASHBOARD_WIDGETS: DashboardWidget[] = [
             style={{
               fontSize: 13,
               fontWeight: 700,
-              color: palette.navy,
+              color: "var(--rcrm-text)",
               textTransform: "uppercase",
               letterSpacing: "0.06em",
             }}

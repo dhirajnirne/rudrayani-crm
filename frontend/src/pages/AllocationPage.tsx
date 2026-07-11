@@ -563,9 +563,9 @@ function AllocatedList() {
                       Reason: {log.reason}
                     </Typography.Text>
                   )}
-                  <div style={{ fontSize: 12, color: "#888" }}>
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                     by {log.allocated_by_name} · {new Date(log.created_at).toLocaleString("en-IN")}
-                  </div>
+                  </Typography.Text>
                 </div>
               ),
             }))}
