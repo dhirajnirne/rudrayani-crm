@@ -21,7 +21,8 @@
     "seed:admin": "tsx src/migrations/seed_admin.ts",
     "seed:demo": "tsx src/migrations/seed_demo.ts",
     "seed:payments": "tsx src/migrations/seed_payments.ts",
-    "seed:activity": "tsx src/migrations/seed_hero_activity.ts"
+    "seed:activity": "tsx src/migrations/seed_hero_activity.ts",
+    "seed:real": "tsx src/migrations/seed_real_data.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1080.0",
