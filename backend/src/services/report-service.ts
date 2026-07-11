@@ -104,6 +104,13 @@ export function monthDays(month: string, now = new Date()): MonthDays {
   return { in_month: inMonth, elapsed, left: inMonth - elapsed };
 }
 
+/** Is `month` ('YYYY-MM' or 'YYYY-MM-01') the current calendar month in IST? */
+function isCurrentMonth(month: string, now = new Date()): boolean {
+  const [y, m] = month.split("-").map(Number);
+  const istNow = new Date(now.toLocaleString("en-US", { timeZone: IST }));
+  return y === istNow.getFullYear() && m === istNow.getMonth() + 1;
+}
+
 /** WHERE fragments for the snapshot base under the resolved filters. */
 function baseConditions(filters: ReportFilters, params: unknown[]): string[] {
   const conditions: string[] = [];
@@ -143,6 +150,95 @@ function baseConditions(filters: ReportFilters, params: unknown[]): string[] {
     conditions.push(`c.status = $${params.length}`);
   }
   return conditions;
+}
+
+/**
+ * WHERE fragments against the LIVE `customers` table — same shape as
+ * baseConditions() but for the current month, which has no frozen snapshot
+ * to read (Phase 8 computed-default target).
+ */
+function liveConditions(filters: ReportFilters, params: unknown[]): string[] {
+  const conditions: string[] = [];
+  if (filters.company_id) {
+    params.push(filters.company_id);
+    conditions.push(`c.company_id = $${params.length}`);
+  }
+  if (filters.branch_id) {
+    params.push(filters.branch_id);
+    conditions.push(`tm.branch_id = $${params.length}`);
+  }
+  if (filters.team_id) {
+    params.push(filters.team_id);
+    conditions.push(`c.assigned_team_id = $${params.length}`);
+  }
+  if (filters.agent_id) {
+    params.push(filters.agent_id);
+    conditions.push(`c.assigned_agent_id = $${params.length}`);
+  }
+  if (filters.product) {
+    params.push(filters.product);
+    conditions.push(
+      `(lower(c.product) = lower($${params.length}) OR EXISTS (
+          SELECT 1 FROM products pr
+           WHERE pr.company_id = c.company_id
+             AND lower(pr.raw_label) = lower(c.product)
+             AND lower(pr.canonical_label) = lower($${params.length})))`,
+    );
+  }
+  if (filters.bucket) {
+    params.push(filters.bucket);
+    conditions.push(`lower(c.bucket) = lower($${params.length})`);
+  }
+  if (filters.status) {
+    params.push(filters.status);
+    conditions.push(`c.status = $${params.length}`);
+  }
+  return conditions;
+}
+
+/**
+ * Book totals (SUM(emi), SUM(pos), COUNT) under the resolved scope/dimension
+ * filters — current month reads the live `customers` table (up to date);
+ * past months read the frozen `customer_month_snapshots` row for that month
+ * (what the book looked like then). Backs the Phase 8 computed-default
+ * collection target and the pos_total secondary stat.
+ */
+export interface BookTotals {
+  count: number;
+  emi_total: number;
+  pos_total: number;
+}
+
+export async function bookTotals(agencyId: string, filters: ReportFilters): Promise<BookTotals> {
+  if (isCurrentMonth(filters.month.slice(0, 7))) {
+    const params: unknown[] = [agencyId];
+    const conditions = liveConditions(filters, params);
+    const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
+    const { rows } = await pool.query(
+      `SELECT COUNT(*)::int AS n, COALESCE(SUM(c.emi), 0)::float AS emi_total,
+              COALESCE(SUM(c.pos), 0)::float AS pos_total
+         FROM customers c
+         JOIN companies co ON co.id = c.company_id AND co.agency_id = $1
+         LEFT JOIN teams tm ON tm.id = c.assigned_team_id
+        WHERE true ${where}`,
+      params,
+    );
+    return { count: rows[0].n, emi_total: rows[0].emi_total, pos_total: rows[0].pos_total };
+  }
+  const params: unknown[] = [agencyId, filters.month];
+  const conditions = baseConditions(filters, params);
+  const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
+  const { rows } = await pool.query(
+    `SELECT COUNT(*)::int AS n, COALESCE(SUM(s.emi), 0)::float AS emi_total,
+            COALESCE(SUM(s.pos), 0)::float AS pos_total
+       FROM customer_month_snapshots s
+       JOIN companies co ON co.id = s.company_id AND co.agency_id = $1
+       JOIN customers c ON c.id = s.customer_id
+       LEFT JOIN teams tm ON tm.id = s.assigned_team_id
+      WHERE s.month = $2::date ${where}`,
+    params,
+  );
+  return { count: rows[0].n, emi_total: rows[0].emi_total, pos_total: rows[0].pos_total };
 }
 
 /** Is there a next-month allocation file to compare against (transition basis)? */
@@ -372,8 +468,23 @@ export async function resolveTarget(
     return { target_amount: rows[0].target_amount, target_count: rows[0].target_count };
   };
 
+  /**
+   * Phase 8: when nobody has set a manual collection target at any scope
+   * level above, fall back to the book's own EMI schedule -- SUM(emi) over
+   * the same scope/company/product/bucket filters (never for the other
+   * metrics, which are already POS-denominated via the classified
+   * aggregates). An empty book returns null, not a fabricated 0.
+   */
+  const computedDefault = async (): Promise<TargetValue> => {
+    if (metric !== "collection") return { target_amount: null, target_count: null };
+    const totals = await bookTotals(agencyId, filters);
+    return totals.count === 0
+      ? { target_amount: null, target_count: null }
+      : { target_amount: totals.emi_total, target_count: totals.count };
+  };
+
   if (filters.agent_id) {
-    return (await exact("agent", filters.agent_id)) ?? { target_amount: null, target_count: null };
+    return (await exact("agent", filters.agent_id)) ?? (await computedDefault());
   }
   if (filters.team_id) {
     return (
@@ -382,7 +493,8 @@ export async function resolveTarget(
         "agent",
         "JOIN users u ON u.id = t.scope_id AND u.team_id = $PARENT",
         filters.team_id,
-      )) ?? { target_amount: null, target_count: null }
+      )) ??
+      (await computedDefault())
     );
   }
   if (filters.branch_id) {
@@ -397,14 +509,16 @@ export async function resolveTarget(
         "agent",
         "JOIN users u ON u.id = t.scope_id AND u.branch_id = $PARENT",
         filters.branch_id,
-      )) ?? { target_amount: null, target_count: null }
+      )) ??
+      (await computedDefault())
     );
   }
   return (
     (await exact("agency", null)) ??
     (await childSum("branch")) ??
     (await childSum("team")) ??
-    (await childSum("agent")) ?? { target_amount: null, target_count: null }
+    (await childSum("agent")) ??
+    (await computedDefault())
   );
 }
 
@@ -476,7 +590,10 @@ export async function depositsByRange(
   return { collected, deposited, pending: collected - deposited };
 }
 
-async function depositTotals(agencyId: string, filters: ReportFilters): Promise<DepositTotals> {
+// Exported (not just used by dashboard()) so the branch drill-down (Phase 9)
+// can pull the same collected/deposited/pending math for a branch_id scope
+// without re-deriving the payment-conditions logic.
+export async function depositTotals(agencyId: string, filters: ReportFilters): Promise<DepositTotals> {
   const params: unknown[] = [agencyId, filters.month];
   const conditions = paymentConditions(filters, params);
   const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
@@ -495,6 +612,82 @@ async function depositTotals(agencyId: string, filters: ReportFilters): Promise<
   const collected = rows[0].collected as number;
   const deposited = rows[0].deposited as number;
   return { collected, deposited, pending: collected - deposited };
+}
+
+export interface DepositRow {
+  id: string;
+  amount: number;
+  mode: string | null;
+  paid_at: string;
+  deposited_at: string | null;
+  customer_name: string;
+  loan_number: string;
+  company_name: string;
+  collected_by_name: string;
+  deposited_by_name: string | null;
+}
+
+export interface DepositListFilters {
+  deposited?: boolean;
+  month?: string; // 'YYYY-MM-01'
+  agent_id?: string;
+  company_id?: string;
+  branch_id?: string;
+  limit?: number;
+}
+
+/**
+ * Individual payment rows behind the deposit reconciliation UI (Phase 5.4)
+ * and the branch drill-down's Deposits section (Phase 9) -- factored out of
+ * the /payments/deposits route so both share one query instead of drifting.
+ * branch_id filters by the COLLECTING agent's branch (u.branch_id), the same
+ * "credit whoever recorded the payment" semantic paymentConditions() uses.
+ */
+export async function listDeposits(
+  agencyId: string,
+  filters: DepositListFilters,
+): Promise<DepositRow[]> {
+  const conditions = ["co.agency_id = $1"];
+  const params: unknown[] = [agencyId];
+  if (filters.deposited === true) conditions.push("p.deposited_at IS NOT NULL");
+  if (filters.deposited === false) conditions.push("p.deposited_at IS NULL");
+  if (filters.month) {
+    params.push(filters.month);
+    conditions.push(
+      `p.paid_at >= ($${params.length}::date::timestamp AT TIME ZONE 'Asia/Kolkata')
+       AND p.paid_at < ((($${params.length}::date + interval '1 month')::date)::timestamp AT TIME ZONE 'Asia/Kolkata')`,
+    );
+  }
+  if (filters.agent_id) {
+    params.push(filters.agent_id);
+    conditions.push(`p.collected_by_user_id = $${params.length}`);
+  }
+  if (filters.company_id) {
+    params.push(filters.company_id);
+    conditions.push(`c.company_id = $${params.length}`);
+  }
+  if (filters.branch_id) {
+    params.push(filters.branch_id);
+    conditions.push(`u.branch_id = $${params.length}`);
+  }
+  params.push(filters.limit ?? 500);
+
+  const { rows } = await pool.query(
+    `SELECT p.id, p.amount, p.mode, p.paid_at, p.deposited_at,
+            c.customer_name, c.loan_number, co.name AS company_name,
+            u.full_name AS collected_by_name,
+            du.full_name AS deposited_by_name
+       FROM payments p
+       JOIN customers c ON c.id = p.customer_id
+       JOIN companies co ON co.id = c.company_id
+       JOIN users u ON u.id = p.collected_by_user_id
+       LEFT JOIN users du ON du.id = p.deposited_by_user_id
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY p.paid_at DESC
+      LIMIT $${params.length}`,
+    params,
+  );
+  return rows as DepositRow[];
 }
 
 export interface MetricBlock {
@@ -525,6 +718,12 @@ export interface DashboardResult {
     target_pct: number | null;
     run_rate_current: number | null;
     run_rate_required: number | null;
+    /** Phase 8: total principal outstanding of the scope's book -- context
+     *  for the target, never baked into it. */
+    pos_total: number;
+    /** target_amount as a % of pos_total -- how much of the book's
+     *  outstanding principal this month's EMI target represents. */
+    emi_over_pos_pct: number | null;
   };
   deposits: DepositTotals;
   trail: { allocated_count: number; uploaded_count: number; pct: number | null };
@@ -580,6 +779,7 @@ export async function dashboard(
     collectionTarget.target_amount != null
       ? Math.max(collectionTarget.target_amount - agg.collected_amount, 0)
       : null;
+  const collectionBook = await bookTotals(user.agency_id, filters);
 
   return {
     month: filters.month.slice(0, 7),
@@ -626,6 +826,11 @@ export async function dashboard(
       run_rate_required:
         collectionTarget.target_amount != null
           ? (Math.max(collectionTarget.target_amount - deposits.collected, 0) / Math.max(days.left, 1))
+          : null,
+      pos_total: collectionBook.pos_total,
+      emi_over_pos_pct:
+        collectionTarget.target_amount != null
+          ? pct(collectionTarget.target_amount, collectionBook.pos_total)
           : null,
     },
     deposits,

@@ -6,6 +6,7 @@ import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
 import { detectPaymentNormalization } from "../services/bucket-movement-service";
+import { listDeposits } from "../services/report-service";
 import { getStorage } from "../services/storage/storage-provider";
 
 /**
@@ -183,45 +184,20 @@ router.get(
           .optional(),
         agent_id: z.string().uuid().optional(),
         company_id: z.string().uuid().optional(),
+        // Phase 9: branch drill-down reuses this same list -- filters by the
+        // COLLECTING agent's branch (see listDeposits()).
+        branch_id: z.string().uuid().optional(),
       })
       .parse(req.query);
 
-    const conditions = ["co.agency_id = $1"];
-    const params: unknown[] = [req.user!.agency_id];
-    if (query.deposited === "true") conditions.push("p.deposited_at IS NOT NULL");
-    if (query.deposited === "false") conditions.push("p.deposited_at IS NULL");
-    if (query.month) {
-      params.push(`${query.month}-01`);
-      conditions.push(
-        `p.paid_at >= ($${params.length}::date::timestamp AT TIME ZONE 'Asia/Kolkata')
-         AND p.paid_at < ((($${params.length}::date + interval '1 month')::date)::timestamp AT TIME ZONE 'Asia/Kolkata')`,
-      );
-    }
-    if (query.agent_id) {
-      params.push(query.agent_id);
-      conditions.push(`p.collected_by_user_id = $${params.length}`);
-    }
-    if (query.company_id) {
-      params.push(query.company_id);
-      conditions.push(`c.company_id = $${params.length}`);
-    }
-
-    const { rows } = await pool.query(
-      `SELECT p.id, p.amount, p.mode, p.paid_at, p.deposited_at,
-              c.customer_name, c.loan_number, co.name AS company_name,
-              u.full_name AS collected_by_name,
-              du.full_name AS deposited_by_name
-         FROM payments p
-         JOIN customers c ON c.id = p.customer_id
-         JOIN companies co ON co.id = c.company_id
-         JOIN users u ON u.id = p.collected_by_user_id
-         LEFT JOIN users du ON du.id = p.deposited_by_user_id
-        WHERE ${conditions.join(" AND ")}
-        ORDER BY p.paid_at DESC
-        LIMIT 500`,
-      params,
-    );
-    res.json({ payments: rows });
+    const payments = await listDeposits(req.user!.agency_id, {
+      deposited: query.deposited === undefined ? undefined : query.deposited === "true",
+      month: query.month ? `${query.month}-01` : undefined,
+      agent_id: query.agent_id,
+      company_id: query.company_id,
+      branch_id: query.branch_id,
+    });
+    res.json({ payments });
   }),
 );
 
