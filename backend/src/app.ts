@@ -20,6 +20,7 @@ import dashboardPreferencesRoutes from "./routes/dashboard-preferences";
 import dayPlanRoutes from "./routes/day-plan";
 import dispositionRoutes from "./routes/dispositions";
 import employeeRoutes from "./routes/employees";
+import fieldConfigRoutes from "./routes/field-config";
 import fieldVisitRoutes from "./routes/field-visits";
 import healthRoutes from "./routes/health";
 import importReviewRoutes from "./routes/import-reviews";
@@ -76,6 +77,7 @@ export function createApp() {
   app.use("/api/correction-requests", correctionRequestRoutes);
   app.use("/api/reminders", reminderRoutes);
   app.use("/api/buckets", bucketRoutes);
+  app.use("/api/field-config", fieldConfigRoutes);
   app.use("/api/targets", targetRoutes);
   app.use("/api/reports", reportRoutes);
   app.use("/api/dashboard-preferences", dashboardPreferencesRoutes);

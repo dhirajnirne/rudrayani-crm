@@ -3,58 +3,39 @@ import type { PoolClient } from "pg";
 import { pool } from "../config/db";
 import { HttpError } from "../middleware/error-handler";
 import { detectAllocationConfirmation } from "./bucket-movement-service";
+import { resolveFieldCatalog, type FieldCatalogEntry } from "./field-config-service";
 
-/** System fields an Excel column can map to (brief Section 4). */
-export const SYSTEM_FIELDS = [
-  "loan_number",
-  "customer_name",
-  "mobile_number",
-  "product",
-  "bucket",
-  "due_amount",
-  "pos", // principal outstanding -- distinct from due_amount (owner feedback round, Phase 1)
-  "emi",
-  "emi_due_date", // this cycle's EMI due date -- drives the independent DPD cross-check (Phase 7)
-  "agent_phone", // assigns the loan to the agent with this phone (optional)
-  "address",     // stored in custom_fields.address (no native column)
-] as const;
-export type SystemField = (typeof SYSTEM_FIELDS)[number];
-// Owner feedback round, Phase 2: every core loan-ledger system field must now
-// be MAPPED to a column at import time -- previously only loan_number/
-// customer_name were, and everything else was silently optional in the
-// mapping wizard. This is a template-completeness requirement (a column must
-// be assigned to each field), separate from REQUIRED_FIELDS below, which
-// governs whether an individual ROW's cell may be blank.
+// Owner feedback round, Phase 10: the field catalog (which keys exist, which
+// are required-to-map) used to be the compile-time SYSTEM_FIELDS /
+// REQUIRED_MAPPED_FIELDS consts below. Both are now resolved at runtime per
+// company from system_field_definitions + company_field_settings (see
+// field-config-service.ts) so an agency admin can add fields and a company
+// admin can enable/require/reorder them without a code change or deploy.
 //
-// emi_due_date is deliberately EXCLUDED: it's a bonus capability layered on
-// top of the core ledger ("drives the independent DPD cross-check", not core
-// loan data), and a company may not share due dates from day one -- proven
-// by e2e-allocation-lifecycle.test.ts's own scenario, where Alpha/Beta's
-// first two monthly files have no due-date column at all and only start
-// sending one in month 3 ("a company can start sharing due dates any time").
-// Forcing it here would make onboarding impossible for any company that
-// hasn't started sharing due dates yet, which is a real and current scenario,
-// not a hypothetical -- a materially worse regression than what was asked.
-export const REQUIRED_MAPPED_FIELDS: SystemField[] = [
-  "loan_number",
-  "customer_name",
-  "mobile_number",
-  "product",
-  "bucket",
-  "due_amount",
-  "pos",
-  "emi",
-  "agent_phone",
-];
-/** Fields whose per-row cell value may never be blank, once mapped. */
-const REQUIRED_FIELDS: SystemField[] = ["loan_number", "customer_name"];
-const NUMERIC_FIELDS: SystemField[] = ["due_amount", "pos", "emi"];
-const DATE_FIELDS: SystemField[] = ["emi_due_date"];
-// Fields that route into custom_fields rather than a native customers column.
-const CUSTOM_FIELDS_PASSTHROUGH: SystemField[] = ["address"];
+// A field's routing (native customers column vs. custom_fields JSON,
+// numeric/date/text parsing) is data-driven off FieldCatalogEntry.field_type
+// and .storage_column, NOT a hardcoded array anymore -- see
+// classifyMappingRow() below. The one exception is `agent_phone`: it never
+// gets its own customers column (storage_column = NULL, field_type =
+// 'resolver') because it isn't stored data at all -- it's a lookup key
+// resolved against `users.phone` to set assigned_agent_id/assigned_team_id
+// (see resolveAgents()/commitImport() below). It's treated like a plain text
+// field in the per-row mapping loop (assigned straight onto MappedRow, not
+// routed to custom_fields) purely because field_type === 'resolver' skips
+// the "storage_column is NULL => custom_fields" branch, same as it always
+// implicitly did when CUSTOM_FIELDS_PASSTHROUGH was a hardcoded array that
+// simply didn't list it.
 
-/** {"Excel Column Header": "system_field"} — unmapped headers go to custom_fields. */
-export type ColumnMapping = Record<string, SystemField>;
+/** Fields whose per-row cell value may never be blank, once mapped -- this
+ *  is a structural pipeline requirement (loan_number is the dedup/match key,
+ *  customer_name is the identity fallback shown everywhere), not a
+ *  per-company configurable, so it stays a fixed pair rather than reading
+ *  off the catalog (mirrors STRUCTURALLY_REQUIRED_FIELDS in
+ *  field-config-service.ts, which the admin UI uses to block disabling them). */
+const REQUIRED_FIELDS = ["loan_number", "customer_name"];
+
+/** {"Excel Column Header": "field_key"} — unmapped headers go to custom_fields. */
+export type ColumnMapping = Record<string, string>;
 
 export interface ParsedSheet {
   columns: string[];
@@ -170,19 +151,37 @@ export interface ValidationResult {
   unmappedColumns: string[];
 }
 
+/**
+ * Classifies how one mapped field's raw cell value should be handled, purely
+ * off catalog metadata -- replaces the old NUMERIC_FIELDS/DATE_FIELDS/
+ * CUSTOM_FIELDS_PASSTHROUGH hardcoded arrays. An admin-added custom field
+ * (is_core=false, storage_column=NULL) automatically falls into 'custom',
+ * exactly how "address" always behaved.
+ */
+function classifyField(entry: FieldCatalogEntry): "numeric" | "date" | "custom" | "text" {
+  if (entry.field_type === "resolver") return "text"; // agent_phone: not stored, resolved elsewhere
+  if (entry.storage_column === null) return "custom";
+  if (entry.field_type === "numeric") return "numeric";
+  if (entry.field_type === "date") return "date";
+  return "text";
+}
+
 export async function validateRows(
   companyId: string,
   sheet: ParsedSheet,
   mapping: ColumnMapping,
 ): Promise<ValidationResult> {
+  const catalog = await resolveFieldCatalog(companyId);
+  const byKey = new Map(catalog.filter((f) => f.is_enabled).map((f) => [f.field_key, f]));
+
   const mappedFields = Object.values(mapping);
-  for (const required of REQUIRED_MAPPED_FIELDS) {
-    if (!mappedFields.includes(required)) {
-      throw new HttpError(400, `The template must map a column to "${required}"`);
+  for (const entry of catalog) {
+    if (entry.is_enabled && entry.is_required && !mappedFields.includes(entry.field_key)) {
+      throw new HttpError(400, `The template must map a column to "${entry.field_key}"`);
     }
   }
   for (const [column, field] of Object.entries(mapping)) {
-    if (!SYSTEM_FIELDS.includes(field)) {
+    if (!byKey.has(field)) {
       throw new HttpError(400, `Unknown system field "${field}" for column "${column}"`);
     }
     if (!sheet.columns.includes(column)) {
@@ -206,16 +205,18 @@ export async function validateRows(
 
     for (const [column, field] of Object.entries(mapping)) {
       const raw = record[column] ?? "";
-      if (CUSTOM_FIELDS_PASSTHROUGH.includes(field as SystemField)) {
+      const entry = byKey.get(field)!;
+      const kind = classifyField(entry);
+      if (kind === "custom") {
         if (raw) mapped.custom_fields[field] = raw;
-      } else if (NUMERIC_FIELDS.includes(field)) {
+      } else if (kind === "numeric") {
         const amount = parseAmount(raw);
         if (amount === "invalid") {
           problems.push(`"${column}" has a non-numeric value: "${raw}"`);
         } else {
           (mapped as Record<string, unknown>)[field] = amount;
         }
-      } else if (DATE_FIELDS.includes(field)) {
+      } else if (kind === "date") {
         const date = parseDueDate(raw);
         if (date === "invalid") {
           problems.push(`"${column}" has an unrecognized date value: "${raw}"`);

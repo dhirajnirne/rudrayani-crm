@@ -21,6 +21,7 @@ const DayPlanPage = lazy(() => import("./pages/DayPlanPage"));
 const DepositsPage = lazy(() => import("./pages/DepositsPage"));
 const DispositionsPage = lazy(() => import("./pages/DispositionsPage"));
 const EmployeesPage = lazy(() => import("./pages/EmployeesPage"));
+const FieldConfigPage = lazy(() => import("./pages/FieldConfigPage"));
 const ImportPage = lazy(() => import("./pages/ImportPage"));
 const ImportReviewPage = lazy(() => import("./pages/ImportReviewPage"));
 const MyRequestsPage = lazy(() => import("./pages/MyRequestsPage"));
@@ -64,6 +65,7 @@ export default function App() {
         <Route path="teams" element={<TeamsPage />} />
         <Route path="companies" element={<CompaniesPage />} />
         <Route path="buckets" element={<BucketsPage />} />
+        <Route path="field-config" element={<FieldConfigPage />} />
         <Route path="import" element={<ImportPage />} />
         <Route path="import-reviews" element={<ImportReviewPage />} />
         <Route path="customers" element={<CustomersPage />} />

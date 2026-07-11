@@ -17,6 +17,7 @@ import {
   LogoutOutlined,
   MoonOutlined,
   ScheduleOutlined,
+  SettingOutlined,
   ShopOutlined,
   SunOutlined,
   TeamOutlined,
@@ -88,6 +89,11 @@ export default function AppLayout() {
       key: "/buckets",
       icon: <FilterOutlined />,
       label: <Link to="/buckets">Buckets</Link>,
+    },
+    hasPermission("companies.manage") && {
+      key: "/field-config",
+      icon: <SettingOutlined />,
+      label: <Link to="/field-config">Field Config</Link>,
     },
     hasPermission("imports.manage") && {
       key: "/import",
