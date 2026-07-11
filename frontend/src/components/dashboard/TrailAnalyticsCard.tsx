@@ -1,4 +1,4 @@
-import { Card, Col, DatePicker, Row, Space, Spin, Typography, message } from "antd";
+import { Card, Col, DatePicker, Row, Space, Spin, theme, Typography, message } from "antd";
 import { Column } from "@ant-design/plots";
 import dayjs, { type Dayjs } from "dayjs";
 import { useEffect, useState } from "react";
@@ -19,13 +19,17 @@ interface TrailAnalytics {
   ptp_conversion_pct: number | null;
 }
 
+// Uses antd's resolved theme tokens (not the static light-only `palette`
+// import) so the tile background actually flips with light/dark mode --
+// see SummaryStat.tsx for the same fix and the bug it addresses.
 function Stat({ label, value }: { label: string; value: string }) {
+  const { token } = theme.useToken();
   return (
-    <div style={{ background: palette.background, borderRadius: 8, padding: "10px 14px" }}>
+    <div style={{ background: token.colorFillTertiary, borderRadius: 8, padding: "10px 14px" }}>
       <Typography.Text type="secondary" style={{ fontSize: 13 }}>
         {label}
       </Typography.Text>
-      <div className="money" style={{ fontSize: 20, fontWeight: 700 }}>
+      <div className="money" style={{ fontSize: 20, fontWeight: 700, color: token.colorText }}>
         {value}
       </div>
     </div>

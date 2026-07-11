@@ -91,7 +91,9 @@ export default function AttendancePage() {
       render: (name: string, r: AttendanceRecord) => (
         <div>
           <div style={{ fontWeight: 600 }}>{name}</div>
-          <div style={{ fontSize: 12, color: "#888" }}>{r.team_name ?? r.branch_name ?? "—"}</div>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {r.team_name ?? r.branch_name ?? "—"}
+          </Typography.Text>
         </div>
       ),
     },

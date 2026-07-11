@@ -1,4 +1,4 @@
-import { Alert, Button, Card, Form, Input, Steps, Typography, message } from "antd";
+import { Alert, Button, Card, Form, Input, Steps, theme, Typography, message } from "antd";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, errorMessage } from "../api/client";
@@ -9,6 +9,7 @@ export default function ForgotPasswordPage() {
   const [phone, setPhone] = useState("");
   const [devOtp, setDevOtp] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const { token } = theme.useToken();
 
   const requestOtp = async (values: { phone: string }) => {
     setSubmitting(true);
@@ -43,7 +44,7 @@ export default function ForgotPasswordPage() {
 
   return (
     <div
-      style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: "#f0f2f5" }}
+      style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: token.colorBgLayout }}
     >
       <Card style={{ width: 420 }}>
         <Typography.Title level={4}>Reset password</Typography.Title>

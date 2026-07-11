@@ -1,4 +1,4 @@
-import { Button, Card, Form, Input, Typography, message } from "antd";
+import { Button, Card, Form, Input, theme, Typography, message } from "antd";
 import { LockOutlined, PhoneOutlined } from "@ant-design/icons";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -9,6 +9,7 @@ export default function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const [submitting, setSubmitting] = useState(false);
+  const { token } = theme.useToken();
 
   const onFinish = async (values: { phone: string; password: string }) => {
     setSubmitting(true);
@@ -28,7 +29,7 @@ export default function LoginPage() {
         minHeight: "100vh",
         display: "grid",
         placeItems: "center",
-        background: "#f0f2f5",
+        background: token.colorBgLayout,
       }}
     >
       <Card style={{ width: 380 }}>

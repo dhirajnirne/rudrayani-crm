@@ -1,4 +1,4 @@
-import { Card, Col, DatePicker, Row, Select, Space, Spin, Tag, Typography, message } from "antd";
+import { Card, Col, DatePicker, Row, Select, Space, Spin, Tag, theme, Typography, message } from "antd";
 import { Column } from "@ant-design/plots";
 import dayjs, { type Dayjs } from "dayjs";
 import { useEffect, useMemo, useState } from "react";
@@ -40,6 +40,7 @@ interface TrendPoint {
  * Incentive Calculator.
  */
 export default function ManagementDashboardPage() {
+  const { token } = theme.useToken();
   const [month, setMonth] = useState<Dayjs>(dayjs());
   const [companyId, setCompanyId] = useState<string>();
   const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
@@ -263,7 +264,7 @@ export default function ManagementDashboardPage() {
                   <Col xs={12} md={6} key={label}>
                     <div
                       style={{
-                        background: palette.background,
+                        background: token.colorFillTertiary,
                         borderRadius: 8,
                         padding: "12px 16px",
                         opacity: 0.6,
@@ -288,6 +289,7 @@ export default function ManagementDashboardPage() {
 }
 
 function AgentRankCard({ title, rows }: { title: string; rows: AgentRow[] }) {
+  const { token } = theme.useToken();
   return (
     <Card size="small" title={title}>
       {rows.length === 0 ? (
@@ -303,7 +305,7 @@ function AgentRankCard({ title, rows }: { title: string; rows: AgentRow[] }) {
                 alignItems: "center",
                 padding: "6px 8px",
                 borderRadius: 6,
-                background: i % 2 === 0 ? palette.background : "transparent",
+                background: i % 2 === 0 ? token.colorFillTertiary : "transparent",
               }}
             >
               <span>

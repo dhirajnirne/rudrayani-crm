@@ -79,6 +79,10 @@ screens/menu items based on what a person is allowed to do.
 | **Day Plan** | A web page for managers showing, for any day, every agent's attendance, PTPs due, reminders due, and activity so far. |
 | **Attachment / Document** | A supporting file (photo or PDF) uploaded against a customer — e.g. a KYC document or agreement copy — separate from payment/visit proof photos. |
 | **Custom Field / Detail Field** | Any column from the original import file that didn't map to a standard system field is kept as a "custom field" so no data is lost; some can be flagged to also show on the Customer Detail view as a "detail field". |
+| **POS (Principal Outstanding)** | The remaining loan principal a customer still owes — distinct from **Due Amount**, which is the current *overdue arrears* (what's actually late). Portfolio-size figures (e.g. the Dashboard's "Portfolio (POS)" tile, Management Dashboard's "Total Portfolio") are measured in POS; the Resolution/Roll Back/Normalization/Recovery metrics are also POS-denominated, while Due Amount stays purely a "how much is currently overdue" figure. |
+| **Correction Request** | A request an agent raises to fix a mistake in one of their own already-saved records (a payment amount, call remark, or PTP detail) — there's no direct edit button once saved. An Admin/Ops Manager approves (applying the change) or rejects it. Only a narrow, safe list of fields can ever be corrected this way — never the customer, the collecting agent, or any timestamp. |
+| **Manager / Org Chart** | Every employee can optionally have a **Manager** (any other employee) purely for reporting-line visibility — separate from Team/Branch structure and from the Team Leader capability. Shown as a tree on the **Org Chart** page. |
+| **Field Definition** | An admin-configurable catalog entry describing an import column (its label, type, and whether it's a core field every company must have or an optional custom one) — configured per-company on the **Field Config** page, and what the Import wizard's column-mapping step offers. |
 
 ---
 
@@ -146,6 +150,11 @@ has rather than forcing a single role.
 The left-hand menu only shows pages you have permission to open. Every page
 below lists which permission unlocks it.
 
+Every web page also has a **sun/moon icon** in the top-right header — toggles
+between light and dark mode. Your choice is remembered on this device, and
+defaults to your operating system's own light/dark setting the first time
+you open the app.
+
 ### Dashboard *(everyone — no special permission)*
 Your home page after login. What you see depends on your role:
 - **Agency Admin / Ops Manager / Team Leader** (anyone with `reports.view`):
@@ -168,6 +177,36 @@ Your home page after login. What you see depends on your role:
 - **Telecaller / Field Agent** (no `reports.view`): a simpler
   **"My Performance — &lt;your name&gt;"** view — just your own numbers, no
   filters. (The same view is also available on the mobile app.)
+
+For exactly how every number on this page is calculated, see
+`docs/metrics-formulas.md`.
+
+### Management Dashboard *(`reports.view`)*
+A second, KPI-focused view of the same underlying data as the Dashboard,
+aimed at leadership rather than day-to-day monitoring — one screen with
+every headline number instead of drilling through cards. Includes: Total
+Portfolio (POS), Collected Today vs. MTD, Collection %, pending PTP value,
+broken PTP count, Outstanding Balance, Active Agents/Cases, EMI vs.
+Settlement collections, Field vs. Telecalling collections, a daily Recovery
+Trend chart, the same product/company/branch/team/agent Breakdown table as
+the main Dashboard, and Top 10 / Bottom 10 agent leaderboards by amount
+collected. A "Coming Soon" strip lists KPIs not yet built (Revenue & Agency
+Commission, Compliance Alerts, Legal Cases Status, Incentive Calculator).
+
+### Org Chart *(`employees.view`)*
+A reporting-line tree, separate from Team/Branch structure: each employee
+can optionally have a **Manager** (any other employee) purely for "who
+reports to whom" visibility. Shown as an expandable tree; anyone whose
+manager isn't visible in the current view is shown as a root with a "reports
+to X" note.
+
+### Field Config *(`companies.manage`)*
+Admin control over what columns the Import wizard can map to. Lists every
+**Field Definition** — the core fields every company must have (Loan
+Number, Customer Name, Due Amount, etc. — these can never be deleted, only
+disabled per company) plus any custom fields your agency has added, which
+become mappable in the Import wizard the moment they're enabled for a
+company.
 
 ### Employees *(`employees.view`)*
 Your staff directory. Search by name/phone. Add a new employee (name,
@@ -258,6 +297,15 @@ blank to return the customer to the unallocated pool); **Reject** leaves
 the customer with their current agent. Nothing happens automatically until
 you decide.
 
+### Correction Requests *(`imports.review`)*
+Agents can't directly edit a payment, call log, or PTP once saved — instead
+they raise a Correction Request (from the mobile app) proposing a fix (e.g.
+a wrong amount, a garbled remark) with a reason. This page lists pending/
+approved/rejected requests; **Approve** applies the proposed change to the
+record, **Reject** leaves it untouched. Only a narrow, safe set of fields
+can ever be proposed per record type — never the customer, the collecting
+agent, or any timestamp.
+
 ### Dispositions *(`dispositions.manage`)*
 The master list of call-outcome codes agents choose from when logging a
 call. Add/edit a code: Action Code, Result Code, Category, Description, a
@@ -284,12 +332,25 @@ For any date, one row per agent: attendance status, PTPs due (count + ₹),
 reminders due (count), calls made, payments collected. Expand a row to see
 the actual customer list behind those counts.
 
+### Attendance *(`tracking.view`)*
+The detailed, filterable, exportable attendance log — every punch-in/punch-
+out record with duration, filterable by date range, branch, team, agent, or
+"on-duty only," with an Export button. Where **Day Plan** is the daily
+at-a-glance summary, Attendance is the full audit-trail record behind it.
+
 ### Targets *(`targets.manage`)*
 Set monthly targets. Choose the scope level (Per agent / Per team / Per
 branch / Whole agency), edit numbers directly in the table (Collection,
 Resolution, Roll Back, Normalization, Recovery — in ₹ or count), or bulk-
 import from Excel. **Save changes** only enables once you've edited
 something; clearing a cell removes that target entirely.
+
+If nobody has set a manual **Collection** target at any scope level, the
+Dashboard doesn't just show "no target" — it falls back to the book's own
+EMI schedule (the sum of each customer's EMI) as a computed default, so
+every scope always has a sensible collection benchmark even before anyone
+sets one manually. This fallback applies only to Collection; the other four
+metrics show no target until one is explicitly set.
 
 ### Deposits *(`payments.deposit`)*
 Reconcile field-collected cash. Filter by month/status/company, multi-
@@ -389,11 +450,23 @@ upload.
   taken, payments collected today.
 
 ### My Performance
-Your own scorecard for the current month: collection vs. target with a
-progress bar and "amount needed per day to hit target," your account
-count and total outstanding, how much of your book you've worked this
-month, and per-metric breakdowns (Resolution, Roll Back, Normalization,
-Recovery). Read-only.
+Your own scorecard for the current month, tailored to your role — all
+three pull from the same `/reports/dashboard` and `/tracking/team-day`
+endpoints the web Dashboard and Day Plan use, just self- or team-scoped
+automatically:
+- **Telecaller** — collection vs. target with a progress bar and "amount
+  needed per day to hit target," calls made today with a connected-call
+  rate (a call counts as connected unless it's Not Connected or Out of
+  Service), and per-metric breakdowns (Resolution, Roll Back,
+  Normalization, Recovery).
+- **Field Agent** — the same collection/target scorecard, plus today's
+  attendance/GPS status and receipts captured, since field work is
+  visit-driven rather than call-driven.
+- **Team Leader** — a team-wide "today" snapshot: every member's
+  attendance/GPS status, cash vs. online collections, and field visits, in
+  one screen (the same data behind the web Day Plan, without leaving the
+  app).
+All three are read-only.
 
 ### Punching In / Out & Location Tracking
 Punching in captures your location, tells the server you're on shift, and
