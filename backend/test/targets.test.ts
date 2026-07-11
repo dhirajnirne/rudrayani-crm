@@ -233,3 +233,129 @@ describe("monthly targets", () => {
     expect(Number(agencyRow.target_amount)).toBe(900000);
   });
 });
+
+/**
+ * Phase 8: when nobody has set a manual collection target at a scope, the
+ * dashboard falls back to a computed default -- SUM(emi) over that scope's
+ * book -- instead of showing a blank target. Exercised via
+ * /api/reports/dashboard since that's resolveTarget()'s real caller.
+ *
+ * By this point in the file, month 2026-07's agency-level collection target
+ * (set then deleted in the "monthly targets" describe block above) is gone,
+ * and no branch/team/agent-level collection target for 2026-07 was ever
+ * created -- a clean slate for the computed-default tier at every scope.
+ */
+describe("collection target computed default (Phase 8)", () => {
+  let companyId: string;
+  let histCompanyId: string;
+
+  beforeAll(async () => {
+    const company = await pool.query(
+      "INSERT INTO companies (agency_id, name) VALUES ($1, 'Targets NBFC') RETURNING id",
+      [agencyId],
+    );
+    companyId = company.rows[0].id;
+    const histCompany = await pool.query(
+      "INSERT INTO companies (agency_id, name) VALUES ($1, 'Targets NBFC Hist') RETURNING id",
+      [agencyId],
+    );
+    histCompanyId = histCompany.rows[0].id;
+
+    // Live book (current month, real clock is 2026-07) -- computed default
+    // must read straight off `customers`, not a snapshot.
+    await pool.query(
+      `INSERT INTO customers
+         (company_id, loan_number, customer_name, product, bucket, due_amount, emi, pos,
+          assigned_team_id, assigned_agent_id)
+       VALUES ($1, 'TGT-LIVE-01', 'Live One', 'CVL', 'Current', 50000, 4000, 50000, $2, $3),
+              ($1, 'TGT-LIVE-02', 'Live Two', 'CVL', 'Current', 30000, 2500, 30000, $2, $3)`,
+      [companyId, teamId, agentId],
+    );
+
+    // Historical book: a June 2026 snapshot with different emi/pos than the
+    // deliberately-wrong live customer row, proving the June lookup reads
+    // the frozen snapshot instead of today's live numbers.
+    const hist = await pool.query(
+      `INSERT INTO customers (company_id, loan_number, customer_name, product, due_amount, emi, pos)
+       VALUES ($1, 'TGT-HIST-01', 'Hist One', 'CVL', 1, 1, 1) RETURNING id`,
+      [histCompanyId],
+    );
+    await pool.query(
+      `INSERT INTO customer_month_snapshots
+         (customer_id, company_id, month, bucket, due_amount, pos, emi, product,
+          assigned_team_id, assigned_agent_id)
+       VALUES ($1, $2, '2026-06-01', '30', 9000, 90000, 9000, 'CVL', $3, $4)`,
+      [hist.rows[0].id, histCompanyId, teamId, agentId],
+    );
+  });
+
+  afterAll(async () => {
+    await pool.query("DELETE FROM customer_month_snapshots WHERE company_id IN ($1, $2)", [
+      companyId,
+      histCompanyId,
+    ]);
+    await pool.query("DELETE FROM customers WHERE company_id IN ($1, $2)", [
+      companyId,
+      histCompanyId,
+    ]);
+    await pool.query("DELETE FROM companies WHERE id IN ($1, $2)", [companyId, histCompanyId]);
+  });
+
+  it("agent scope: SUM(emi) over the live book, plus pos_total", async () => {
+    const res = await request(app)
+      .get(`/api/reports/dashboard?month=2026-07&agent_id=${agentId}&company_id=${companyId}`)
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.collection.target_amount).toBe(6500); // 4000 + 2500
+    expect(res.body.collection.pos_total).toBe(80000); // 50000 + 30000
+  });
+
+  it("team scope: same computed default, scoped to the team", async () => {
+    const res = await request(app)
+      .get(`/api/reports/dashboard?month=2026-07&team_id=${teamId}&company_id=${companyId}`)
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.collection.target_amount).toBe(6500);
+    expect(res.body.collection.pos_total).toBe(80000);
+  });
+
+  it("branch scope: same computed default, scoped to the branch", async () => {
+    const res = await request(app)
+      .get(`/api/reports/dashboard?month=2026-07&branch_id=${branchId}&company_id=${companyId}`)
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.collection.target_amount).toBe(6500);
+    expect(res.body.collection.pos_total).toBe(80000);
+  });
+
+  it("agency scope: same computed default, no manual target at any level", async () => {
+    const res = await request(app)
+      .get(`/api/reports/dashboard?month=2026-07&company_id=${companyId}`)
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.collection.target_amount).toBe(6500);
+    expect(res.body.collection.pos_total).toBe(80000);
+  });
+
+  it("empty book returns null, not a fabricated zero", async () => {
+    const res = await request(app)
+      .get(
+        `/api/reports/dashboard?month=2026-07&company_id=${companyId}&bucket=NoSuchBucket`,
+      )
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.collection.target_amount).toBeNull();
+    expect(res.body.collection.pos_total).toBe(0);
+  });
+
+  it("a past month reads the frozen snapshot, not live customer data", async () => {
+    const res = await request(app)
+      .get(
+        `/api/reports/dashboard?month=2026-06&agent_id=${agentId}&company_id=${histCompanyId}`,
+      )
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.collection.target_amount).toBe(9000); // snapshot emi, not live emi=1
+    expect(res.body.collection.pos_total).toBe(90000); // snapshot pos, not live pos=1
+  });
+});

@@ -6,6 +6,7 @@ import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
 import { parseWorkbook } from "../services/import-service";
+import { bookTotalsByScope } from "../services/report-service";
 
 /**
  * Monthly targets (Phase 5 dashboard). Admin/ops set a ₹ amount and/or an
@@ -92,6 +93,22 @@ router.get(
       params,
     );
     res.json({ targets: rows });
+  }),
+);
+
+/**
+ * Phase 8: book size (SUM(emi)/SUM(pos)) per entity at a scope level, so the
+ * Targets page can show what the computed-default collection target would
+ * be next to whatever's been manually entered.
+ */
+router.get(
+  "/book-totals",
+  asyncHandler(async (req, res) => {
+    const query = z
+      .object({ month: monthSchema, scope_type: z.enum(SCOPE_TYPES) })
+      .parse(req.query);
+    const totals = await bookTotalsByScope(req.user!.agency_id, query.month, query.scope_type);
+    res.json({ totals });
   }),
 );
 

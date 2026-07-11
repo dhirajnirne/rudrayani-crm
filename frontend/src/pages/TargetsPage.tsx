@@ -36,6 +36,10 @@ type TargetRow = {
   target_amount: string | null;
   target_count: number | null;
 };
+type BookTotal = { scope_id: string | null; count: number; emi_total: number; pos_total: number };
+
+/** ₹ with thousands separators, no decimals -- matches the InputNumber formatter below. */
+const formatRupees = (n: number) => `₹ ${Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
 
 /**
  * Monthly target entry (Phase 5): month + scope level -> one editable row per
@@ -50,6 +54,7 @@ export default function TargetsPage() {
   const [entities, setEntities] = useState<ScopeEntity[]>([]);
   const [saved, setSaved] = useState<TargetRow[]>([]);
   const [edits, setEdits] = useState<Record<string, number | null>>({});
+  const [bookTotals, setBookTotals] = useState<Record<string, BookTotal>>({});
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -100,6 +105,24 @@ export default function TargetsPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  /**
+   * Phase 8: the book size (SUM(emi)/SUM(pos)) per entity at this scope
+   * level -- shown alongside the Collection column so admins can see what
+   * the computed-default target would be while entering manual ones.
+   */
+  useEffect(() => {
+    api
+      .get("/targets/book-totals", { params: { month: month.format("YYYY-MM"), scope_type: scopeType } })
+      .then((res) => {
+        const map: Record<string, BookTotal> = {};
+        for (const t of res.data.totals as BookTotal[]) {
+          map[t.scope_id ?? "agency"] = t;
+        }
+        setBookTotals(map);
+      })
+      .catch((err) => message.error(errorMessage(err)));
+  }, [month, scopeType]);
 
   const savedValue = useCallback(
     (scopeId: string | null, metric: Metric): number | null => {
@@ -184,33 +207,58 @@ export default function TargetsPage() {
   const columns = useMemo(
     () => [
       { title: scopeType === "agent" ? "Agent" : scopeType === "team" ? "Team" : scopeType === "branch" ? "Branch" : "Scope", dataIndex: "name", fixed: "left" as const, width: 200 },
+      {
+        title: "Portfolio (POS)",
+        width: 160,
+        render: (_: unknown, entity: ScopeEntity) => {
+          const book = bookTotals[entity.scope_id ?? "agency"];
+          if (!book || book.count === 0) return <Typography.Text type="secondary">—</Typography.Text>;
+          return (
+            <Typography.Text type="secondary">
+              {formatRupees(book.pos_total)}
+              <br />
+              <span style={{ fontSize: 11 }}>{book.count} loan(s)</span>
+            </Typography.Text>
+          );
+        },
+      },
       ...METRICS.map((metric) => ({
         title: METRIC_LABELS[metric],
         width: 150,
-        render: (_: unknown, entity: ScopeEntity) => (
-          <InputNumber
-            style={{ width: "100%" }}
-            min={0}
-            placeholder="—"
-            value={currentValue(entity.scope_id, metric)}
-            formatter={
-              amountMode
-                ? (v) => (v === undefined || v === null || v === ("" as never) ? "" : `₹ ${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ","))
-                : undefined
-            }
-            parser={amountMode ? (v) => Number((v ?? "").replace(/[₹,\s]/g, "")) as never : undefined}
-            onChange={(v) =>
-              setEdits((prev) => ({
-                ...prev,
-                [cellKey(entity.scope_id, metric)]: v === null || v === undefined ? null : Number(v),
-              }))
-            }
-          />
-        ),
+        render: (_: unknown, entity: ScopeEntity) => {
+          const book = bookTotals[entity.scope_id ?? "agency"];
+          // Collection's computed-default tier (Phase 8) is SUM(emi) over
+          // this entity's book -- surfaced as a placeholder so admins can
+          // see what applies automatically when a cell is left blank.
+          const defaultHint =
+            metric === "collection" && amountMode && book && book.count > 0
+              ? `Default: ${formatRupees(book.emi_total)}`
+              : "—";
+          return (
+            <InputNumber
+              style={{ width: "100%" }}
+              min={0}
+              placeholder={defaultHint}
+              value={currentValue(entity.scope_id, metric)}
+              formatter={
+                amountMode
+                  ? (v) => (v === undefined || v === null || v === ("" as never) ? "" : `₹ ${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ","))
+                  : undefined
+              }
+              parser={amountMode ? (v) => Number((v ?? "").replace(/[₹,\s]/g, "")) as never : undefined}
+              onChange={(v) =>
+                setEdits((prev) => ({
+                  ...prev,
+                  [cellKey(entity.scope_id, metric)]: v === null || v === undefined ? null : Number(v),
+                }))
+              }
+            />
+          );
+        },
       })),
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [scopeType, amountMode, edits, saved],
+    [scopeType, amountMode, edits, saved, bookTotals],
   );
 
   return (
@@ -264,7 +312,7 @@ export default function TargetsPage() {
         dataSource={entities}
         columns={columns}
         pagination={false}
-        scroll={{ x: 950 }}
+        scroll={{ x: 1110 }}
         size="small"
       />
     </div>
