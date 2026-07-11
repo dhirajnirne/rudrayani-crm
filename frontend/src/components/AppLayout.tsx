@@ -7,6 +7,7 @@ import {
   CalendarOutlined,
   DashboardOutlined,
   AimOutlined,
+  ClusterOutlined,
   EnvironmentOutlined,
   FilterOutlined,
   WalletOutlined,
@@ -62,6 +63,11 @@ export default function AppLayout() {
       key: "/employees",
       icon: <UserOutlined />,
       label: <Link to="/employees">Employees</Link>,
+    },
+    hasPermission("employees.view") && {
+      key: "/org-chart",
+      icon: <ClusterOutlined />,
+      label: <Link to="/org-chart">Org Chart</Link>,
     },
     hasPermission("branches.manage") && {
       key: "/branches",

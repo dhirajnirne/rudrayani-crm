@@ -10,6 +10,7 @@ export interface User {
   agency_id: string;
   branch_id: string | null;
   team_id: string | null;
+  manager_id: string | null;
   full_name: string;
   phone: string;
   email: string | null;
@@ -18,6 +19,30 @@ export interface User {
 
 export interface Employee extends User {
   is_active: boolean;
+}
+
+/** A node in the org-chart tree (GET /employees/org-hierarchy). */
+export interface OrgAgent extends Employee {
+  manager_name: string | null;
+}
+
+export interface OrgTeam {
+  id: string;
+  name: string;
+  agents: OrgAgent[];
+}
+
+export interface OrgBranch {
+  id: string;
+  name: string;
+  teams: OrgTeam[];
+  unassigned_agents: OrgAgent[];
+}
+
+export interface OrgHierarchy {
+  agency: { id: string; name: string } | null;
+  branches: OrgBranch[];
+  unassigned_agents: OrgAgent[];
 }
 
 export interface Branch {

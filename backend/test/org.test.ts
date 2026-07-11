@@ -48,6 +48,7 @@ afterAll(async () => {
 describe("Org structure", () => {
   let branchId: string;
   let teamId: string;
+  let opsManagerId: string;
 
   it("admin creates a branch, a team in it, and a company", async () => {
     const branch = await request(app)
@@ -92,6 +93,7 @@ describe("Org structure", () => {
       });
     expect(res.status).toBe(201);
     expect(res.body.employee.capabilities).toContain("operations_manager");
+    opsManagerId = res.body.employee.id;
     opsToken = await login(OPS_PHONE);
   });
 
@@ -186,5 +188,110 @@ describe("Org structure", () => {
       .set("Authorization", `Bearer ${adminToken}`)
       .send({ full_name: "Dup", phone: OPS_PHONE, password: PASSWORD });
     expect(res.status).toBe(409);
+  });
+
+  describe("manager_id (Reports to) and org hierarchy", () => {
+    const TL_PHONE = "7100000011";
+    let teamLeaderId: string;
+    let otherAgencyId: string;
+
+    afterAll(async () => {
+      if (otherAgencyId) {
+        await pool.query("DELETE FROM users WHERE agency_id = $1", [otherAgencyId]);
+        await pool.query("DELETE FROM agencies WHERE id = $1", [otherAgencyId]);
+      }
+    });
+
+    it("admin assigns a manager (Reports to) when creating an employee", async () => {
+      const res = await request(app)
+        .post("/api/employees")
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({
+          full_name: "Team Leader Two",
+          phone: TL_PHONE,
+          password: PASSWORD,
+          branch_id: branchId,
+          manager_id: opsManagerId,
+          capabilities: { is_team_leader: true },
+        });
+      expect(res.status).toBe(201);
+      expect(res.body.employee.manager_id).toBe(opsManagerId);
+      teamLeaderId = res.body.employee.id;
+    });
+
+    it("rejects a manager_id belonging to another agency", async () => {
+      const otherAgency = await pool.query(
+        "INSERT INTO agencies (name) VALUES ('Other Agency (org.test)') RETURNING id",
+      );
+      otherAgencyId = otherAgency.rows[0].id;
+      const hash = await hashPassword(PASSWORD);
+      const otherUser = await pool.query(
+        `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin)
+         VALUES ($1, 'Other Admin', '7199999999', $2, true) RETURNING id`,
+        [otherAgencyId, hash],
+      );
+      const otherAgencyManagerId = otherUser.rows[0].id;
+
+      const createRes = await request(app)
+        .post("/api/employees")
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({
+          full_name: "Sneaky Report",
+          phone: "7100000012",
+          password: PASSWORD,
+          manager_id: otherAgencyManagerId,
+        });
+      expect(createRes.status).toBe(400);
+
+      const patchRes = await request(app)
+        .patch(`/api/employees/${teamLeaderId}`)
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ manager_id: otherAgencyManagerId });
+      expect(patchRes.status).toBe(400);
+    });
+
+    it("rejects an employee being set as their own manager", async () => {
+      const res = await request(app)
+        .patch(`/api/employees/${teamLeaderId}`)
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ manager_id: teamLeaderId });
+      expect(res.status).toBe(400);
+    });
+
+    it("clears a manager_id by patching it to null", async () => {
+      const res = await request(app)
+        .patch(`/api/employees/${teamLeaderId}`)
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ manager_id: null });
+      expect(res.status).toBe(200);
+      expect(res.body.employee.manager_id).toBeNull();
+
+      // Restore for the org-hierarchy assertion below.
+      const restore = await request(app)
+        .patch(`/api/employees/${teamLeaderId}`)
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ manager_id: opsManagerId });
+      expect(restore.status).toBe(200);
+    });
+
+    it("GET /employees/org-hierarchy nests branches/teams/agents with manager edges", async () => {
+      const res = await request(app)
+        .get("/api/employees/org-hierarchy")
+        .set("Authorization", `Bearer ${adminToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.agency.id).toBe(agencyId);
+
+      const branch = res.body.branches.find((b: { id: string }) => b.id === branchId);
+      expect(branch).toBeTruthy();
+
+      type Agent = { id: string; phone: string; manager_id: string | null; manager_name: string | null };
+      const allAgents: Agent[] = branch.teams
+        .flatMap((t: { agents: Agent[] }) => t.agents)
+        .concat(branch.unassigned_agents);
+      const tl = allAgents.find((a) => a.phone === TL_PHONE);
+      expect(tl).toBeTruthy();
+      expect(tl!.manager_id).toBe(opsManagerId);
+      expect(tl!.manager_name).toBe("Ops Manager");
+    });
   });
 });

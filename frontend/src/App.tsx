@@ -25,6 +25,7 @@ const ImportPage = lazy(() => import("./pages/ImportPage"));
 const ImportReviewPage = lazy(() => import("./pages/ImportReviewPage"));
 const MyRequestsPage = lazy(() => import("./pages/MyRequestsPage"));
 const MyWorklistPage = lazy(() => import("./pages/MyWorklistPage"));
+const OrgChartPage = lazy(() => import("./pages/OrgChartPage"));
 const ReallocationRequestsPage = lazy(() => import("./pages/ReallocationRequestsPage"));
 const TargetsPage = lazy(() => import("./pages/TargetsPage"));
 const TeamsPage = lazy(() => import("./pages/TeamsPage"));
@@ -58,6 +59,7 @@ export default function App() {
       >
         <Route index element={<DashboardPage />} />
         <Route path="employees" element={<EmployeesPage />} />
+        <Route path="org-chart" element={<OrgChartPage />} />
         <Route path="branches" element={<BranchesPage />} />
         <Route path="teams" element={<TeamsPage />} />
         <Route path="companies" element={<CompaniesPage />} />
