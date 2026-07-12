@@ -240,7 +240,7 @@ export default function ImportReviewPage() {
             const dueChanged =
               isUpdate && p.due_amount != null && String(p.due_amount) !== String(record.current_due_amount);
             return (
-              <Descriptions size="small" bordered column={2} style={{ maxWidth: 900 }}>
+              <Descriptions size="small" bordered column={1}>
                 <Descriptions.Item label="Customer name">{p.customer_name ?? "-"}</Descriptions.Item>
                 <Descriptions.Item label="Mobile">{p.mobile_number ?? "-"}</Descriptions.Item>
                 <Descriptions.Item label="Product">{p.product ?? "-"}</Descriptions.Item>
@@ -267,13 +267,13 @@ export default function ImportReviewPage() {
                 </Descriptions.Item>
                 <Descriptions.Item label="EMI">{fmtAmount(p.emi)}</Descriptions.Item>
                 <Descriptions.Item label="Agent phone">{p.agent_phone ?? "-"}</Descriptions.Item>
-                <Descriptions.Item label="Custom fields" span={2}>
-                  {p.custom_fields && Object.keys(p.custom_fields).length > 0
-                    ? Object.entries(p.custom_fields)
-                        .map(([k, v]) => `${k}: ${v || "-"}`)
-                        .join(", ")
-                    : "-"}
-                </Descriptions.Item>
+                {p.custom_fields && Object.keys(p.custom_fields).length > 0
+                  ? Object.entries(p.custom_fields).map(([k, v]) => (
+                      <Descriptions.Item key={k} label={k}>
+                        {v ? String(v) : "-"}
+                      </Descriptions.Item>
+                    ))
+                  : <Descriptions.Item label="Custom fields">-</Descriptions.Item>}
                 {record.item_type !== "addition" && (
                   <>
                     <Descriptions.Item label="Last call" span={2}>

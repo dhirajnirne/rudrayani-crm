@@ -1,10 +1,8 @@
 import {
   Button,
-  Collapse,
   Descriptions,
   Drawer,
   Empty,
-  Input,
   Space,
   Spin,
   Table,
@@ -107,7 +105,7 @@ export default function CustomerDetailDrawer({
 }) {
   const [detail, setDetail] = useState<CustomerDetail | null>(null);
   const [loading, setLoading] = useState(false);
-  const [customFieldsFilter, setCustomFieldsFilter] = useState("");
+
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
   const [correctionTarget, setCorrectionTarget] = useState<{
@@ -224,7 +222,7 @@ export default function CustomerDetailDrawer({
 
           <div>
             <Typography.Title level={5}>Identity</Typography.Title>
-            <Descriptions size="small" bordered column={2}>
+            <Descriptions size="small" bordered column={1}>
               <Descriptions.Item label="Company">{detail.company_name}</Descriptions.Item>
               <Descriptions.Item label="Mobile">{orDash(detail.customer.mobile_number)}</Descriptions.Item>
               <Descriptions.Item label="Product">{orDash(detail.customer.product)}</Descriptions.Item>
@@ -240,40 +238,13 @@ export default function CustomerDetailDrawer({
                   ? Math.max(dayjs().diff(dayjs(detail.customer.due_date), "day"), 0)
                   : "-"}
               </Descriptions.Item>
+              {Object.entries(detail.customer.custom_fields).map(([field, value]) => (
+                <Descriptions.Item key={field} label={field}>
+                  {orDash(value)}
+                </Descriptions.Item>
+              ))}
             </Descriptions>
           </div>
-
-          {Object.keys(detail.customer.custom_fields).length > 0 && (
-            <Collapse
-              items={[
-                {
-                  key: "custom-fields",
-                  label: `Customer Detail (${Object.keys(detail.customer.custom_fields).length} fields from the import file)`,
-                  children: (
-                    <Space direction="vertical" style={{ width: "100%" }}>
-                      <Input.Search
-                        placeholder="Filter fields…"
-                        allowClear
-                        value={customFieldsFilter}
-                        onChange={(e) => setCustomFieldsFilter(e.target.value)}
-                      />
-                      <Descriptions size="small" bordered column={2}>
-                        {Object.entries(detail.customer.custom_fields)
-                          .filter(([field]) =>
-                            field.toLowerCase().includes(customFieldsFilter.toLowerCase()),
-                          )
-                          .map(([field, value]) => (
-                            <Descriptions.Item key={field} label={field}>
-                              {orDash(value)}
-                            </Descriptions.Item>
-                          ))}
-                      </Descriptions>
-                    </Space>
-                  ),
-                },
-              ]}
-            />
-          )}
 
           <div>
             <Typography.Title level={5}>Trail History</Typography.Title>
