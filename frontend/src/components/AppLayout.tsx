@@ -3,12 +3,10 @@ import { Suspense } from "react";
 import {
   ApartmentOutlined,
   AuditOutlined,
-  BankOutlined,
   BarChartOutlined,
   CalendarOutlined,
   DashboardOutlined,
   AimOutlined,
-  ClusterOutlined,
   EnvironmentOutlined,
   FilterOutlined,
   WalletOutlined,
@@ -19,12 +17,10 @@ import {
   MoonOutlined,
   ScheduleOutlined,
   SettingOutlined,
-  ShopOutlined,
   SunOutlined,
   TeamOutlined,
   UnorderedListOutlined,
   UploadOutlined,
-  UserOutlined,
 } from "@ant-design/icons";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
@@ -66,30 +62,32 @@ export default function AppLayout() {
       icon: <FileSyncOutlined />,
       label: <Link to="/my-requests">My Requests</Link>,
     },
-    hasPermission("employees.view") && {
-      key: "/employees",
-      icon: <UserOutlined />,
-      label: <Link to="/employees">Employees</Link>,
-    },
-    hasPermission("employees.view") && {
-      key: "/org-chart",
-      icon: <ClusterOutlined />,
-      label: <Link to="/org-chart">Org Chart</Link>,
-    },
-    hasPermission("branches.manage") && {
-      key: "/branches",
-      icon: <BankOutlined />,
-      label: <Link to="/branches">Branches</Link>,
-    },
-    hasPermission("teams.manage") && {
-      key: "/teams",
+    (user?.capabilities.includes("operations_manager") || user?.capabilities.includes("agency_admin")) && {
+      key: "organization",
       icon: <ApartmentOutlined />,
-      label: <Link to="/teams">Teams</Link>,
-    },
-    hasPermission("companies.manage") && {
-      key: "/companies",
-      icon: <ShopOutlined />,
-      label: <Link to="/companies">Companies</Link>,
+      label: "Organization",
+      children: [
+        hasPermission("companies.manage") && {
+          key: "/companies",
+          label: <Link to="/companies">Companies</Link>,
+        },
+        hasPermission("branches.manage") && {
+          key: "/branches",
+          label: <Link to="/branches">Branches</Link>,
+        },
+        hasPermission("teams.manage") && {
+          key: "/teams",
+          label: <Link to="/teams">Teams</Link>,
+        },
+        hasPermission("employees.view") && {
+          key: "/employees",
+          label: <Link to="/employees">Employees</Link>,
+        },
+        hasPermission("employees.view") && {
+          key: "/org-chart",
+          label: <Link to="/org-chart">Org Chart</Link>,
+        },
+      ].filter(Boolean),
     },
     hasPermission("companies.manage") && {
       key: "/buckets",

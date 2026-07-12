@@ -65,6 +65,7 @@ export default function BranchesPage() {
         loading={loading}
         dataSource={branches}
         pagination={false}
+        scroll={{ x: 500 }}
         onRow={(record) => ({
           onClick: () => setDetailId(record.id),
           style: { cursor: "pointer" },

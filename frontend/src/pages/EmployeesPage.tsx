@@ -262,6 +262,7 @@ export default function EmployeesPage() {
         rowKey="id"
         loading={loading}
         dataSource={filteredEmployees}
+        scroll={{ x: 900 }}
         columns={[
           { title: "Name", dataIndex: "full_name" },
           { title: "Phone", dataIndex: "phone" },

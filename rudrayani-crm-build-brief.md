@@ -7,7 +7,7 @@
 
 ## 1. System Overview
 
-Multi-tenant SaaS for collection agencies. One agency (Rudrayani, for now) manages multiple finance-company clients (Hero FinCorp, Bajaj Finance, TVS Credit, HDB Financial, Tata Capital, etc.), each with its own customer data, products, and buckets. The agency organizes its own staff into branches and teams who call/visit/collect against that data.
+Multi-tenant SaaS for collection agencies. One agency (Rudrayani, for now) manages multiple finance-company clients (Hero FinCorp, Bajaj Financgrae, TVS Credit, HDB Financial, Tata Capital, etc.), each with its own customer data, products, and buckets. The agency organizes its own staff into branches and teams who call/visit/collect against that data.
 
 Two clients: **Web portal** (admin/management) and **Mobile app** (field/calling staff).
 

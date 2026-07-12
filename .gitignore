@@ -29,3 +29,6 @@ mobile/ios/Pods/
 Thumbs.db
 .vscode/
 .idea/
+
+# Test credentials (local dev only)
+TEST_CREDENTIALS.md
