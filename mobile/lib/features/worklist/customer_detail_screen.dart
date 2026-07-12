@@ -7,10 +7,12 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/api/api_client.dart';
 import '../../core/models/customer.dart';
+import '../../core/models/disposition_code.dart';
 import '../../core/widgets/state_views.dart';
 import '../attachments/attachments_section.dart';
 import '../reminders/reminder_sheet.dart';
 import 'customer_detail_provider.dart';
+import 'disposition_flow.dart';
 import 'history_timeline.dart';
 import 'worklist_provider.dart';
 
@@ -64,10 +66,19 @@ class CustomerDetailScreen extends ConsumerWidget {
   }
 }
 
-class _CustomerDetailBody extends ConsumerWidget {
+class _CustomerDetailBody extends StatefulWidget {
   final Customer customer;
 
   const _CustomerDetailBody({required this.customer});
+
+  @override
+  State<_CustomerDetailBody> createState() => _CustomerDetailBodyState();
+}
+
+class _CustomerDetailBodyState extends State<_CustomerDetailBody> {
+  bool _showDispositionForm = false;
+
+  Customer get customer => widget.customer;
 
   Future<void> _dial(BuildContext context) async {
     final uri = Uri(scheme: 'tel', path: customer.mobileNumber);
@@ -172,33 +183,36 @@ class _CustomerDetailBody extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: AppColors.primary,
         foregroundColor: AppColors.onPrimary,
         title: Text(customer.customerName),
         actions: [
-          PopupMenuButton<String>(
-            onSelected: (v) {
-              if (v == 'realloc') _requestReallocation(context, ref);
-            },
-            itemBuilder: (ctx) => const [
-              PopupMenuItem(
-                value: 'realloc',
-                child: ListTile(
-                  leading: Icon(Icons.swap_horiz),
-                  title: Text('Request Reallocation'),
-                  contentPadding: EdgeInsets.zero,
+          Consumer(
+            builder: (context, ref, _) => PopupMenuButton<String>(
+              onSelected: (v) {
+                if (v == 'realloc') _requestReallocation(context, ref);
+              },
+              itemBuilder: (ctx) => const [
+                PopupMenuItem(
+                  value: 'realloc',
+                  child: ListTile(
+                    leading: Icon(Icons.swap_horiz),
+                    title: Text('Request Reallocation'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
-      body: RefreshIndicator(
-        onRefresh: () async =>
-            ref.invalidate(customerDetailProvider(customer.id)),
+      body: Consumer(
+        builder: (context, ref, _) => RefreshIndicator(
+          onRefresh: () async =>
+              ref.invalidate(customerDetailProvider(customer.id)),
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.all(16),
@@ -230,14 +244,19 @@ class _CustomerDetailBody extends ConsumerWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: OutlinedButton.icon(
-                      icon: const Icon(Icons.note_add),
-                      label: const Text('Log Call'),
-                      onPressed: () =>
-                          context.push('/customer/${customer.id}/call-log'),
+                      icon: Icon(_showDispositionForm ? Icons.expand_less : Icons.expand_more),
+                      label: const Text('Log Disposition'),
+                      onPressed: () => setState(() => _showDispositionForm = !_showDispositionForm),
                     ),
                   ),
                 ],
               ),
+              if (_showDispositionForm) ...[
+                const SizedBox(height: 16),
+                _DispositionFormCard(
+                  customer: customer,
+                ),
+              ],
               const SizedBox(height: 8),
               Row(
                 children: [
@@ -399,6 +418,7 @@ class _CustomerDetailBody extends ConsumerWidget {
             ],
           ),
         ),
+        ),
       ),
     );
   }
@@ -477,4 +497,129 @@ class _Row extends StatelessWidget {
       ],
     ),
   );
+}
+
+class _DispositionFormCard extends ConsumerWidget {
+  final Customer customer;
+
+  const _DispositionFormCard({
+    required this.customer,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final codesAsync = ref.watch(dispositionCodesProvider);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text('Log a Disposition',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            if (codesAsync.isLoading)
+              const CircularProgressIndicator()
+            else if (codesAsync.hasError)
+              Text('Error loading codes: ${codesAsync.error}')
+            else
+              _DispositionFieldsWrapper(
+                customer: customer,
+                codes: (codesAsync.valueOrNull ?? [])
+                    .cast<Map<String, dynamic>>()
+                    .map(DispositionCode.fromJson)
+                    .toList(),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DispositionFieldsWrapper extends ConsumerStatefulWidget {
+  final Customer customer;
+  final List<DispositionCode> codes;
+
+  const _DispositionFieldsWrapper({
+    required this.customer,
+    required this.codes,
+  });
+
+  @override
+  ConsumerState<_DispositionFieldsWrapper> createState() => _DispositionFieldsWrapperState();
+}
+
+class _DispositionFieldsWrapperState extends ConsumerState<_DispositionFieldsWrapper> {
+  DispositionSelection? _selection;
+  bool _submitting = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        DispositionFields(
+          allowedChannels: const ['OC', 'FV'],
+          codes: widget.codes,
+          onChanged: (selection) => setState(() => _selection = selection),
+        ),
+        if (_selection != null) ...[
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: _submitting ? null : _submitDisposition,
+            child: Text(_submitting ? 'Saving...' : 'Save Disposition'),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Future<void> _submitDisposition() async {
+    if (_selection == null) return;
+
+    setState(() => _submitting = true);
+    try {
+      final selection = _selection!;
+      await ref.read(apiClientProvider).post(
+        '/call-logs',
+        data: {
+          'customer_id': widget.customer.id,
+          'channel': selection.channel,
+          'result_code': selection.code.resultCode,
+          'remark': selection.remark,
+          'amount': selection.fields['amount'],
+          'ptp_date': selection.fields['date'],
+          'payment_mode': selection.fields['mode'],
+          'reason': selection.fields['reason'],
+          'name_relation': selection.fields['name_relation'],
+        },
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Disposition saved'),
+            backgroundColor: AppColors.success,
+          ),
+        );
+        setState(() {
+          _selection = null;
+        });
+        ref.invalidate(customerDetailProvider(widget.customer.id));
+      }
+    } on DioException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not save disposition: ${e.message}'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
 }
