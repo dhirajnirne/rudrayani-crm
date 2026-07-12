@@ -8,6 +8,7 @@ import '../performance/performance_screen.dart';
 import '../reminders/today_section.dart';
 import '../team/team_screen.dart';
 import '../worklist/worklist_screen.dart';
+import 'more_menu_screen.dart';
 
 /// Determines which role-specific shell to show based on capabilities.
 /// Team Leader wins if multiple flags are somehow set.
@@ -54,11 +55,13 @@ class _TelecallerShellState extends ConsumerState<_TelecallerShell> {
       const WorklistScreen(),
       const TelecallerDashboardScreen(),
       const PerformanceScreen(),
+      const MoreMenuScreen(role: 'telecaller'),
     ];
     const destinations = [
       NavigationDestination(icon: Icon(Icons.list_alt), label: 'Home'),
       NavigationDestination(icon: Icon(Icons.dashboard), label: 'Dashboard'),
       NavigationDestination(icon: Icon(Icons.insights), label: 'Performance'),
+      NavigationDestination(icon: Icon(Icons.more_horiz), label: 'More'),
     ];
 
     return Scaffold(
@@ -93,11 +96,13 @@ class _FieldAgentShellState extends ConsumerState<_FieldAgentShell> {
       const WorklistScreen(),
       const FieldExecutiveDashboardScreen(),
       const PerformanceScreen(),
+      const MoreMenuScreen(role: 'field_agent'),
     ];
     const destinations = [
       NavigationDestination(icon: Icon(Icons.list_alt), label: 'Home'),
       NavigationDestination(icon: Icon(Icons.dashboard), label: 'Dashboard'),
       NavigationDestination(icon: Icon(Icons.insights), label: 'Performance'),
+      NavigationDestination(icon: Icon(Icons.more_horiz), label: 'More'),
     ];
 
     return Scaffold(
@@ -132,11 +137,13 @@ class _TeamLeaderShellState extends ConsumerState<_TeamLeaderShell> {
       const TeamLeaderDashboardScreen(),
       const TeamScreen(),
       const PerformanceScreen(),
+      const MoreMenuScreen(role: 'team_leader'),
     ];
     const destinations = [
       NavigationDestination(icon: Icon(Icons.dashboard), label: 'Dashboard'),
       NavigationDestination(icon: Icon(Icons.groups), label: 'My Team'),
       NavigationDestination(icon: Icon(Icons.insights), label: 'Performance'),
+      NavigationDestination(icon: Icon(Icons.more_horiz), label: 'More'),
     ];
 
     return Scaffold(
