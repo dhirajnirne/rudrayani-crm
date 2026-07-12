@@ -5,33 +5,38 @@ import 'package:flutter/material.dart';
 /// ThemeData so every widget that uses theme properties gets them for free,
 /// while widgets that need raw values import this file directly.
 ///
-/// Palette: "Navy & Emerald" (approved 2026-07-10), mirrors
-/// frontend/src/theme/tokens.ts so both clients repaint from the same
-/// values. Mobile is deliberately single-theme (no dark mode) — field
-/// agents work outdoors in direct sunlight, where a dark theme hurts
-/// readability more than it helps eye strain.
+/// Palette: "Deep Trust Teal" (approved 2026-07-12, mobile redesign phase 1)
+/// — mobile now intentionally diverges from frontend/src/theme/tokens.ts
+/// (this pass is mobile-only; web keeps its existing tokens). Mobile is
+/// still deliberately single-theme (no dark mode) — field agents work
+/// outdoors in direct sunlight, where a dark theme hurts readability more
+/// than it helps eye strain.
 abstract class AppColors {
-  // Brand navy scale
-  static const primary = Color(0xFF1E3A5F);
-  static const primaryDark = Color(0xFF0F172A);
-  static const primarySurface = Color(0xFFE9EEF5);
+  // Brand teal scale
+  static const primary = Color(0xFF0B5D63);
+  static const primaryDark = Color(0xFF123A38);
+  static const primarySurface = Color(0xFFE3EFEE);
+
+  // App scaffold background — the mockup keeps a soft off-white surface
+  // (not pure white) behind every screen, not just cards.
+  static const background = Color(0xFFF3F6F5);
 
   // Status / semantic
-  static const success = Color(0xFF059669); // Emerald
-  static const error = Color(0xFFDC2626);
-  static const warning = Color(0xFFD97706);
+  static const success = Color(0xFF2C694E);
+  static const error = Color(0xFFBA1A1A);
+  static const warning = Color(0xFFD77A00);
   static const info = Color(0xFF2563EB); // Informational banners/callouts
-  static const successContainer = Color(0xFFE3F5EE);
-  static const warningContainer = Color(0xFFFEF3E2);
-  static const errorContainer = Color(0xFFFEE2E2);
-  static const neutralContainer = Color(0xFFF1F3F4);
+  static const successContainer = Color(0xFFE6F1EA);
+  static const warningContainer = Color(0xFFFDF0DE);
+  static const errorContainer = Color(0xFFFBE4E4);
+  static const neutralContainer = Color(0xFFEDF1F0);
 
   // Darker on-container variants — used where semantic-colored text/icons
   // sit directly on a *Container background and need extra contrast (status
   // chips, banner copy) rather than the base semantic color.
-  static const successStrong = Color(0xFF047857);
-  static const warningStrong = Color(0xFFB45309);
-  static const errorStrong = Color(0xFFB91C1C);
+  static const successStrong = Color(0xFF1E4D38);
+  static const warningStrong = Color(0xFF9A5A00);
+  static const errorStrong = Color(0xFF8C1414);
 
   // Rare fourth categorical color — timeline/legend entries only (e.g. PTP
   // markers), never a primary action color.
@@ -41,7 +46,7 @@ abstract class AppColors {
   static const onPrimary = Colors.white;
   static const textSecondary = Color(0xFF64748B);
   static const textTertiary = Color(0xFF94A3B8);
-  static const border = Color(0xFFCBD5E1);
+  static const border = Color(0xFFDCE3E1);
 }
 
 abstract class AppSpacing {
@@ -97,6 +102,7 @@ ThemeData buildAppTheme() {
     ),
     useMaterial3: true,
     fontFamily: 'Inter',
+    scaffoldBackgroundColor: AppColors.background,
     inputDecorationTheme: const InputDecorationTheme(
       border: OutlineInputBorder(),
     ),

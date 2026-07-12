@@ -6,8 +6,10 @@ import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
 import { detectPaymentNormalization } from "../services/bucket-movement-service";
+import { capabilitiesHavePermission } from "../services/permission-service";
 import { listDeposits } from "../services/report-service";
 import { getStorage } from "../services/storage/storage-provider";
+import { capabilitiesOf } from "../types/user";
 
 /**
  * Payment capture (build brief Section 8): whichever agent closes the payment
@@ -150,22 +152,50 @@ router.post(
   }),
 );
 
-/** Payment history for a customer. */
+/**
+ * Payment history. With customer_id: history for that one customer (all
+ * roles allowed by payments.record). Without: the mobile "Payment History"
+ * More-menu screen -- every payment the caller has personally collected,
+ * across all their customers, self-scoped the same way GET /ptps scopes to
+ * the caller when they lack customers.allocate.
+ */
 router.get(
   "/",
   asyncHandler(async (req, res) => {
-    const customerId = z.string().uuid().parse(req.query.customer_id);
+    const q = z
+      .object({ customer_id: z.string().uuid().optional() })
+      .parse(req.query);
+
+    const params: unknown[] = [req.user!.agency_id];
+    const filters: string[] = [];
+    if (q.customer_id) {
+      params.push(q.customer_id);
+      filters.push(`p.customer_id = $${params.length}`);
+    } else {
+      const seesAll = await capabilitiesHavePermission(
+        capabilitiesOf(req.user!),
+        "customers.allocate",
+      );
+      if (!seesAll) {
+        params.push(req.user!.id);
+        filters.push(`p.collected_by_user_id = $${params.length}`);
+      }
+    }
+
     const { rows } = await pool.query(
       `SELECT p.id, p.amount, p.mode, p.type, p.paid_at, p.created_at,
               (p.photo_proof_url IS NOT NULL) AS has_photo,
-              u.full_name AS collected_by_name
+              u.full_name AS collected_by_name,
+              c.id AS customer_id, c.loan_number, c.customer_name
          FROM payments p
          JOIN customers c ON c.id = p.customer_id
          JOIN companies co ON co.id = c.company_id
          JOIN users u ON u.id = p.collected_by_user_id
-        WHERE p.customer_id = $1 AND co.agency_id = $2
-        ORDER BY p.paid_at DESC`,
-      [customerId, req.user!.agency_id],
+        WHERE co.agency_id = $1
+          ${filters.map((f) => `AND ${f}`).join("\n          ")}
+        ORDER BY p.paid_at DESC
+        LIMIT 200`,
+      params,
     );
     res.json({ payments: rows });
   }),
