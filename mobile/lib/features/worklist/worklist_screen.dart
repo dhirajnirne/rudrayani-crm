@@ -2,6 +2,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/auth/auth_provider.dart';
 import '../../core/models/customer.dart';
 import '../../core/offline/offline_queue.dart';
@@ -26,12 +27,39 @@ class WorklistScreen extends ConsumerStatefulWidget {
 
 class _WorklistScreenState extends ConsumerState<WorklistScreen> {
   String _search = '';
+  String? _bucketFilter;
+  String? _companyFilter;
+  String? _productFilter;
 
   @override
   void initState() {
     super.initState();
     // Resume/stop tracking to match the server's view of the shift.
     Future.microtask(() => ref.read(attendanceProvider.notifier).init());
+  }
+
+  List<Widget> _buildFilterChips(List<Customer> customers) {
+    final buckets = <String>{'All Buckets'};
+    final companies = <String>{'All Companies'};
+    final products = <String>{'All Products'};
+
+    for (final c in customers) {
+      if (c.bucket != null) buckets.add(c.bucket!);
+      if (c.companyName.isNotEmpty) companies.add(c.companyName);
+      if (c.product != null) products.add(c.product!);
+    }
+
+    return [
+      for (final b in buckets)
+        Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: FilterChip(
+            label: Text(b),
+            selected: (b == 'All Buckets' && _bucketFilter == null) || _bucketFilter == b,
+            onSelected: (_) => setState(() => _bucketFilter = b == 'All Buckets' ? null : b),
+          ),
+        ),
+    ];
   }
 
   @override
@@ -94,6 +122,14 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
               onChanged: (v) => setState(() => _search = v.toLowerCase()),
             ),
           ),
+          if (wl.hasValue && wl.value != null)
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(
+                children: _buildFilterChips(wl.value ?? []),
+              ),
+            ),
           Expanded(
             child: wl.when(
               loading: () => const Center(child: CircularProgressIndicator()),
@@ -105,18 +141,31 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
                 },
               ),
               data: (customers) {
-                final filtered = _search.isEmpty
-                    ? customers
-                    : customers
-                          .where(
-                            (c) =>
-                                c.customerName.toLowerCase().contains(
-                                  _search,
-                                ) ||
-                                c.loanNumber.toLowerCase().contains(_search) ||
-                                c.mobileNumber.contains(_search),
-                          )
-                          .toList();
+                var filtered = customers;
+
+                // Apply search filter
+                if (_search.isNotEmpty) {
+                  filtered = filtered.where((c) =>
+                    c.customerName.toLowerCase().contains(_search) ||
+                    c.loanNumber.toLowerCase().contains(_search) ||
+                    c.mobileNumber.contains(_search)
+                  ).toList();
+                }
+
+                // Apply bucket filter
+                if (_bucketFilter != null) {
+                  filtered = filtered.where((c) => c.bucket == _bucketFilter).toList();
+                }
+
+                // Apply company filter
+                if (_companyFilter != null) {
+                  filtered = filtered.where((c) => c.companyName == _companyFilter).toList();
+                }
+
+                // Apply product filter
+                if (_productFilter != null) {
+                  filtered = filtered.where((c) => c.product == _productFilter).toList();
+                }
 
                 if (filtered.isEmpty) {
                   return const EmptyState(
@@ -332,91 +381,101 @@ class _DutyBanner extends ConsumerWidget {
   }
 }
 
-class _CustomerCard extends StatelessWidget {
+class _CustomerCard extends ConsumerWidget {
   final Customer customer;
   const _CustomerCard({required this.customer});
 
   @override
-  Widget build(BuildContext context) {
-    final hasPtp = customer.ptpDate != null;
-    final ptpDue =
-        hasPtp &&
-        customer.ptpDate!.isBefore(DateTime.now().add(const Duration(days: 1)));
-
+  Widget build(BuildContext context, WidgetRef ref) {
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       child: ConstrainedBox(
-        // Anti-misclick (design brief): every tappable list row ≥56px tall.
         constraints: const BoxConstraints(minHeight: AppDimens.listRow),
-        child: ListTile(
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 12,
-            vertical: 8,
-          ),
-          leading: CircleAvatar(
-            backgroundColor: ptpDue ? AppColors.warning : AppColors.primary,
-            child: Icon(
-              ptpDue ? Icons.schedule : Icons.person,
-              color: AppColors.onPrimary,
-              size: 20,
-            ),
-          ),
-          title: Text(
-            customer.customerName,
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-          ),
-          subtitle: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '${customer.loanNumber} · ${customer.companyName}',
-                style: const TextStyle(fontSize: 12),
-              ),
-              if (customer.dueAmount != null)
-                Text(
-                  'Due: ${_rupee.format(customer.dueAmount)}',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ).tabular,
-                ),
-              if (customer.lastResultCode != null)
-                Text(
-                  'Last: ${customer.lastResultCode}',
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: AppColors.textTertiary,
-                  ),
-                ),
-              if (hasPtp)
-                Text(
-                  'PTP: ${_rupee.format(customer.ptpAmount)} on ${DateFormat('dd MMM').format(customer.ptpDate!)}',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: ptpDue
-                        ? AppColors.warningStrong
-                        : AppColors.successStrong,
-                  ).tabular,
-                ),
-              if (customer.normalizedPending)
-                const Padding(
-                  padding: EdgeInsets.only(top: 2),
-                  child: Text(
-                    'Normalized this month (pending lender confirmation)',
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: AppColors.info,
-                      fontWeight: FontWeight.w600,
+        child: Row(
+          children: [
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      customer.customerName,
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                  ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${customer.loanNumber} · ${customer.companyName}',
+                      style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ),
-            ],
-          ),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => context.push('/customer/${customer.id}'),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  if (customer.dueAmount != null)
+                    Text(
+                      _rupee.format(customer.dueAmount),
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ).tabular,
+                    ),
+                  if (customer.bucket != null) ...[
+                    const SizedBox(height: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppColors.primarySurface,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        customer.bucket!,
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: AppColors.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            SizedBox(
+              width: AppDimens.tapTarget,
+              child: IconButton(
+                icon: const Icon(Icons.call),
+                onPressed: customer.mobileNumber.isNotEmpty
+                    ? () => _dial(context, customer.mobileNumber)
+                    : null,
+              ),
+            ),
+          ],
         ),
       ),
     );
+  }
+
+  Future<void> _dial(BuildContext context, String number) async {
+    final uri = Uri(scheme: 'tel', path: number);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri);
+    } else if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cannot open dialer')),
+      );
+    }
   }
 }
