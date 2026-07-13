@@ -174,22 +174,16 @@ class ManagementDashboardScreen extends ConsumerWidget {
   }
 
   Widget _buildSplitCards(Map<String, dynamic> collection) {
-    final byType = (collection['by_type'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-    final byChannel = (collection['by_channel'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    // Backend shape: by_type = {settlement, emi}, by_channel = {field,
+    // telecalling, other} -- plain objects, not arrays of {type, amount}.
+    final byType = collection['by_type'] as Map<String, dynamic>? ?? {};
+    final byChannel = collection['by_channel'] as Map<String, dynamic>? ?? {};
 
-    num settlement = 0;
-    num emi = 0;
-    for (var b in byType) {
-      if ((b['type'] as String).toLowerCase() == 'settlement') settlement += (b['amount'] as num?) ?? 0;
-      else if ((b['type'] as String).toLowerCase() == 'emi') emi += (b['amount'] as num?) ?? 0;
-    }
+    final settlement = (byType['settlement'] as num?) ?? 0;
+    final emi = (byType['emi'] as num?) ?? 0;
 
-    num field = 0;
-    num telecalling = 0;
-    for (var b in byChannel) {
-      if ((b['channel'] as String).toLowerCase() == 'field') field += (b['amount'] as num?) ?? 0;
-      else if ((b['channel'] as String).toLowerCase() == 'telecalling') telecalling += (b['amount'] as num?) ?? 0;
-    }
+    final field = (byChannel['field'] as num?) ?? 0;
+    final telecalling = (byChannel['telecalling'] as num?) ?? 0;
 
     return Column(
       children: [
