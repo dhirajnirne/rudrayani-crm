@@ -13,6 +13,13 @@ import { logger } from "./logger";
 // 'YYYY-MM-DD' string Postgres sends instead of ever constructing a Date.
 types.setTypeParser(1082, (value) => value);
 
+// node-postgres returns NUMERIC/DECIMAL (oid 1700) columns as strings by
+// default, since they can exceed JS number precision. Every amount/count
+// column here (due_amount, pos, emi, ptp amounts, etc.) fits safely in a JS
+// double, and API consumers (mobile app, web) expect a JSON number -- parse
+// it here once instead of relying on every consumer to defensively coerce.
+types.setTypeParser(1700, (value) => (value === null ? null : parseFloat(value)));
+
 // Single shared connection pool for the app.
 export const pool = new Pool({
   connectionString: env.DATABASE_URL,

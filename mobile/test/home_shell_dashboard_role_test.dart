@@ -27,10 +27,20 @@ void main() {
       expect(resolveDashboardRole(['field_agent']), DashboardRole.fieldAgent);
     });
 
-    test('agency_admin / operations_manager get no role dashboard tab', () {
-      expect(resolveDashboardRole(['agency_admin']), isNull);
-      expect(resolveDashboardRole(['operations_manager']), isNull);
+    test('agency_admin / operations_manager get management role dashboard tab', () {
+      expect(resolveDashboardRole(['agency_admin']), DashboardRole.management);
+      expect(resolveDashboardRole(['operations_manager']), DashboardRole.management);
+    });
+
+    test('empty capabilities get no role dashboard tab', () {
       expect(resolveDashboardRole([]), isNull);
+    });
+
+    test('management takes precedence over team_leader', () {
+      expect(
+        resolveDashboardRole(['agency_admin', 'team_leader']),
+        DashboardRole.management,
+      );
     });
 
     test('team_leader takes precedence over telecaller and field_agent', () {

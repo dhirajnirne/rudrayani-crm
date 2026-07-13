@@ -4,6 +4,9 @@ import '../../core/auth/auth_provider.dart';
 import '../dashboard/field_executive_dashboard_screen.dart';
 import '../dashboard/team_leader_dashboard_screen.dart';
 import '../dashboard/telecaller_dashboard_screen.dart';
+import '../management/day_plan_screen.dart';
+import '../management/management_approvals_screen.dart';
+import '../management/management_dashboard_screen.dart';
 import '../performance/performance_screen.dart';
 import '../reminders/today_section.dart';
 import '../team/team_screen.dart';
@@ -11,10 +14,13 @@ import '../worklist/worklist_screen.dart';
 import 'more_menu_screen.dart';
 
 /// Determines which role-specific shell to show based on capabilities.
-/// Team Leader wins if multiple flags are somehow set.
-enum DashboardRole { teamLeader, telecaller, fieldAgent }
+/// Agency Admin/Operations Manager wins over Team Leader.
+enum DashboardRole { management, teamLeader, telecaller, fieldAgent }
 
 DashboardRole? resolveDashboardRole(List<String> capabilities) {
+  if (capabilities.contains('agency_admin') || capabilities.contains('operations_manager')) {
+    return DashboardRole.management;
+  }
   if (capabilities.contains('team_leader')) return DashboardRole.teamLeader;
   if (capabilities.contains('telecaller')) return DashboardRole.telecaller;
   if (capabilities.contains('field_agent')) return DashboardRole.fieldAgent;
@@ -31,6 +37,7 @@ class HomeShell extends ConsumerWidget {
     final role = resolveDashboardRole(capabilities);
 
     return switch (role) {
+      DashboardRole.management => const _ManagementShell(),
       DashboardRole.teamLeader => const _TeamLeaderShell(),
       DashboardRole.telecaller => const _TelecallerShell(),
       DashboardRole.fieldAgent => const _FieldAgentShell(),
@@ -143,6 +150,47 @@ class _TeamLeaderShellState extends ConsumerState<_TeamLeaderShell> {
       NavigationDestination(icon: Icon(Icons.dashboard), label: 'Dashboard'),
       NavigationDestination(icon: Icon(Icons.groups), label: 'My Team'),
       NavigationDestination(icon: Icon(Icons.insights), label: 'Performance'),
+      NavigationDestination(icon: Icon(Icons.more_horiz), label: 'More'),
+    ];
+
+    return Scaffold(
+      body: Column(
+        children: [
+          const TodaySection(heroMode: true),
+          Expanded(child: IndexedStack(index: _tab, children: screens)),
+        ],
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _tab,
+        onDestinationSelected: (i) => setState(() => _tab = i),
+        destinations: destinations,
+      ),
+    );
+  }
+}
+
+class _ManagementShell extends ConsumerStatefulWidget {
+  const _ManagementShell();
+
+  @override
+  ConsumerState<_ManagementShell> createState() => _ManagementShellState();
+}
+
+class _ManagementShellState extends ConsumerState<_ManagementShell> {
+  int _tab = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final screens = [
+      const ManagementDashboardScreen(),
+      const DayPlanScreen(),
+      const ManagementApprovalsScreen(),
+      const MoreMenuScreen(role: 'management'),
+    ];
+    const destinations = [
+      NavigationDestination(icon: Icon(Icons.dashboard), label: 'Dashboard'),
+      NavigationDestination(icon: Icon(Icons.calendar_today), label: 'Day Plan'),
+      NavigationDestination(icon: Icon(Icons.check_circle_outline), label: 'Approvals'),
       NavigationDestination(icon: Icon(Icons.more_horiz), label: 'More'),
     ];
 

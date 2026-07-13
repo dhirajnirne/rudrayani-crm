@@ -12,7 +12,9 @@ class MoreMenuScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final items = _itemsForRole(role);
+    final capabilities = ref.watch(authProvider.select((s) => s.capabilities));
+    final isAgencyAdmin = capabilities.contains('agency_admin');
+    final items = _itemsForRole(role, isAgencyAdmin);
 
     return Scaffold(
       appBar: AppBar(
@@ -51,7 +53,26 @@ class MoreMenuScreen extends ConsumerWidget {
     );
   }
 
-  List<Map<String, dynamic>> _itemsForRole(String role) {
+  List<Map<String, dynamic>> _itemsForRole(String role, bool isAgencyAdmin) {
+    if (role == 'management') {
+      final base = [
+        {'label': 'Company View', 'icon': Icons.business, 'route': '/management/company-view'},
+        {'label': 'Live Tracking', 'icon': Icons.location_on, 'route': '/management/live-tracking'},
+        {'label': 'Reports', 'icon': Icons.bar_chart, 'route': '/management/reports'},
+        {'label': 'Attendance Overview', 'icon': Icons.access_time, 'route': '/management/attendance'},
+        {'label': 'Branches/Teams/Companies', 'icon': Icons.account_tree, 'route': '/management/org-reference'},
+      ];
+      if (isAgencyAdmin) {
+        base.addAll([
+          {'label': 'Org Chart', 'icon': Icons.schema, 'route': '/management/org-chart'},
+          {'label': 'Employees', 'icon': Icons.people, 'route': '/management/employees'},
+          {'label': 'Import Status', 'icon': Icons.cloud_upload, 'route': '/management/import-status'},
+          {'label': 'Field Config', 'icon': Icons.settings, 'route': '/management/field-config'},
+          {'label': 'Alerts', 'icon': Icons.warning, 'route': '/management/alerts'},
+        ]);
+      }
+      return base;
+    }
     final common = [
       {
         'label': 'PTPs',

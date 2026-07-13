@@ -1,5 +1,6 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
+import '../approvals/approvals_view.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
@@ -20,11 +21,7 @@ final liveStatusProvider = FutureProvider.autoDispose<Map<String, Map<String, dy
   return {for (final a in agents) a['user_id'] as String: a};
 });
 
-final pendingRequestsProvider =
-    FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
-  final res = await ref.read(apiClientProvider).get('/reallocation-requests');
-  return (res.data['requests'] as List).cast<Map<String, dynamic>>();
-});
+// Reallocation requests provider has been moved to approvals_view.dart
 
 class TeamScreen extends ConsumerWidget {
   const TeamScreen({super.key});
@@ -32,14 +29,12 @@ class TeamScreen extends ConsumerWidget {
   void _refresh(WidgetRef ref) {
     ref.invalidate(teamDayProvider);
     ref.invalidate(liveStatusProvider);
-    ref.invalidate(pendingRequestsProvider);
   }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final day = ref.watch(teamDayProvider);
-    final live = ref.watch(liveStatusProvider);
-    final requests = ref.watch(pendingRequestsProvider);
+    final live = ref.watch(liveStatusProvider).valueOrNull;
 
     return Scaffold(
       appBar: AppBar(
@@ -55,15 +50,9 @@ class TeamScreen extends ConsumerWidget {
         child: ListView(
           padding: const EdgeInsets.all(12),
           children: [
-            requests.when(
-              loading: () => const SizedBox.shrink(),
-              error: (e, _) => _ErrorTile(
-                'Approvals: $e',
-                onRetry: () => ref.invalidate(pendingRequestsProvider),
-              ),
-              data: (reqs) => reqs.isEmpty
-                  ? const SizedBox.shrink()
-                  : _ApprovalsSection(requests: reqs, onDecided: () => _refresh(ref)),
+            const SizedBox(
+              height: 400,
+              child: ApprovalsView(groupByBranch: false),
             ),
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 8),
@@ -88,7 +77,7 @@ class TeamScreen extends ConsumerWidget {
                   for (final m in members)
                     _MemberCard(
                       member: m,
-                      live: live.valueOrNull?[m['user_id']],
+                      live: live?[m['user_id']],
                     ),
                 ],
               ),
@@ -169,140 +158,6 @@ class _MemberCard extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-class _ApprovalsSection extends ConsumerWidget {
-  final List<Map<String, dynamic>> requests;
-  final VoidCallback onDecided;
-  const _ApprovalsSection({required this.requests, required this.onDecided});
-
-  Future<void> _decide(
-    BuildContext context,
-    WidgetRef ref,
-    Map<String, dynamic> request,
-    bool approve,
-  ) async {
-    String? newAgentId;
-    if (approve) {
-      // Pick a new agent from the team, or return to the unallocated pool.
-      final members = ref.read(teamDayProvider).valueOrNull ?? [];
-      final candidates =
-          members.where((m) => m['user_id'] != request['requested_by_id']).toList();
-      final choice = await showModalBottomSheet<String>(
-        context: context,
-        builder: (ctx) => SafeArea(
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              const Padding(
-                padding: EdgeInsets.all(12),
-                child: Text('Assign to…',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-              ),
-              // Anti-misclick: every tappable sheet row ≥56px tall.
-              ConstrainedBox(
-                constraints: const BoxConstraints(minHeight: AppDimens.listRow),
-                child: ListTile(
-                  leading: const Icon(Icons.inbox),
-                  title: const Text('Return to unallocated pool'),
-                  onTap: () => Navigator.pop(ctx, ''),
-                ),
-              ),
-              for (final m in candidates)
-                ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: AppDimens.listRow),
-                  child: ListTile(
-                    leading: const Icon(Icons.person),
-                    title: Text(m['full_name'] as String),
-                    onTap: () => Navigator.pop(ctx, m['user_id'] as String),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      );
-      if (choice == null) return; // cancelled
-      newAgentId = choice.isEmpty ? null : choice;
-    }
-
-    try {
-      await ref.read(apiClientProvider).post(
-        '/reallocation-requests/${request['id']}/decide',
-        data: {
-          'approve': approve,
-          'new_agent_id': ?newAgentId,
-        },
-      );
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(approve ? 'Request approved' : 'Request rejected'),
-          backgroundColor: approve ? AppColors.success : AppColors.textSecondary,
-        ));
-      }
-      onDecided();
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Failed: $e'), backgroundColor: AppColors.error));
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Reallocation Approvals (${requests.length})',
-            style: const TextStyle(
-                fontWeight: FontWeight.bold, fontSize: 14, color: AppColors.primary)),
-        const SizedBox(height: 8),
-        for (final r in requests)
-          Card(
-            margin: const EdgeInsets.only(bottom: 8),
-            color: AppColors.warningContainer,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('${r['customer_name']} · ${r['loan_number']}',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  Text('Requested by ${r['requested_by_name']}',
-                      style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
-                  const SizedBox(height: 4),
-                  Text('"${r['reason']}"', style: const TextStyle(fontSize: 13)),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: () => _decide(context, ref, r, true),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.primary,
-                            foregroundColor: AppColors.onPrimary,
-                          ),
-                          child: const Text('Approve'),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => _decide(context, ref, r, false),
-                          style: OutlinedButton.styleFrom(foregroundColor: AppColors.error),
-                          child: const Text('Reject'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-      ],
     );
   }
 }
