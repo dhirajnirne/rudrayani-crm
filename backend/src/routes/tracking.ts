@@ -50,6 +50,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const me = req.user!;
     const scope = scopeFilter(me);
+    const branchId = z.string().uuid().optional().parse(req.query.branch_id);
     const { minutes, radius } = await agencyThresholds(me.agency_id);
 
     const params: unknown[] = [me.agency_id, radius];
@@ -57,6 +58,12 @@ router.get(
     if (scope.param !== null) {
       params.push(scope.param);
       scopeClause = scope.clause.replace("$SCOPE", `$${params.length}`);
+    }
+    
+    let branchClause = "";
+    if (branchId) {
+      params.push(branchId);
+      branchClause = ` AND u.branch_id = $${params.length}`;
     }
 
     const { rows } = await pool.query(
@@ -96,6 +103,7 @@ router.get(
         WHERE a.punch_out_at IS NULL
           AND u.agency_id = $1
           ${scopeClause}
+          ${branchClause}
         ORDER BY u.full_name`,
       params,
     );

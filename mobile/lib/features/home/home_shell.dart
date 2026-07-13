@@ -1,88 +1,79 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/auth/auth_provider.dart';
-import '../../core/theme/app_theme.dart';
 import '../dashboard/field_executive_dashboard_screen.dart';
 import '../dashboard/team_leader_dashboard_screen.dart';
 import '../dashboard/telecaller_dashboard_screen.dart';
+import '../management/day_plan_screen.dart';
+import '../management/management_approvals_screen.dart';
+import '../management/management_dashboard_screen.dart';
 import '../performance/performance_screen.dart';
 import '../reminders/today_section.dart';
 import '../team/team_screen.dart';
 import '../worklist/worklist_screen.dart';
+import 'more_menu_screen.dart';
 
-/// Which role-specific dashboard tab (if any) a user's capability set maps
-/// to. A user can only hold one of team_leader/telecaller/field_agent as
-/// their primary "individual work" capability in practice, but if more than
-/// one flag is somehow set, team_leader wins (broadest scope) then
-/// telecaller then field_agent -- the same precedence scope.ts/
-/// resolveReportScope use server-side. Extracted as a pure function (rather
-/// than inlined in build()) so the branching itself has a fast, deterministic
-/// unit test independent of the full widget tree (see
-/// test/home_shell_dashboard_role_test.dart) -- HomeShell's other tabs
-/// (WorklistScreen in particular) pull in Hive/connectivity platform channels
-/// that make a full widget-tree mount impractical for a routing-only test.
-enum DashboardRole { teamLeader, telecaller, fieldAgent }
+/// Determines which role-specific shell to show based on capabilities.
+/// Agency Admin/Operations Manager wins over Team Leader.
+enum DashboardRole { management, teamLeader, telecaller, fieldAgent }
 
 DashboardRole? resolveDashboardRole(List<String> capabilities) {
+  if (capabilities.contains('agency_admin') || capabilities.contains('operations_manager')) {
+    return DashboardRole.management;
+  }
   if (capabilities.contains('team_leader')) return DashboardRole.teamLeader;
   if (capabilities.contains('telecaller')) return DashboardRole.telecaller;
   if (capabilities.contains('field_agent')) return DashboardRole.fieldAgent;
   return null;
 }
 
-/// Role-aware landing (brief §3, §10; Phase 12: role-based dashboards).
-/// Every role gets My Worklist / My Performance; a Team Leader additionally
-/// gets My Team + a Team Dashboard, and a plain telecaller/field_agent gets
-/// their own role-specific Dashboard tab.
-class HomeShell extends ConsumerStatefulWidget {
+/// Mobile redesign phase 1: per-role bottom-nav shells replacing the shared tab layout.
+class HomeShell extends ConsumerWidget {
   const HomeShell({super.key});
 
   @override
-  ConsumerState<HomeShell> createState() => _HomeShellState();
+  Widget build(BuildContext context, WidgetRef ref) {
+    final capabilities = ref.watch(authProvider.select((s) => s.capabilities));
+    final role = resolveDashboardRole(capabilities);
+
+    return switch (role) {
+      DashboardRole.management => const _ManagementShell(),
+      DashboardRole.teamLeader => const _TeamLeaderShell(),
+      DashboardRole.telecaller => const _TelecallerShell(),
+      DashboardRole.fieldAgent => const _FieldAgentShell(),
+      null => const Scaffold(body: Center(child: Text('No dashboard available for your role'))),
+    };
+  }
 }
 
-class _HomeShellState extends ConsumerState<HomeShell> {
+class _TelecallerShell extends ConsumerStatefulWidget {
+  const _TelecallerShell();
+
+  @override
+  ConsumerState<_TelecallerShell> createState() => _TelecallerShellState();
+}
+
+class _TelecallerShellState extends ConsumerState<_TelecallerShell> {
   int _tab = 0;
 
   @override
   Widget build(BuildContext context) {
-    final capabilities = ref.watch(authProvider.select((s) => s.capabilities));
-    final role = resolveDashboardRole(capabilities);
-    final isTL = role == DashboardRole.teamLeader;
-    final isTelecaller = role == DashboardRole.telecaller;
-    final isFieldAgent = role == DashboardRole.fieldAgent;
-
     final screens = [
       const WorklistScreen(),
-      if (isTL) const TeamLeaderDashboardScreen(),
-      if (isTL) const TeamScreen(),
-      if (isTelecaller) const TelecallerDashboardScreen(),
-      if (isFieldAgent) const FieldExecutiveDashboardScreen(),
+      const TelecallerDashboardScreen(),
       const PerformanceScreen(),
+      const MoreMenuScreen(role: 'telecaller'),
     ];
-    final destinations = [
-      const NavigationDestination(
-        icon: Icon(Icons.list_alt),
-        label: 'My Worklist',
-      ),
-      if (isTL)
-        const NavigationDestination(icon: Icon(Icons.dashboard), label: 'Team Dashboard'),
-      if (isTL)
-        const NavigationDestination(icon: Icon(Icons.groups), label: 'My Team'),
-      if (isTelecaller)
-        const NavigationDestination(icon: Icon(Icons.dashboard), label: 'Dashboard'),
-      if (isFieldAgent)
-        const NavigationDestination(icon: Icon(Icons.dashboard), label: 'Dashboard'),
-      const NavigationDestination(
-        icon: Icon(Icons.insights),
-        label: 'My Performance',
-      ),
+    const destinations = [
+      NavigationDestination(icon: Icon(Icons.list_alt), label: 'Home'),
+      NavigationDestination(icon: Icon(Icons.dashboard), label: 'Dashboard'),
+      NavigationDestination(icon: Icon(Icons.insights), label: 'Performance'),
+      NavigationDestination(icon: Icon(Icons.more_horiz), label: 'More'),
     ];
 
     return Scaffold(
       body: Column(
         children: [
-          // "Today's Actions" hero — always visible above the tab content
           const TodaySection(heroMode: true),
           Expanded(child: IndexedStack(index: _tab, children: screens)),
         ],
@@ -90,7 +81,129 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
         onDestinationSelected: (i) => setState(() => _tab = i),
-        indicatorColor: AppColors.primary.withValues(alpha: 0.15),
+        destinations: destinations,
+      ),
+    );
+  }
+}
+
+class _FieldAgentShell extends ConsumerStatefulWidget {
+  const _FieldAgentShell();
+
+  @override
+  ConsumerState<_FieldAgentShell> createState() => _FieldAgentShellState();
+}
+
+class _FieldAgentShellState extends ConsumerState<_FieldAgentShell> {
+  int _tab = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final screens = [
+      const WorklistScreen(),
+      const FieldExecutiveDashboardScreen(),
+      const PerformanceScreen(),
+      const MoreMenuScreen(role: 'field_agent'),
+    ];
+    const destinations = [
+      NavigationDestination(icon: Icon(Icons.list_alt), label: 'Home'),
+      NavigationDestination(icon: Icon(Icons.dashboard), label: 'Dashboard'),
+      NavigationDestination(icon: Icon(Icons.insights), label: 'Performance'),
+      NavigationDestination(icon: Icon(Icons.more_horiz), label: 'More'),
+    ];
+
+    return Scaffold(
+      body: Column(
+        children: [
+          const TodaySection(heroMode: true),
+          Expanded(child: IndexedStack(index: _tab, children: screens)),
+        ],
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _tab,
+        onDestinationSelected: (i) => setState(() => _tab = i),
+        destinations: destinations,
+      ),
+    );
+  }
+}
+
+class _TeamLeaderShell extends ConsumerStatefulWidget {
+  const _TeamLeaderShell();
+
+  @override
+  ConsumerState<_TeamLeaderShell> createState() => _TeamLeaderShellState();
+}
+
+class _TeamLeaderShellState extends ConsumerState<_TeamLeaderShell> {
+  int _tab = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final screens = [
+      const TeamLeaderDashboardScreen(),
+      const TeamScreen(),
+      const PerformanceScreen(),
+      const MoreMenuScreen(role: 'team_leader'),
+    ];
+    const destinations = [
+      NavigationDestination(icon: Icon(Icons.dashboard), label: 'Dashboard'),
+      NavigationDestination(icon: Icon(Icons.groups), label: 'My Team'),
+      NavigationDestination(icon: Icon(Icons.insights), label: 'Performance'),
+      NavigationDestination(icon: Icon(Icons.more_horiz), label: 'More'),
+    ];
+
+    return Scaffold(
+      body: Column(
+        children: [
+          const TodaySection(heroMode: true),
+          Expanded(child: IndexedStack(index: _tab, children: screens)),
+        ],
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _tab,
+        onDestinationSelected: (i) => setState(() => _tab = i),
+        destinations: destinations,
+      ),
+    );
+  }
+}
+
+class _ManagementShell extends ConsumerStatefulWidget {
+  const _ManagementShell();
+
+  @override
+  ConsumerState<_ManagementShell> createState() => _ManagementShellState();
+}
+
+class _ManagementShellState extends ConsumerState<_ManagementShell> {
+  int _tab = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final screens = [
+      const ManagementDashboardScreen(),
+      const DayPlanScreen(),
+      const ManagementApprovalsScreen(),
+      const MoreMenuScreen(role: 'management'),
+    ];
+    const destinations = [
+      NavigationDestination(icon: Icon(Icons.dashboard), label: 'Dashboard'),
+      NavigationDestination(icon: Icon(Icons.calendar_today), label: 'Day Plan'),
+      NavigationDestination(icon: Icon(Icons.check_circle_outline), label: 'Approvals'),
+      NavigationDestination(icon: Icon(Icons.more_horiz), label: 'More'),
+    ];
+
+    return Scaffold(
+      body: Column(
+        children: [
+          const TodaySection(heroMode: true),
+          Expanded(child: IndexedStack(index: _tab, children: screens)),
+        ],
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _tab,
+        onDestinationSelected: (i) => setState(() => _tab = i),
         destinations: destinations,
       ),
     );

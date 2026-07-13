@@ -9,7 +9,9 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../core/api/api_client.dart';
+import '../../core/models/disposition_code.dart';
 import '../../core/offline/offline_queue.dart';
+import '../worklist/disposition_flow.dart';
 import '../worklist/worklist_provider.dart';
 
 /// Field-visit evidence (brief §8): a photo of the visit, an optional remark,
@@ -25,13 +27,16 @@ class FieldVisitScreen extends ConsumerStatefulWidget {
 
 class _FieldVisitScreenState extends ConsumerState<FieldVisitScreen> {
   final _remarkCtrl = TextEditingController();
+  final _amountCtrl = TextEditingController();
   File? _photo;
   bool _loading = false;
   String? _error;
+  DispositionSelection? _dispositionSelection;
 
   @override
   void dispose() {
     _remarkCtrl.dispose();
+    _amountCtrl.dispose();
     super.dispose();
   }
 
@@ -59,15 +64,23 @@ class _FieldVisitScreenState extends ConsumerState<FieldVisitScreen> {
       setState(() => _error = 'Add a photo of the visit');
       return;
     }
+    if (_dispositionSelection == null) {
+      setState(() => _error = 'Select a disposition');
+      return;
+    }
 
     setState(() { _loading = true; _error = null; });
     try {
       final pos = await _tryGps();
+      final selection = _dispositionSelection!;
 
       // One key for both paths (direct send / offline queue).
       final payload = <String, dynamic>{
         'customer_id': widget.customerId,
+        'channel': selection.channel,
+        'result_code': selection.code.resultCode,
         if (_remarkCtrl.text.trim().isNotEmpty) 'remark': _remarkCtrl.text.trim(),
+        if (_amountCtrl.text.trim().isNotEmpty) 'amount': double.tryParse(_amountCtrl.text),
         if (pos != null) 'lat': pos.latitude,
         if (pos != null) 'lng': pos.longitude,
         'client_key': OfflineQueueNotifier.newClientKey(),
@@ -172,6 +185,45 @@ class _FieldVisitScreenState extends ConsumerState<FieldVisitScreen> {
                 ],
               ),
             const SizedBox(height: 16),
+            const Text('Disposition *',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            const SizedBox(height: 8),
+            Consumer(
+              builder: (context, ref, _) {
+                final codesAsync = ref.watch(dispositionCodesProvider);
+                return codesAsync.when(
+                  data: (codes) {
+                    final fvCodes = codesForChannel(
+                      codes.cast<Map<String, dynamic>>()
+                          .map(DispositionCode.fromJson)
+                          .toList(),
+                      'FV',
+                    );
+                    return DispositionFields(
+                      allowedChannels: const ['FV'],
+                      codes: fvCodes,
+                      onChanged: (selection) => setState(() => _dispositionSelection = selection),
+                    );
+                  },
+                  loading: () => const CircularProgressIndicator(),
+                  error: (err, _) => Text('Error: $err'),
+                );
+              },
+            ),
+            const SizedBox(height: 16),
+            if (_dispositionSelection?.code.resultCode.contains('PTP') ?? false) ...[
+              TextField(
+                controller: _amountCtrl,
+                keyboardType: TextInputType.number,
+                style: const TextStyle().tabular,
+                decoration: const InputDecoration(
+                  labelText: 'Payment Amount (₹)',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.currency_rupee),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
             TextField(
               controller: _remarkCtrl,
               maxLines: 2,

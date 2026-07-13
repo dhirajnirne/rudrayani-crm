@@ -4,12 +4,16 @@ import { pool } from "../config/db";
 import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
+import { capabilitiesHavePermission } from "../services/permission-service";
 import {
   composeRemark,
   createsPtp,
   missingRequiredFields,
   type DispositionCodeRow,
 } from "../services/disposition-service";
+import { capabilitiesOf } from "../types/user";
+
+const IST = "Asia/Kolkata";
 
 const router = Router();
 router.use(authenticate, requirePermission("calls.log"));
@@ -144,24 +148,61 @@ router.post(
   }),
 );
 
-/** Call history for a customer (newest first). */
+/**
+ * Call history. With customer_id: history for that one customer. Without:
+ * the mobile "Today's Call Log" tab -- every call the caller has personally
+ * logged, self-scoped the same way GET /ptps and GET /payments scope to the
+ * caller when they lack customers.allocate; optionally narrowed to one IST
+ * calendar day via `date`.
+ */
 router.get(
   "/",
   asyncHandler(async (req, res) => {
-    const customerId = z.string().uuid().parse(req.query.customer_id);
+    const q = z
+      .object({
+        customer_id: z.string().uuid().optional(),
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      })
+      .parse(req.query);
+
+    const params: unknown[] = [req.user!.agency_id];
+    const filters: string[] = [];
+    if (q.customer_id) {
+      params.push(q.customer_id);
+      filters.push(`cl.customer_id = $${params.length}`);
+    } else {
+      const seesAll = await capabilitiesHavePermission(
+        capabilitiesOf(req.user!),
+        "customers.allocate",
+      );
+      if (!seesAll) {
+        params.push(req.user!.id);
+        filters.push(`cl.agent_id = $${params.length}`);
+      }
+    }
+    if (q.date) {
+      params.push(q.date);
+      filters.push(
+        `cl.created_at >= ($${params.length}::date::timestamp AT TIME ZONE '${IST}')` +
+          ` AND cl.created_at < (($${params.length}::date + 1)::timestamp AT TIME ZONE '${IST}')`,
+      );
+    }
+
     const { rows } = await pool.query(
       `SELECT cl.id, cl.remark, cl.call_duration_seconds, cl.details, cl.created_at,
               u.full_name AS agent_name,
-              d.action_code, d.result_code, d.description AS disposition_description
+              d.action_code, d.result_code, d.description AS disposition_description,
+              c.id AS customer_id, c.loan_number, c.customer_name
          FROM call_logs cl
          JOIN customers c ON c.id = cl.customer_id
          JOIN companies co ON co.id = c.company_id
          JOIN users u ON u.id = cl.agent_id
          LEFT JOIN disposition_codes d ON d.id = cl.disposition_code_id
-        WHERE cl.customer_id = $1 AND co.agency_id = $2
+        WHERE co.agency_id = $1
+          ${filters.map((f) => `AND ${f}`).join("\n          ")}
         ORDER BY cl.created_at DESC
         LIMIT 200`,
-      [customerId, req.user!.agency_id],
+      params,
     );
     res.json({ call_logs: rows });
   }),

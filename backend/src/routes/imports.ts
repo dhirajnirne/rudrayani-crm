@@ -266,22 +266,41 @@ router.post(
   }),
 );
 
-/** Import history for a company. */
+/** Import history for a company (or all companies in agency if company_id is omitted). */
 router.get(
   "/runs",
   asyncHandler(async (req, res) => {
-    const companyId = z.string().uuid().parse(req.query.company_id);
-    await assertCompanyInAgency(companyId, req.user!.agency_id);
-    const { rows } = await pool.query(
-      `SELECT r.*, u.full_name AS uploaded_by_name, t.name AS template_name
+    const companyId = z.string().uuid().optional().parse(req.query.company_id);
+    if (companyId) {
+      await assertCompanyInAgency(companyId, req.user!.agency_id);
+    }
+    
+    let query: string;
+    let params: unknown[];
+
+    if (companyId) {
+      query = `SELECT r.*, u.full_name AS uploaded_by_name, t.name AS template_name, c.name AS company_name
          FROM import_runs r
+         JOIN companies c ON c.id = r.company_id
          LEFT JOIN users u ON u.id = r.uploaded_by
          LEFT JOIN import_templates t ON t.id = r.template_id
         WHERE r.company_id = $1
         ORDER BY r.created_at DESC
-        LIMIT 100`,
-      [companyId],
-    );
+        LIMIT 100`;
+      params = [companyId];
+    } else {
+      query = `SELECT r.*, u.full_name AS uploaded_by_name, t.name AS template_name, c.name AS company_name
+         FROM import_runs r
+         JOIN companies c ON c.id = r.company_id
+         LEFT JOIN users u ON u.id = r.uploaded_by
+         LEFT JOIN import_templates t ON t.id = r.template_id
+        WHERE c.agency_id = $1
+        ORDER BY r.created_at DESC
+        LIMIT 100`;
+      params = [req.user!.agency_id];
+    }
+
+    const { rows } = await pool.query(query, params);
     res.json({ runs: rows });
   }),
 );
