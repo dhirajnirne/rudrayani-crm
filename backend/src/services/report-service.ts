@@ -123,6 +123,53 @@ function buildTeamClause(scope: ResolvedScope, params: unknown[]): string | null
   return null;
 }
 
+/**
+ * Build report WHERE conditions with multi-team TL support.
+ * Like baseConditions() but replaces the team clause with buildTeamClause()
+ * to handle scopeTeamIds from multi-team TLs.
+ */
+function buildReportConditions(scope: ResolvedScope, params: unknown[]): string[] {
+  const conditions: string[] = [];
+  const filters = scope.filters;
+
+  if (filters.company_id) {
+    params.push(filters.company_id);
+    conditions.push(`s.company_id = $${params.length}`);
+  }
+  if (filters.branch_id) {
+    params.push(filters.branch_id);
+    conditions.push(`tm.branch_id = $${params.length}`);
+  }
+
+  // Team handling with multi-team support
+  const teamClause = buildTeamClause(scope, params);
+  if (teamClause) conditions.push(teamClause);
+
+  if (filters.agent_id) {
+    params.push(filters.agent_id);
+    conditions.push(`s.assigned_agent_id = $${params.length}`);
+  }
+  if (filters.product) {
+    params.push(filters.product);
+    conditions.push(
+      `(lower(s.product) = lower($${params.length}) OR EXISTS (
+          SELECT 1 FROM products pr
+           WHERE pr.company_id = s.company_id
+             AND lower(pr.raw_label) = lower(s.product)
+             AND lower(pr.canonical_label) = lower($${params.length})))`,
+    );
+  }
+  if (filters.bucket) {
+    params.push(filters.bucket);
+    conditions.push(`lower(s.bucket) = lower($${params.length})`);
+  }
+  if (filters.status) {
+    params.push(filters.status);
+    conditions.push(`c.status = $${params.length}`);
+  }
+  return conditions;
+}
+
 export interface MonthDays {
   in_month: number;
   elapsed: number;
@@ -472,9 +519,11 @@ async function classify(
   agencyId: string,
   filters: ReportFilters,
   useTransition: boolean,
+  scope?: ResolvedScope,
 ): Promise<ClassifiedAggregates> {
   const params: unknown[] = [agencyId, filters.month, useTransition];
-  const conditions = baseConditions(filters, params);
+  // Use buildReportConditions if scope provided (handles multi-team), else fallback to baseConditions
+  const conditions = scope ? buildReportConditions(scope, params) : baseConditions(filters, params);
   const { rows } = await pool.query(
     `WITH ${classifiedCtes(conditions)}
      SELECT ${AGGREGATE_SELECT} FROM class`,
@@ -649,6 +698,55 @@ function paymentConditions(filters: ReportFilters, params: unknown[]): string[] 
   return conditions;
 }
 
+/**
+ * Payment conditions with multi-team TL support.
+ * Like paymentConditions() but replaces team_id with buildTeamClause()
+ * to handle scopeTeamIds from multi-team TLs.
+ * Note: Uses cu.team_id since we're checking collector's team, not customer's allocation.
+ */
+function buildPaymentConditions(scope: ResolvedScope, params: unknown[]): string[] {
+  const conditions: string[] = [];
+  const filters = scope.filters;
+
+  if (filters.company_id) {
+    params.push(filters.company_id);
+    conditions.push(`c.company_id = $${params.length}`);
+  }
+  if (filters.agent_id) {
+    params.push(filters.agent_id);
+    conditions.push(`p.collected_by_user_id = $${params.length}`);
+  }
+
+  // Team handling with multi-team support (collector's team)
+  if (scope.scopeTeamIds?.length) {
+    params.push(scope.scopeTeamIds);
+    conditions.push(`cu.team_id = ANY($${params.length})`);
+  } else if (filters.team_id) {
+    params.push(filters.team_id);
+    conditions.push(`cu.team_id = $${params.length}`);
+  }
+
+  if (filters.branch_id) {
+    params.push(filters.branch_id);
+    conditions.push(`cu.branch_id = $${params.length}`);
+  }
+  if (filters.product) {
+    params.push(filters.product);
+    conditions.push(
+      `(lower(c.product) = lower($${params.length}) OR EXISTS (
+          SELECT 1 FROM products pr
+           WHERE pr.company_id = c.company_id
+             AND lower(pr.raw_label) = lower(c.product)
+             AND lower(pr.canonical_label) = lower($${params.length})))`,
+    );
+  }
+  if (filters.bucket) {
+    params.push(filters.bucket);
+    conditions.push(`lower(c.bucket) = lower($${params.length})`);
+  }
+  return conditions;
+}
+
 export interface DepositTotals {
   collected: number;
   deposited: number;
@@ -684,9 +782,13 @@ export async function depositsByRange(
 // Exported (not just used by dashboard()) so the branch drill-down (Phase 9)
 // can pull the same collected/deposited/pending math for a branch_id scope
 // without re-deriving the payment-conditions logic.
-export async function depositTotals(agencyId: string, filters: ReportFilters): Promise<DepositTotals> {
+export async function depositTotals(
+  agencyId: string,
+  filters: ReportFilters,
+  scope?: ResolvedScope,
+): Promise<DepositTotals> {
   const params: unknown[] = [agencyId, filters.month];
-  const conditions = paymentConditions(filters, params);
+  const conditions = scope ? buildPaymentConditions(scope, params) : paymentConditions(filters, params);
   const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
   const { rows } = await pool.query(
     `SELECT COALESCE(SUM(p.amount), 0)::float AS collected,
@@ -972,8 +1074,8 @@ export async function dashboard(
   const filters = scope.filters;
   const days = monthDays(filters.month.slice(0, 7));
   const useTransition = await hasNextMonthSnapshot(user.agency_id, filters);
-  const agg = await classify(user.agency_id, filters, useTransition);
-  const deposits = await depositTotals(user.agency_id, filters);
+  const agg = await classify(user.agency_id, filters, useTransition, scope);
+  const deposits = await depositTotals(user.agency_id, filters, scope);
 
   const basisOf = (metric: ReportMetric): "transition" | "payments" =>
     metric === "recovery" ? "payments" : useTransition ? "transition" : "payments";
