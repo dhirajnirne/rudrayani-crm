@@ -17,10 +17,10 @@ import { commitImport, type ColumnMapping, type ParsedSheet } from "../services/
 import { detectPaymentNormalization } from "../services/bucket-movement-service";
 
 const USERS = [
-  { phone: "8888888801", name: "Priya Sharma (Telecaller)", flag: "is_telecaller", team: true },
-  { phone: "8888888802", name: "Rahul Verma (Field Agent)", flag: "is_field_agent", team: true },
-  { phone: "8888888803", name: "Sneha Patil (Team Leader)", flag: "is_team_leader", team: true },
-  { phone: "8888888804", name: "Amit Kulkarni (Ops Manager)", flag: "is_operations_manager", team: false },
+  { phone: "8888888801", name: "Priya Sharma (Telecaller)", designation: "telecaller", team: true },
+  { phone: "8888888802", name: "Rahul Verma (Field Agent)", designation: "field_agent", team: true },
+  { phone: "8888888803", name: "Sneha Patil (Team Leader)", designation: "team_leader", team: true },
+  { phone: "8888888804", name: "Amit Kulkarni (Ops Manager)", designation: "operations_manager", team: false },
 ] as const;
 
 const MAPPING: ColumnMapping = {
@@ -92,23 +92,50 @@ async function run(): Promise<void> {
   const hash = await hashPassword(password);
   let adminId: string | null = null;
   let telecallerId: string | null = null;
+
+  // Helper: compute booleans from designation
+  const booleansForDesignation = (designation: string) => ({
+    is_operations_manager: designation === "operations_manager",
+    is_team_leader: designation === "team_leader",
+    is_telecaller: designation === "telecaller",
+    is_field_agent: designation === "field_agent",
+  });
+
   for (const user of USERS) {
+    const bools = booleansForDesignation(user.designation);
     const { rows } = await pool.query(
-      `INSERT INTO users (agency_id, branch_id, team_id, full_name, phone, password_hash, ${user.flag})
-       VALUES ($1, $2, $3, $4, $5, $6, true)
+      `INSERT INTO users (agency_id, branch_id, team_id, full_name, phone, password_hash, designation,
+                          is_operations_manager, is_team_leader, is_telecaller, is_field_agent)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        ON CONFLICT (phone) DO UPDATE
          SET password_hash = EXCLUDED.password_hash,
-             ${user.flag} = true,
+             designation = EXCLUDED.designation,
+             is_operations_manager = EXCLUDED.is_operations_manager,
+             is_team_leader = EXCLUDED.is_team_leader,
+             is_telecaller = EXCLUDED.is_telecaller,
+             is_field_agent = EXCLUDED.is_field_agent,
              is_active = true,
              branch_id = EXCLUDED.branch_id,
              team_id = EXCLUDED.team_id,
              failed_login_attempts = 0,
              locked_until = NULL
        RETURNING id`,
-      [agencyId, branchId, user.team ? teamId : null, user.name, user.phone, hash],
+      [
+        agencyId,
+        branchId,
+        user.team ? teamId : null,
+        user.name,
+        user.phone,
+        hash,
+        user.designation,
+        bools.is_operations_manager,
+        bools.is_team_leader,
+        bools.is_telecaller,
+        bools.is_field_agent,
+      ],
     );
     console.log(`  ${user.name.padEnd(32)} phone ${user.phone}  id ${rows[0].id}`);
-    if (user.flag === "is_telecaller") telecallerId = rows[0].id;
+    if (user.designation === "telecaller") telecallerId = rows[0].id;
   }
   const { rows: admins } = await pool.query(
     "SELECT id FROM users WHERE agency_id = $1 AND is_agency_admin = true LIMIT 1",

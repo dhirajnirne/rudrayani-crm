@@ -96,25 +96,63 @@ async function assertBranchAndTeam(
 }
 
 /**
- * manager_id is informational only (brief: no permission implications), but
- * it must still resolve to a real employee in the same agency -- otherwise
- * the org chart could point at a manager from another tenant. Self-reference
- * is also rejected: an employee cannot report to themselves.
+ * Hard hierarchy enforcement: non-admin designations MUST have a manager
+ * whose designation is exactly the next rank up in the fixed chain:
+ * - operations_manager → manager is agency_admin (via assertCanEditOpsManager)
+ * - team_leader → manager is operations_manager
+ * - telecaller / field_agent → manager is team_leader
+ * - agency_admin → no manager allowed
+ *
+ * Forward-only enforcement: only validates when designation or manager_id
+ * is part of the write payload, not on every unrelated edit.
  */
 async function assertManager(
   agencyId: string,
+  designation: Capability | null,
   managerId: string | null | undefined,
   selfId?: string,
 ): Promise<void> {
-  if (!managerId) return;
+  if (!designation || designation === "agency_admin") {
+    // Admin requires no manager
+    if (managerId) {
+      throw new HttpError(400, "An agency admin cannot have a manager");
+    }
+    return;
+  }
+
+  if (!managerId) {
+    throw new HttpError(400, `${designation} requires a manager`);
+  }
+
   if (selfId && managerId === selfId) {
     throw new HttpError(400, "An employee cannot be their own manager");
   }
-  const { rows } = await pool.query("SELECT 1 FROM users WHERE id = $1 AND agency_id = $2", [
-    managerId,
-    agencyId,
-  ]);
-  if (rows.length === 0) throw new HttpError(400, "Manager not found in this agency");
+
+  // Look up manager's designation and validate it's exactly one rank up
+  const expectedManagerDesignation: Record<Capability, Capability> = {
+    operations_manager: "agency_admin",
+    team_leader: "operations_manager",
+    telecaller: "team_leader",
+    field_agent: "team_leader",
+    agency_admin: "agency_admin", // unreachable but needed for type completeness
+  };
+
+  const requiredDesignation = expectedManagerDesignation[designation];
+  const { rows } = await pool.query<{ designation: string }>(
+    "SELECT designation FROM users WHERE id = $1 AND agency_id = $2",
+    [managerId, agencyId],
+  );
+
+  if (rows.length === 0) {
+    throw new HttpError(400, "Manager not found in this agency");
+  }
+
+  if (rows[0].designation !== requiredDesignation) {
+    throw new HttpError(
+      400,
+      `Manager must be a ${requiredDesignation} (this employee is a ${designation})`,
+    );
+  }
 }
 
 router.get(
@@ -152,7 +190,7 @@ router.post(
     const body = createSchema.parse(req.body);
     await assertCanEditOpsManager(req.user!, body.designation);
     await assertBranchAndTeam(req.user!.agency_id, body.branch_id, body.team_id);
-    await assertManager(req.user!.agency_id, body.manager_id);
+    await assertManager(req.user!.agency_id, body.designation as Capability, body.manager_id);
 
     const passwordHash = await hashPassword(body.password);
     const booleans = booleansForDesignation(body.designation);
@@ -292,8 +330,11 @@ router.patch(
       body.branch_id ?? existing.branch_id,
       body.team_id ?? existing.team_id,
     );
+    // Validate hierarchy only if designation or manager_id is being changed
     if (body.manager_id !== undefined || body.designation) {
-      await assertManager(req.user!.agency_id, body.manager_id ?? existing.manager_id, existing.id);
+      const designation = (body.designation ?? existing.designation) as Capability;
+      const managerId = body.manager_id !== undefined ? body.manager_id : existing.manager_id;
+      await assertManager(req.user!.agency_id, designation, managerId, existing.id);
     }
 
     const booleans = body.designation ? booleansForDesignation(body.designation) : null;
