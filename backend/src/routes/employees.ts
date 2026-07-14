@@ -8,17 +8,12 @@ import { hashPassword } from "../services/auth-service";
 import { capabilitiesHavePermission } from "../services/permission-service";
 import { getSmsProvider } from "../services/sms/sms-provider";
 import { logger } from "../config/logger";
-import { capabilitiesOf, publicUser, type UserRow } from "../types/user";
+import { capabilitiesOf, publicUser, booleansForDesignation, type UserRow, type Capability } from "../types/user";
 
 const router = Router();
 router.use(authenticate);
 
-const capabilitySchema = z.object({
-  is_operations_manager: z.boolean().optional(),
-  is_team_leader: z.boolean().optional(),
-  is_telecaller: z.boolean().optional(),
-  is_field_agent: z.boolean().optional(),
-});
+const designationSchema = z.enum(["operations_manager", "team_leader", "telecaller", "field_agent"]);
 
 const createSchema = z.object({
   full_name: z.string().trim().min(1).max(200),
@@ -28,7 +23,7 @@ const createSchema = z.object({
   branch_id: z.string().uuid().optional().nullable(),
   team_id: z.string().uuid().optional().nullable(),
   manager_id: z.string().uuid().optional().nullable(),
-  capabilities: capabilitySchema.default({}),
+  designation: designationSchema,
 });
 
 const updateSchema = z.object({
@@ -38,7 +33,7 @@ const updateSchema = z.object({
   team_id: z.string().uuid().optional().nullable(),
   manager_id: z.string().uuid().optional().nullable(),
   is_active: z.boolean().optional(),
-  capabilities: capabilitySchema.optional(),
+  designation: designationSchema.optional(),
 });
 
 /**
@@ -48,10 +43,13 @@ const updateSchema = z.object({
  *  - Granting or revoking Operations Manager requires the ops_managers.create
  *    permission — which only the Agency Admin capability holds.
  */
-async function assertCanEditOpsManager(actor: UserRow): Promise<void> {
-  const allowed = await capabilitiesHavePermission(capabilitiesOf(actor), "ops_managers.create");
-  if (!allowed) {
-    throw new HttpError(403, "Only the Agency Admin can add or remove an Operations Manager");
+async function assertCanEditOpsManager(actor: UserRow, designation?: Capability): Promise<void> {
+  // Only check if setting designation to operations_manager
+  if (designation === "operations_manager") {
+    const allowed = await capabilitiesHavePermission(capabilitiesOf(actor), "ops_managers.create");
+    if (!allowed) {
+      throw new HttpError(403, "Only the Agency Admin can add or remove an Operations Manager");
+    }
   }
 }
 
@@ -152,16 +150,17 @@ router.post(
   requirePermission("employees.create"),
   asyncHandler(async (req, res) => {
     const body = createSchema.parse(req.body);
-    if (body.capabilities.is_operations_manager) await assertCanEditOpsManager(req.user!);
+    await assertCanEditOpsManager(req.user!, body.designation);
     await assertBranchAndTeam(req.user!.agency_id, body.branch_id, body.team_id);
     await assertManager(req.user!.agency_id, body.manager_id);
 
     const passwordHash = await hashPassword(body.password);
+    const booleans = booleansForDesignation(body.designation);
     const { rows } = await pool.query<UserRow>(
       `INSERT INTO users
-         (agency_id, full_name, phone, email, password_hash, branch_id, team_id, manager_id,
+         (agency_id, full_name, phone, email, password_hash, branch_id, team_id, manager_id, designation,
           is_operations_manager, is_team_leader, is_telecaller, is_field_agent)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
        RETURNING *`,
       [
         req.user!.agency_id,
@@ -172,10 +171,11 @@ router.post(
         body.branch_id ?? null,
         body.team_id ?? null,
         body.manager_id ?? null,
-        body.capabilities.is_operations_manager ?? false,
-        body.capabilities.is_team_leader ?? false,
-        body.capabilities.is_telecaller ?? false,
-        body.capabilities.is_field_agent ?? false,
+        body.designation,
+        booleans.is_operations_manager,
+        booleans.is_team_leader,
+        booleans.is_telecaller,
+        booleans.is_field_agent,
       ],
     );
     await notifyCredentials(body.phone, body.password, false);
@@ -275,10 +275,9 @@ router.patch(
       throw new HttpError(403, "The Agency Admin account cannot be modified here");
     }
 
-    const opsFlagChanging =
-      body.capabilities?.is_operations_manager !== undefined &&
-      body.capabilities.is_operations_manager !== existing.is_operations_manager;
-    if (opsFlagChanging) await assertCanEditOpsManager(req.user!);
+    if (body.designation) {
+      await assertCanEditOpsManager(req.user!, body.designation);
+    }
 
     if (body.is_active === false) {
       const allowed = await capabilitiesHavePermission(
@@ -293,11 +292,11 @@ router.patch(
       body.branch_id ?? existing.branch_id,
       body.team_id ?? existing.team_id,
     );
-    if (body.manager_id !== undefined) {
-      await assertManager(req.user!.agency_id, body.manager_id, existing.id);
+    if (body.manager_id !== undefined || body.designation) {
+      await assertManager(req.user!.agency_id, body.manager_id ?? existing.manager_id, existing.id);
     }
 
-    const caps = body.capabilities ?? {};
+    const booleans = body.designation ? booleansForDesignation(body.designation) : null;
     const { rows } = await pool.query<UserRow>(
       `UPDATE users SET
           full_name = COALESCE($3, full_name),
@@ -305,11 +304,12 @@ router.patch(
           branch_id = CASE WHEN $5::boolean THEN $6::uuid ELSE branch_id END,
           team_id = CASE WHEN $7::boolean THEN $8::uuid ELSE team_id END,
           manager_id = CASE WHEN $14::boolean THEN $15::uuid ELSE manager_id END,
+          designation = COALESCE($16, designation),
           is_active = COALESCE($9, is_active),
-          is_operations_manager = COALESCE($10, is_operations_manager),
-          is_team_leader = COALESCE($11, is_team_leader),
-          is_telecaller = COALESCE($12, is_telecaller),
-          is_field_agent = COALESCE($13, is_field_agent)
+          is_operations_manager = CASE WHEN $16::text IS NOT NULL THEN $17::boolean ELSE is_operations_manager END,
+          is_team_leader = CASE WHEN $16::text IS NOT NULL THEN $18::boolean ELSE is_team_leader END,
+          is_telecaller = CASE WHEN $16::text IS NOT NULL THEN $19::boolean ELSE is_telecaller END,
+          is_field_agent = CASE WHEN $16::text IS NOT NULL THEN $20::boolean ELSE is_field_agent END
         WHERE id = $1 AND agency_id = $2
         RETURNING *`,
       [
@@ -322,12 +322,17 @@ router.patch(
         body.team_id !== undefined,
         body.team_id ?? null,
         body.is_active ?? null,
-        caps.is_operations_manager ?? null,
-        caps.is_team_leader ?? null,
-        caps.is_telecaller ?? null,
-        caps.is_field_agent ?? null,
+        null, // $10 (unused)
+        null, // $11 (unused)
+        null, // $12 (unused)
+        null, // $13 (unused)
         body.manager_id !== undefined,
         body.manager_id ?? null,
+        body.designation ?? null,
+        booleans?.is_operations_manager ?? null,
+        booleans?.is_team_leader ?? null,
+        booleans?.is_telecaller ?? null,
+        booleans?.is_field_agent ?? null,
       ],
     );
 
