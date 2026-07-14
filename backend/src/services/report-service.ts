@@ -1246,12 +1246,12 @@ export async function agentBreakdown(
   requested: ReportFilters,
   hasFullView: boolean,
 ): Promise<AgentReportRow[]> {
-  const scope = resolveReportScope(user, requested, hasFullView);
+  const scope = await resolveReportScope(user, requested, hasFullView);
   const filters = scope.filters;
   const useTransition = await hasNextMonthSnapshot(user.agency_id, filters);
 
   const params: unknown[] = [user.agency_id, filters.month, useTransition];
-  const conditions = baseConditions(filters, params);
+  const conditions = scope ? buildReportConditions(scope, params) : baseConditions(filters, params);
   const { rows } = await pool.query(
     `WITH ${classifiedCtes(conditions)}
      SELECT class.assigned_agent_id AS agent_id, ${AGGREGATE_SELECT}
@@ -1264,7 +1264,7 @@ export async function agentBreakdown(
   // Separately query collected amounts by who actually recorded the payment
   // (paymentConditions uses p.collected_by_user_id, unlike classifiedCtes which uses allocated agent).
   const payParams: unknown[] = [user.agency_id, filters.month];
-  const payConditions = paymentConditions(filters, payParams);
+  const payConditions = scope ? buildPaymentConditions(scope, payParams) : paymentConditions(filters, payParams);
   const payWhere = payConditions.length > 0 ? `AND ${payConditions.join(" AND ")}` : "";
   const { rows: collectedRows } = await pool.query(
     `SELECT p.collected_by_user_id AS agent_id, SUM(p.amount)::float AS collected_amount
@@ -1357,11 +1357,11 @@ export async function dimensionBreakdown(
   hasFullView: boolean,
   dimension: BreakdownDimension,
 ): Promise<BreakdownRow[]> {
-  const scope = resolveReportScope(user, requested, hasFullView);
+  const scope = await resolveReportScope(user, requested, hasFullView);
   const filters = scope.filters;
   const useTransition = await hasNextMonthSnapshot(user.agency_id, filters);
   const params: unknown[] = [user.agency_id, filters.month, useTransition];
-  const conditions = baseConditions(filters, params);
+  const conditions = scope ? buildReportConditions(scope, params) : baseConditions(filters, params);
   const dim = DIMENSION_GROUP[dimension];
   const orderBy = dimension === "bucket" ? "MIN(class.cur_sort) ASC NULLS LAST" : "allocated_amount DESC";
 
@@ -1387,7 +1387,7 @@ export async function dimensionBreakdown(
     bucket:  "c.bucket",
   };
   const payParams: unknown[] = [user.agency_id, filters.month];
-  const payConditions = paymentConditions(filters, payParams);
+  const payConditions = scope ? buildPaymentConditions(scope, payParams) : paymentConditions(filters, payParams);
   const payWhere = payConditions.length > 0 ? `AND ${payConditions.join(" AND ")}` : "";
   const dimPayGroup = DIM_PAYMENT_GROUP[dimension];
   const { rows: collectedRows } = await pool.query(
