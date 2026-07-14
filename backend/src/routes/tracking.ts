@@ -49,7 +49,7 @@ router.get(
   "/live",
   asyncHandler(async (req, res) => {
     const me = req.user!;
-    const scope = scopeFilter(me);
+    const scope = await scopeFilter(me);
     const { minutes, radius } = await agencyThresholds(me.agency_id);
 
     const params: unknown[] = [me.agency_id, radius];

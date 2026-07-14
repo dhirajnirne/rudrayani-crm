@@ -34,7 +34,7 @@ router.get(
       })
       .parse(req.query);
 
-    const scope = scopeFilter(me);
+    const scope = await scopeFilter(me);
     const params: unknown[] = [me.agency_id];
     let scopeClause = "";
     if (scope.param !== null) {
