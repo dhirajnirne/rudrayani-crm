@@ -814,9 +814,13 @@ export async function depositTotals(
  * paymentConditions() with the MTD figure so both use identical scope
  * narrowing, just a different time window.
  */
-export async function collectedToday(agencyId: string, filters: ReportFilters): Promise<number> {
+export async function collectedToday(
+  agencyId: string,
+  filters: ReportFilters,
+  scope?: ResolvedScope,
+): Promise<number> {
   const params: unknown[] = [agencyId];
-  const conditions = paymentConditions(filters, params);
+  const conditions = scope ? buildPaymentConditions(scope, params) : paymentConditions(filters, params);
   const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
   const { rows } = await pool.query(
     `SELECT COALESCE(SUM(p.amount), 0)::float AS today
@@ -841,9 +845,10 @@ export interface PaymentTypeSplit {
 export async function collectionByType(
   agencyId: string,
   filters: ReportFilters,
+  scope?: ResolvedScope,
 ): Promise<PaymentTypeSplit> {
   const params: unknown[] = [agencyId, filters.month];
-  const conditions = paymentConditions(filters, params);
+  const conditions = scope ? buildPaymentConditions(scope, params) : paymentConditions(filters, params);
   const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
   const { rows } = await pool.query(
     `SELECT COALESCE(SUM(p.amount) FILTER (WHERE p.type = 'settlement'), 0)::float AS settlement,
@@ -879,9 +884,10 @@ export interface CollectionChannelSplit {
 export async function collectionByChannel(
   agencyId: string,
   filters: ReportFilters,
+  scope?: ResolvedScope,
 ): Promise<CollectionChannelSplit> {
   const params: unknown[] = [agencyId, filters.month];
-  const conditions = paymentConditions(filters, params);
+  const conditions = scope ? buildPaymentConditions(scope, params) : paymentConditions(filters, params);
   const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
   const { rows } = await pool.query(
     `SELECT
@@ -1114,9 +1120,9 @@ export async function dashboard(
       : null;
   const collectionBook = await bookTotals(user.agency_id, filters);
   const [todayAmount, byType, byChannel] = await Promise.all([
-    collectedToday(user.agency_id, filters),
-    collectionByType(user.agency_id, filters),
-    collectionByChannel(user.agency_id, filters),
+    collectedToday(user.agency_id, filters, scope),
+    collectionByType(user.agency_id, filters, scope),
+    collectionByChannel(user.agency_id, filters, scope),
   ]);
 
   return {
