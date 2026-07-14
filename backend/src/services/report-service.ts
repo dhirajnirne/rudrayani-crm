@@ -45,19 +45,20 @@ export interface ReportFilters {
 }
 
 export interface ResolvedScope {
-  clampedTo: "agency" | "team" | "self";
+  clampedTo: "agency" | "team" | "teams" | "self";
   filters: ReportFilters;
+  scopeTeamIds?: string[] | null; // For multi-team TLs when no specific team is requested
 }
 
 /**
  * Server-side scope clamp: admin/ops roam the agency; a TL is pinned to their
  * team; everyone else (self-scoped access) is pinned to themselves.
  */
-export function resolveReportScope(
+export async function resolveReportScope(
   user: UserRow,
   requested: ReportFilters,
   hasFullView: boolean,
-): ResolvedScope {
+): Promise<ResolvedScope> {
   if (!hasFullView) {
     if (requested.agent_id && requested.agent_id !== user.id) {
       throw new HttpError(403, "You can only view your own performance");
@@ -71,12 +72,28 @@ export function resolveReportScope(
     return { clampedTo: "agency", filters: requested };
   }
   if (user.is_team_leader) {
-    // TL without a team sees nothing rather than everything.
-    const teamId = user.team_id ?? "00000000-0000-0000-0000-000000000000";
-    if (requested.team_id && requested.team_id !== teamId) {
-      throw new HttpError(403, "Team leaders can only view their own team");
+    // Multi-team TL: fetch led team IDs from team_leaders table
+    const { rows } = await pool.query<{ team_id: string }>(
+      "SELECT team_id FROM team_leaders WHERE user_id = $1 ORDER BY team_id",
+      [user.id],
+    );
+    const teamIds = rows.map((r) => r.team_id);
+
+    if (requested.team_id) {
+      // Specific team requested: validate it's in the TL's led set
+      if (!teamIds.includes(requested.team_id)) {
+        throw new HttpError(403, "You do not lead this team");
+      }
+      // Single specific team
+      return { clampedTo: "team", filters: { ...requested, team_id: requested.team_id, branch_id: undefined } };
     }
-    return { clampedTo: "team", filters: { ...requested, team_id: teamId, branch_id: undefined } };
+
+    // No specific team requested: aggregate across all led teams
+    return {
+      clampedTo: "teams",
+      filters: { ...requested, team_id: undefined, branch_id: undefined },
+      scopeTeamIds: teamIds.length > 0 ? teamIds : null,
+    };
   }
   // reports.view holders that fit none of the above shouldn't exist, but fail shut.
   return {
