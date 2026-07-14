@@ -102,6 +102,27 @@ export async function resolveReportScope(
   };
 }
 
+/**
+ * Build team_id WHERE clause for multi-team TL support.
+ * Returns the WHERE fragment and updates params array.
+ *
+ * Handles two scenarios:
+ * 1. Single team: team_id = $N
+ * 2. Multi-team TL with scopeTeamIds: team_id = ANY($N) where $N is array
+ * 3. No team restriction: null (no clause added)
+ */
+function buildTeamClause(scope: ResolvedScope, params: unknown[]): string | null {
+  if (scope.scopeTeamIds?.length) {
+    params.push(scope.scopeTeamIds);
+    return `s.assigned_team_id = ANY($${params.length})`;
+  }
+  if (scope.filters.team_id) {
+    params.push(scope.filters.team_id);
+    return `s.assigned_team_id = $${params.length}`;
+  }
+  return null;
+}
+
 export interface MonthDays {
   in_month: number;
   elapsed: number;
@@ -947,7 +968,7 @@ export async function dashboard(
   requested: ReportFilters,
   hasFullView: boolean,
 ): Promise<DashboardResult> {
-  const scope = resolveReportScope(user, requested, hasFullView);
+  const scope = await resolveReportScope(user, requested, hasFullView);
   const filters = scope.filters;
   const days = monthDays(filters.month.slice(0, 7));
   const useTransition = await hasNextMonthSnapshot(user.agency_id, filters);
