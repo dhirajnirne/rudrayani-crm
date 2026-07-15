@@ -165,7 +165,7 @@ async function resolveAgentByPhone(
 
 async function approveAddition(
   client: PoolClient,
-  item: { id: string; company_id: string; loan_number: string; payload: ReviewPayload; allocation_month: string },
+  item: { id: string; company_id: string; loan_number: string; payload: ReviewPayload; allocation_month: string; import_run_id: string },
   approvedBy: string,
 ): Promise<void> {
   const payload = item.payload;
@@ -200,6 +200,14 @@ async function approveAddition(
     );
   }
   const customerId = inserted.rows[0].id as string;
+
+  // Track 6.3: Backup for addition (for rollback via DELETE)
+  await client.query(
+    `INSERT INTO import_row_backups (import_run_id, customer_id, kind, prior_values)
+     VALUES ($1, $2, 'addition', $3)
+     ON CONFLICT (import_run_id, customer_id) DO NOTHING`,
+    [item.import_run_id, customerId, JSON.stringify({})],
+  );
   if (agent) {
     await client.query(
       `INSERT INTO allocation_logs (customer_id, from_agent_id, to_agent_id, allocated_by, reason)
@@ -222,16 +230,32 @@ async function approveAddition(
   );
 }
 
-async function approveRemoval(client: PoolClient, customerId: string): Promise<void> {
+async function approveRemoval(
+  client: PoolClient,
+  item: { customer_id: string; import_run_id: string },
+): Promise<void> {
   // Mirrors how closing a customer already clears the assignment (payments.ts)
   // -- a recalled case has nothing left to work, so it shouldn't linger as
   // "assigned" to an agent even though every current query already filters
   // status='active' before checking assignment.
+
+  // Track 6.3: Fetch prior state for rollback
+  const prior = await client.query(
+    `SELECT customer_name, mobile_number, product, bucket, due_amount, pos, emi, due_date,
+            custom_fields, assigned_agent_id, assigned_team_id, status FROM customers
+      WHERE id = $1`,
+    [item.customer_id],
+  );
+  if (!prior.rows[0]) {
+    throw new HttpError(404, "Customer not found");
+  }
+  const priorState = prior.rows[0];
+
   const { rows } = await client.query(
     `UPDATE customers SET status = 'recalled', recalled_at = now(),
             assigned_agent_id = NULL, assigned_team_id = NULL
       WHERE id = $1 AND status = 'active' RETURNING id`,
-    [customerId],
+    [item.customer_id],
   );
   if (!rows[0]) {
     throw new HttpError(
@@ -239,15 +263,33 @@ async function approveRemoval(client: PoolClient, customerId: string): Promise<v
       "Customer is no longer active -- this review item is stale (already recalled or closed)",
     );
   }
+
+  // Track 6.3: Backup for removal (for rollback via reactivation)
+  await client.query(
+    `INSERT INTO import_row_backups (import_run_id, customer_id, kind, prior_values)
+     VALUES ($1, $2, 'removal', $3)
+     ON CONFLICT (import_run_id, customer_id) DO NOTHING`,
+    [item.import_run_id, item.customer_id, JSON.stringify(priorState)],
+  );
 }
 
 async function approveReactivation(
   client: PoolClient,
-  item: { id: string; company_id: string; customer_id: string; payload: ReviewPayload; allocation_month: string },
+  item: { id: string; company_id: string; customer_id: string; payload: ReviewPayload; allocation_month: string; import_run_id: string },
   approvedBy: string,
 ): Promise<void> {
   const payload = item.payload;
   const agent = await resolveAgentByPhone(client, item.company_id, payload.agent_phone);
+
+  // Track 6.3: Fetch prior state for rollback
+  const prior = await client.query(
+    `SELECT customer_name, mobile_number, product, bucket, due_amount, pos, emi, due_date,
+            custom_fields, assigned_agent_id, assigned_team_id, status FROM customers WHERE id = $1`,
+    [item.customer_id],
+  );
+  if (!prior.rows[0]) throw new HttpError(404, "Customer no longer exists");
+  const priorState = prior.rows[0];
+
   const existing = await client.query(
     `SELECT id, assigned_agent_id FROM customers WHERE id = $1 FOR UPDATE`,
     [item.customer_id],
@@ -284,6 +326,14 @@ async function approveReactivation(
       agent?.team_id ?? null,
     ],
   );
+
+  // Track 6.3: Backup for reactivation (for rollback via re-deactivation)
+  await client.query(
+    `INSERT INTO import_row_backups (import_run_id, customer_id, kind, prior_values)
+     VALUES ($1, $2, 'reactivation', $3)
+     ON CONFLICT (import_run_id, customer_id) DO NOTHING`,
+    [item.import_run_id, item.customer_id, JSON.stringify(priorState)],
+  );
   if (agent && cust.assigned_agent_id !== agent.id) {
     await client.query(
       `INSERT INTO allocation_logs (customer_id, from_agent_id, to_agent_id, allocated_by, reason)
@@ -313,11 +363,27 @@ async function approveReactivation(
  */
 async function approveUpdate(
   client: PoolClient,
-  item: { id: string; customer_id: string; payload: ReviewPayload; company_id: string; allocation_month: string },
+  item: { id: string; customer_id: string; payload: ReviewPayload; company_id: string; allocation_month: string; import_run_id: string },
   approvedBy: string,
 ): Promise<void> {
   const payload = item.payload;
   const agent = await resolveAgentByPhone(client, item.company_id, payload.agent_phone);
+
+  // Track 6.3: Fetch prior state for rollback
+  const prior = await client.query(
+    `SELECT customer_name, mobile_number, product, bucket, due_amount, pos, emi, due_date,
+            custom_fields, assigned_agent_id, assigned_team_id FROM customers
+      WHERE id = $1 AND status = 'active'`,
+    [item.customer_id],
+  );
+  if (!prior.rows[0]) {
+    throw new HttpError(
+      409,
+      "Customer is no longer active -- this review item is stale, re-run the import to refresh the queue",
+    );
+  }
+  const priorState = prior.rows[0];
+
   const existing = await client.query(
     `SELECT id, assigned_agent_id FROM customers WHERE id = $1 AND status = 'active' FOR UPDATE`,
     [item.customer_id],
@@ -357,6 +423,14 @@ async function approveUpdate(
       agent?.id ?? null,
       agent?.team_id ?? null,
     ],
+  );
+
+  // Track 6.3: Backup for update (for rollback via restoring prior values)
+  await client.query(
+    `INSERT INTO import_row_backups (import_run_id, customer_id, kind, prior_values)
+     VALUES ($1, $2, 'update', $3)
+     ON CONFLICT (import_run_id, customer_id) DO NOTHING`,
+    [item.import_run_id, item.customer_id, JSON.stringify(priorState)],
   );
   if (agent && cust.assigned_agent_id !== agent.id) {
     await client.query(
@@ -412,7 +486,7 @@ async function applyDecision(
     if (item.item_type === "addition") {
       await approveAddition(client, item, decidedBy);
     } else if (item.item_type === "removal") {
-      await approveRemoval(client, item.customer_id);
+      await approveRemoval(client, item);
     } else if (item.item_type === "update") {
       await approveUpdate(client, item, decidedBy);
     } else {
