@@ -1,6 +1,5 @@
 import {
   Button,
-  Checkbox,
   Form,
   Input,
   Modal,
@@ -117,11 +116,6 @@ export default function EmployeesPage() {
     load();
   }, [load]);
 
-  // Update search with debounce-like behavior (load is already memoized with search dependency)
-  const handleSearch = (q: string) => {
-    setSearch(q);
-  };
-
   const branchName = (id: string | null) => branches.find((b) => b.id === id)?.name ?? "—";
   const teamName = (id: string | null) => teams.find((t) => t.id === id)?.name ?? "—";
 
@@ -184,7 +178,7 @@ export default function EmployeesPage() {
       }
       setEditing(null);
       form.resetFields();
-      load(search);
+      load();
     } catch (err) {
       message.error(errorMessage(err));
     }

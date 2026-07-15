@@ -17,7 +17,6 @@ import {
   Table,
   Tag,
   Tabs,
-  Tooltip,
   Typography,
   Upload,
   message,
@@ -29,6 +28,7 @@ import {
   FileExcelOutlined,
   HistoryOutlined,
   InboxOutlined,
+  ReloadOutlined,
 } from "@ant-design/icons";
 import type { RcFile } from "antd/es/upload";
 import type { Dayjs } from "dayjs";
@@ -884,7 +884,6 @@ function ImportHistory() {
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [rolling, setRolling] = useState<string | null>(null);
-  const [blockedCustomers, setBlockedCustomers] = useState<string[]>([]);
 
   const deleteRun = async (runId: string) => {
     setDeleting(runId);
@@ -901,7 +900,6 @@ function ImportHistory() {
 
   const rollbackRun = async (runId: string) => {
     setRolling(runId);
-    setBlockedCustomers([]);
     try {
       await api.post(`/imports/runs/${runId}/rollback`);
       message.success("Import rolled back successfully");
@@ -912,7 +910,6 @@ function ImportHistory() {
         const match = msg.match(/(\w+-\d+(?:, \w+-\d+)*)/);
         if (match) {
           const customers = match[1].split(", ");
-          setBlockedCustomers(customers);
           message.error(`Cannot rollback: ${customers.length} customer(s) have been worked since. ${customers.join(", ")}`);
         } else {
           message.error(msg);
