@@ -176,36 +176,39 @@ class HistoryTimeline extends ConsumerWidget {
             ),
             const Divider(),
             // Track 7.1: Customer context header (due amount, EMI)
-            detail.whenData((d) {
-              final dueAmount = d['due_amount'] as num?;
-              final emi = d['emi'] as num?;
-              if (dueAmount == null && emi == null) return null;
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Row(
-                  children: [
-                    if (dueAmount != null) ...[
-                      Text(
-                        'Due: ${_rupee.format(dueAmount)}',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
+            detail.maybeWhen(
+              data: (d) {
+                final dueAmount = d['due_amount'] as num?;
+                final emi = d['emi'] as num?;
+                if (dueAmount == null && emi == null) return const SizedBox.shrink();
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    children: [
+                      if (dueAmount != null) ...[
+                        Text(
+                          'Due: ${_rupee.format(dueAmount)}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
-                      ),
-                      if (emi != null) const SizedBox(width: 16),
+                        if (emi != null) const SizedBox(width: 16),
+                      ],
+                      if (emi != null)
+                        Text(
+                          'EMI: ${_rupee.format(emi)}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                     ],
-                    if (emi != null)
-                      Text(
-                        'EMI: ${_rupee.format(emi)}',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                  ],
-                ),
-              );
-            }),
+                  ),
+                );
+              },
+              orElse: () => const SizedBox.shrink(),
+            ),
             const Divider(),
             detail.when(
               loading: () => const Padding(
