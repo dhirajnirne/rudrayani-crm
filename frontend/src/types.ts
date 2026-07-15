@@ -57,6 +57,7 @@ export interface Team {
   branch_id: string;
   branch_name?: string;
   created_at: string;
+  leaders?: Array<{ id: string; full_name: string }>;
 }
 
 export interface Company {

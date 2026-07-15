@@ -253,7 +253,21 @@ router.get(
       [agencyId],
     );
 
+    // Fetch team_leaders for multi-team TL support
+    const { rows: teamLeaders } = await pool.query<{ user_id: string; team_id: string }>(
+      `SELECT tl.user_id, tl.team_id FROM team_leaders tl
+         JOIN users u ON u.id = tl.user_id
+        WHERE u.agency_id = $1`,
+      [agencyId],
+    );
+    const leadersByTeam = new Map<string, string[]>();
+    for (const tl of teamLeaders) {
+      if (!leadersByTeam.has(tl.team_id)) leadersByTeam.set(tl.team_id, []);
+      leadersByTeam.get(tl.team_id)!.push(tl.user_id);
+    }
+
     const nameById = new Map(users.map((u) => [u.id, u.full_name]));
+    const userById = new Map(users.map((u) => [u.id, u]));
     const toAgent = (u: UserRow) => ({
       ...publicUser(u),
       is_active: u.is_active,
@@ -265,17 +279,23 @@ router.get(
       name: b.name,
       teams: teams
         .filter((t) => t.branch_id === b.id)
-        .map((t) => ({
-          id: t.id,
-          name: t.name,
-          agents: users.filter((u) => u.team_id === t.id).map(toAgent),
-        })),
+        .map((t) => {
+          const agentsInTeam = users.filter((u) => u.team_id === t.id);
+          const leadersInTeam = (leadersByTeam.get(t.id) ?? [])
+            .map((lid) => userById.get(lid))
+            .filter((u): u is UserRow => u !== undefined);
+          return {
+            id: t.id,
+            name: t.name,
+            agents: [...agentsInTeam, ...leadersInTeam].map(toAgent),
+          };
+        }),
       unassigned_agents: users
-        .filter((u) => u.branch_id === b.id && !u.team_id)
+        .filter((u) => u.branch_id === b.id && !u.team_id && u.designation !== 'team_leader')
         .map(toAgent),
     }));
 
-    const agencyUnassigned = users.filter((u) => !u.branch_id).map(toAgent);
+    const agencyUnassigned = users.filter((u) => !u.branch_id && u.designation !== 'team_leader').map(toAgent);
 
     res.json({
       agency: agencyRows[0] ?? null,
