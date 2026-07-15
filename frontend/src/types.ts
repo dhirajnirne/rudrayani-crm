@@ -9,11 +9,13 @@ export interface User {
   id: string;
   agency_id: string;
   branch_id: string | null;
+  branch_ids?: string[]; // Multi-branch for telecallers
   team_id: string | null;
   manager_id: string | null;
   full_name: string;
   phone: string;
   email: string | null;
+  designation?: "operations_manager" | "team_leader" | "telecaller" | "field_agent" | "agency_admin";
   capabilities: Capability[];
 }
 
