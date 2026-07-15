@@ -108,12 +108,14 @@ router.get(
     const { rows } = await pool.query(
       `SELECT c.id, c.loan_number, c.customer_name, c.mobile_number,
               c.product, c.bucket, c.due_amount, c.pos, c.emi, c.status, c.recalled_at,
-              c.custom_fields, c.created_at, c.assigned_agent_id, c.branch_id,
+              c.custom_fields, c.created_at, c.assigned_agent_id, c.assigned_field_agent_id, c.branch_id,
               a.full_name AS assigned_agent_name,
+              f.full_name AS assigned_field_agent_name,
               co.name AS company_name, co.id AS company_id
          FROM customers c
          JOIN companies co ON co.id = c.company_id
          LEFT JOIN users a ON a.id = c.assigned_agent_id
+         LEFT JOIN users f ON f.id = c.assigned_field_agent_id
         WHERE ${where}
         ORDER BY c.created_at DESC
         LIMIT $${params.length - 1} OFFSET $${params.length}`,
