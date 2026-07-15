@@ -363,4 +363,137 @@ router.delete(
   }),
 );
 
+/**
+ * Track 6.4: Rollback allocation-mode (review-approval) imports.
+ * Reverses changes per backup kind (update, addition, reactivation, removal).
+ * All-or-nothing: blocks entire rollback if any customer has been worked since.
+ */
+router.post(
+  "/runs/:id/rollback",
+  asyncHandler(async (req, res) => {
+    const runId = z.string().uuid().parse(req.params.id);
+    const runRow = await pool.query(
+      `SELECT r.id, r.company_id, r.rolled_back_at FROM import_runs r
+        JOIN companies c ON c.id = r.company_id
+       WHERE r.id = $1 AND c.agency_id = $2`,
+      [runId, req.user!.agency_id],
+    );
+    if (!runRow.rows[0]) throw new HttpError(404, "Import run not found");
+    if (runRow.rows[0].rolled_back_at) {
+      throw new HttpError(400, "This import run has already been rolled back");
+    }
+
+    // Get all backups for this run
+    const backups = await pool.query(
+      `SELECT id, customer_id, kind, prior_values, created_at FROM import_row_backups
+        WHERE import_run_id = $1
+        ORDER BY created_at`,
+      [runId],
+    );
+
+    if (backups.rows.length === 0) {
+      throw new HttpError(400, "No backups found for this import run");
+    }
+
+    // Check which customers have been worked since their backup was created
+    const blockedResult = await pool.query(
+      `SELECT DISTINCT irb.customer_id, c.loan_number
+         FROM import_row_backups irb
+         JOIN customers c ON c.id = irb.customer_id
+        WHERE irb.import_run_id = $1
+          AND (
+            EXISTS (SELECT 1 FROM allocation_logs al WHERE al.customer_id = irb.customer_id AND al.created_at > irb.created_at)
+            OR EXISTS (SELECT 1 FROM payments p WHERE p.customer_id = irb.customer_id AND p.created_at > irb.created_at)
+            OR EXISTS (SELECT 1 FROM call_logs cl WHERE cl.customer_id = irb.customer_id AND cl.created_at > irb.created_at)
+            OR EXISTS (SELECT 1 FROM ptps pt WHERE pt.customer_id = irb.customer_id AND pt.created_at > irb.created_at)
+            OR EXISTS (SELECT 1 FROM import_runs ir2 WHERE ir2.id != $1 AND ir2.created_at > irb.created_at AND EXISTS (SELECT 1 FROM customers c2 WHERE c2.id = irb.customer_id AND c2.import_run_id = ir2.id))
+          )`,
+      [runId],
+    );
+
+    if (blockedResult.rows.length > 0) {
+      throw new HttpError(409, `Rollback blocked: ${blockedResult.rows.length} customer(s) have been worked since. ${blockedResult.rows.map((r: any) => r.loan_number).join(", ")}`);
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Process each backup and reverse it per kind
+      for (const backup of backups.rows) {
+        const { customer_id, kind, prior_values } = backup;
+
+        if (kind === "update") {
+          // Restore prior field values
+          const priorData = prior_values as Record<string, any>;
+          const setClauses: string[] = [];
+          const values: any[] = [customer_id];
+          let paramIdx = 2;
+
+          // Build dynamic SET clause for all fields in prior_values
+          for (const [field, value] of Object.entries(priorData)) {
+            if (field === "custom_fields" && value) {
+              setClauses.push(`${field} = $${paramIdx}::jsonb`);
+            } else {
+              setClauses.push(`${field} = $${paramIdx}`);
+            }
+            values.push(value ?? null);
+            paramIdx++;
+          }
+
+          await client.query(
+            `UPDATE customers SET ${setClauses.join(", ")} WHERE id = $1`,
+            values,
+          );
+        } else if (kind === "addition") {
+          // Delete the customer (with safety: already verified no work done since)
+          await client.query(`DELETE FROM customers WHERE id = $1`, [customer_id]);
+        } else if (kind === "reactivation") {
+          // Re-deactivate by setting status = 'recalled', recalled_at = now()
+          await client.query(
+            `UPDATE customers SET status = 'recalled', recalled_at = now() WHERE id = $1`,
+            [customer_id],
+          );
+        } else if (kind === "removal") {
+          // Reactivate by restoring prior state
+          const priorData = prior_values as Record<string, any>;
+          const setClauses: string[] = [];
+          const values: any[] = [customer_id];
+          let paramIdx = 2;
+
+          for (const [field, value] of Object.entries(priorData)) {
+            if (field === "custom_fields" && value) {
+              setClauses.push(`${field} = $${paramIdx}::jsonb`);
+            } else {
+              setClauses.push(`${field} = $${paramIdx}`);
+            }
+            values.push(value ?? null);
+            paramIdx++;
+          }
+
+          await client.query(
+            `UPDATE customers SET ${setClauses.join(", ")} WHERE id = $1`,
+            values,
+          );
+        }
+      }
+
+      // Mark as rolled back
+      await client.query(
+        `UPDATE import_runs SET rolled_back_at = now() WHERE id = $1`,
+        [runId],
+      );
+
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    res.json({ ok: true, rolled_back_count: backups.rows.length });
+  }),
+);
+
 export default router;
