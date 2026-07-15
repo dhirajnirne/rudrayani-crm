@@ -470,6 +470,7 @@ export interface CommitResult {
   new_products: string[];
   /** True when a prior allocation import already exists for this month (a repeat/refresh, not the first). */
   is_repeat_import: boolean;
+  unknown_branches?: string[];
 }
 
 /** phone -> {id, team_id} for the agency's active users named in the file. */
@@ -643,7 +644,7 @@ export async function commitImport(params: {
           JSON.stringify(row.custom_fields),
           agent?.id ?? null,
           agent?.team_id ?? null,
-          branch?.id ?? null,
+          branch ?? null,
           mode === "new" ? runId : null,
         ],
       );

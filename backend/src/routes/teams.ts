@@ -4,6 +4,8 @@ import { pool } from "../config/db";
 import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
+import { capabilitiesOf } from "../types/user";
+import { capabilitiesHavePermission } from "../services/permission-service";
 
 const router = Router();
 router.use(authenticate);
@@ -94,8 +96,11 @@ router.post(
   "/:id/leaders",
   asyncHandler(async (req, res) => {
     // Gate by ops_managers.create so only Admin/OM can assign leadership
-    const allowed = await requirePermission("ops_managers.create")(req, res, () => {});
-    if (allowed instanceof HttpError) throw allowed;
+    if (!req.user) throw new HttpError(401, "Unauthorized");
+    const allowed = await capabilitiesHavePermission(capabilitiesOf(req.user), "ops_managers.create");
+    if (!allowed) {
+      throw new HttpError(403, "Only Agency Admin or Operations Manager can assign team leaders");
+    }
 
     const body = z.object({ user_id: z.string().uuid() }).parse(req.body);
 
@@ -130,8 +135,11 @@ router.delete(
   "/:id/leaders/:userId",
   asyncHandler(async (req, res) => {
     // Gate by ops_managers.create so only Admin/OM can manage leadership
-    const allowed = await requirePermission("ops_managers.create")(req, res, () => {});
-    if (allowed instanceof HttpError) throw allowed;
+    if (!req.user) throw new HttpError(401, "Unauthorized");
+    const allowed = await capabilitiesHavePermission(capabilitiesOf(req.user), "ops_managers.create");
+    if (!allowed) {
+      throw new HttpError(403, "Only Agency Admin or Operations Manager can manage team leaders");
+    }
 
     // Verify team exists and belongs to agency
     const { rows: teamRows } = await pool.query(

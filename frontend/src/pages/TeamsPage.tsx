@@ -194,7 +194,7 @@ export default function TeamsPage() {
                     danger
                     size="small"
                     icon={<DeleteOutlined />}
-                    onClick={() => removeLeader(managingLeaders.id, leader.id)}
+                    onClick={() => removeLeader(managingLeaders!.id, leader.id)}
                   />
                 </div>
               ))}

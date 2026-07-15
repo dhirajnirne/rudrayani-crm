@@ -1200,7 +1200,7 @@ export async function overview(
   hasFullView: boolean,
   months: number | "all",
 ): Promise<{ total: number; points: OverviewPoint[] }> {
-  const scope = resolveReportScope(user, { ...requested, month: "2000-01-01" }, hasFullView);
+  const scope = await resolveReportScope(user, { ...requested, month: "2000-01-01" }, hasFullView);
   const params: unknown[] = [user.agency_id];
   const conditions = paymentConditions(scope.filters, params);
   let monthLimit = "";
