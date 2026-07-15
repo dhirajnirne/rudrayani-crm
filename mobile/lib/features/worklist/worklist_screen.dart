@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -10,6 +10,7 @@ import '../../core/tracking/attendance_provider.dart';
 import '../../core/tracking/tracking_service.dart';
 import '../../core/widgets/state_views.dart';
 import 'worklist_provider.dart';
+import '../reminders/today_section.dart';
 
 final _rupee = NumberFormat.currency(
   locale: 'en_IN',
@@ -48,7 +49,7 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Today\'s Worklist',
+              'My Worklist',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
             Text(
@@ -78,6 +79,7 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
         children: [
           const _DutyBanner(),
           const _SyncBanner(),
+          const TodaySection(),
           Padding(
             padding: const EdgeInsets.all(12),
             child: Column(

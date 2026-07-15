@@ -1,9 +1,10 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'correction_request_dialog.dart';
 import 'customer_detail_provider.dart';
+import '../../../core/utils/parser.dart';
 
 final _rupee = NumberFormat.currency(
   locale: 'en_IN',
@@ -73,7 +74,7 @@ List<_HistoryEntry> _merge(Map<String, dynamic> detail) {
         at: DateTime.parse(m['paid_at'] as String),
         icon: Icons.currency_rupee,
         color: AppColors.success,
-        title: 'Payment: ${_rupee.format((m['amount'] as num).toDouble())}',
+        title: 'Payment: ${_rupee.format(parseDouble(m['amount']) ?? 0.0)}',
         subtitle: m['mode'] as String?,
         correctableRecordType: 'payment',
         recordId: m['id'] as String?,
@@ -108,7 +109,7 @@ List<_HistoryEntry> _merge(Map<String, dynamic> detail) {
         icon: Icons.calendar_today,
         color: AppColors.accent,
         title:
-            'PTP: ${_rupee.format((m['amount'] as num).toDouble())} '
+            'PTP: ${_rupee.format(parseDouble(m['amount']) ?? 0.0)} '
             '(${m['status']})',
         subtitle: m['promised_date'] != null
             ? 'Promised ${DateFormat('dd MMM yyyy').format(DateTime.parse(m['promised_date'] as String))}'

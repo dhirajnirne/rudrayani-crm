@@ -24,7 +24,7 @@
     "seed:activity": "tsx src/migrations/seed_hero_activity.ts"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1080.0",
+    "@aws-sdk/client-s3": "^3.1085.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

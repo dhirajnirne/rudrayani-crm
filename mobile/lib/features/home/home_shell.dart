@@ -6,7 +6,6 @@ import '../dashboard/field_executive_dashboard_screen.dart';
 import '../dashboard/team_leader_dashboard_screen.dart';
 import '../dashboard/telecaller_dashboard_screen.dart';
 import '../performance/performance_screen.dart';
-import '../reminders/today_section.dart';
 import '../team/team_screen.dart';
 import '../worklist/worklist_screen.dart';
 
@@ -66,13 +65,22 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         label: 'My Worklist',
       ),
       if (isTL)
-        const NavigationDestination(icon: Icon(Icons.dashboard), label: 'Team Dashboard'),
+        const NavigationDestination(
+          icon: Icon(Icons.dashboard),
+          label: 'Team Dashboard',
+        ),
       if (isTL)
         const NavigationDestination(icon: Icon(Icons.groups), label: 'My Team'),
       if (isTelecaller)
-        const NavigationDestination(icon: Icon(Icons.dashboard), label: 'Dashboard'),
+        const NavigationDestination(
+          icon: Icon(Icons.dashboard),
+          label: 'Dashboard',
+        ),
       if (isFieldAgent)
-        const NavigationDestination(icon: Icon(Icons.dashboard), label: 'Dashboard'),
+        const NavigationDestination(
+          icon: Icon(Icons.dashboard),
+          label: 'Dashboard',
+        ),
       const NavigationDestination(
         icon: Icon(Icons.insights),
         label: 'My Performance',
@@ -80,13 +88,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     ];
 
     return Scaffold(
-      body: Column(
-        children: [
-          // "Today's Actions" hero — always visible above the tab content
-          const TodaySection(heroMode: true),
-          Expanded(child: IndexedStack(index: _tab, children: screens)),
-        ],
-      ),
+      body: IndexedStack(index: _tab, children: screens),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
         onDestinationSelected: (i) => setState(() => _tab = i),

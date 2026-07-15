@@ -5,6 +5,7 @@ import '../../core/api/api_client.dart';
 import '../../core/auth/auth_provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/state_views.dart';
+import '../../core/utils/parser.dart';
 import 'dashboard_widgets.dart';
 
 String _lakh(num? v) {
@@ -111,7 +112,7 @@ class FieldExecutiveDashboardScreen extends ConsumerWidget {
               error: (e, _) => InlineErrorNote(message: 'Route: $e'),
               data: (r) {
                 if (r == null) return const SizedBox.shrink();
-                final km = ((r['distance_meters'] as num?) ?? 0) / 1000;
+                final km = (parseDouble(r['distance_meters']) ?? 0.0) / 1000;
                 final points = (r['points'] as List?)?.length ?? 0;
                 return DashboardStatGrid(cards: [
                   DashboardStatCard(label: "Today's Distance", value: '${km.toStringAsFixed(1)} km'),
@@ -144,8 +145,8 @@ class FieldExecutiveDashboardScreen extends ConsumerWidget {
               error: (e, _) => InlineErrorNote(message: 'Target: $e'),
               data: (d) {
                 final collection = d['collection'] as Map<String, dynamic>;
-                final mtd = (collection['mtd_amount'] as num?) ?? 0;
-                final target = collection['target_amount'] as num?;
+                final mtd = parseDouble(collection['mtd_amount']) ?? 0.0;
+                final target = parseDouble(collection['target_amount']);
                 final progress = target != null && target > 0 ? (mtd / target).clamp(0.0, 1.0) : null;
                 return DashboardStatGrid(cards: [
                   DashboardStatCard(label: 'Collected MTD', value: '₹ ${_lakh(mtd)}', accent: AppColors.success),

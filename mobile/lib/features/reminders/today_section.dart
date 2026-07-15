@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/theme/app_theme.dart';
 import 'reminders_provider.dart';
+import '../../core/utils/parser.dart';
 
 final _rupee = NumberFormat.currency(
   locale: 'en_IN',
@@ -187,7 +188,7 @@ class _PtpTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final promised = DateTime.parse(ptp['promised_date'] as String);
     final overdue = promised.isBefore(DateTime.now());
-    final amount = (ptp['amount'] as num?)?.toDouble();
+    final amount = parseDouble(ptp['amount']);
     final textColor = heroMode ? AppColors.onPrimary : null;
 
     return ListTile(

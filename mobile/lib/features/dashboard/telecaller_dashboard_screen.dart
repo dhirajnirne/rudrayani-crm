@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/state_views.dart';
+import '../../core/utils/parser.dart';
 import 'dashboard_widgets.dart';
 
 String _lakh(num? v) {
@@ -68,9 +69,9 @@ class TelecallerDashboardScreen extends ConsumerWidget {
           error: (e, _) => ErrorState(message: 'Could not load your dashboard.\n$e', onRetry: () => _refresh(ref)),
           data: (d) {
             final collection = d['collection'] as Map<String, dynamic>;
-            final mtd = (collection['mtd_amount'] as num?) ?? 0;
-            final today = (collection['today_amount'] as num?) ?? 0;
-            final target = collection['target_amount'] as num?;
+            final mtd = parseDouble(collection['mtd_amount']) ?? 0.0;
+            final today = parseDouble(collection['today_amount']) ?? 0.0;
+            final target = parseDouble(collection['target_amount']);
             final progress = target != null && target > 0 ? (mtd / target).clamp(0.0, 1.0) : null;
 
             return ListView(
@@ -93,11 +94,11 @@ class TelecallerDashboardScreen extends ConsumerWidget {
                   ),
                   error: (e, _) => InlineErrorNote(message: 'Calls: $e'),
                   data: (t) {
-                    final total = (t['total_trails'] as num?)?.toInt() ?? 0;
+                    final total = parseInt(t['total_trails']) ?? 0;
                     final byResult = (t['by_result_code'] as List).cast<Map<String, dynamic>>();
                     final notConnected = byResult
                         .where((r) => _notConnectedCodes.contains(r['result_code']))
-                        .fold<int>(0, (s, r) => s + ((r['count'] as num?)?.toInt() ?? 0));
+                        .fold<int>(0, (s, r) => s + (parseInt(r['count']) ?? 0));
                     final connected = total - notConnected;
                     return DashboardStatGrid(cards: [
                       DashboardStatCard(label: 'Total Calls', value: '$total'),
@@ -122,7 +123,7 @@ class TelecallerDashboardScreen extends ConsumerWidget {
                     DashboardStatCard(
                         label: 'Broken', value: '${t['ptps_broken'] ?? 0}', accent: AppColors.error),
                     DashboardStatCard(
-                        label: 'Pending Value', value: '₹ ${_lakh(t['ptps_pending_value'] as num?)}'),
+                        label: 'Pending Value', value: '₹ ${_lakh(parseDouble(t['ptps_pending_value']))}'),
                   ]),
                 ),
               ],

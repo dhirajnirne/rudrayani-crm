@@ -1114,10 +1114,6 @@ export async function dashboard(
   };
 
   const collectionTarget = await resolveTarget(user.agency_id, "collection", filters);
-  const collectionRemaining =
-    collectionTarget.target_amount != null
-      ? Math.max(collectionTarget.target_amount - agg.collected_amount, 0)
-      : null;
   const collectionBook = await bookTotals(user.agency_id, filters);
   const [todayAmount, byType, byChannel] = await Promise.all([
     collectedToday(user.agency_id, filters, scope),

@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/state_views.dart';
+import '../../core/utils/parser.dart';
 
 /// "My Performance" (Phase 5): the same /reports/dashboard endpoint as the
 /// web — the server clamps the scope to the signed-in user, so this shows
@@ -77,8 +78,8 @@ class _PerformanceBody extends StatelessWidget {
     final metrics = data['metrics'] as Map<String, dynamic>;
     final trail = data['trail'] as Map<String, dynamic>;
 
-    final mtd = (collection['mtd_amount'] as num?) ?? 0;
-    final target = collection['target_amount'] as num?;
+    final mtd = parseDouble(collection['mtd_amount']) ?? 0.0;
+    final target = parseDouble(collection['target_amount']);
     final progress =
         target != null && target > 0 ? (mtd / target).clamp(0.0, 1.0) : null;
 
@@ -138,7 +139,7 @@ class _PerformanceBody extends StatelessWidget {
                     mtd >= target!
                         ? 'Target achieved! 🎉'
                         : '₹ ${_lakh(target - mtd)} to go'
-                          ' · need ₹ ${_lakh(collection['run_rate_required'] as num?)} per day',
+                          ' · need ₹ ${_lakh(parseDouble(collection['run_rate_required']))} per day',
                     style: TextStyle(color: AppColors.onPrimary.withValues(alpha: 0.7), fontSize: 12).tabular,
                   ),
                 ],
@@ -155,7 +156,7 @@ class _PerformanceBody extends StatelessWidget {
               child: _StatCard(
                 label: 'My accounts',
                 value: '${allocated['count']}',
-                sub: '₹ ${_lakh(allocated['amount'] as num?)} POS',
+                sub: '₹ ${_lakh(parseDouble(allocated['amount']))} POS',
               ),
             ),
             const SizedBox(width: 8),
@@ -163,7 +164,7 @@ class _PerformanceBody extends StatelessWidget {
               child: _StatCard(
                 label: 'Worked (trail)',
                 value: '${trail['uploaded_count']} / ${trail['allocated_count']}',
-                sub: _pct(trail['pct'] as num?),
+                sub: _pct(parseDouble(trail['pct'])),
               ),
             ),
           ],
@@ -218,9 +219,9 @@ class _MetricRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final mtd = metric['mtd_amount'] as num?;
-    final target = metric['target_amount'] as num?;
-    final pctVal = metric['mtd_pct'] as num?;
+    final mtd = parseDouble(metric['mtd_amount']);
+    final target = parseDouble(metric['target_amount']);
+    final pctVal = parseDouble(metric['mtd_pct']);
     final progress = target != null && target > 0
         ? ((mtd ?? 0) / target).clamp(0.0, 1.0)
         : null;

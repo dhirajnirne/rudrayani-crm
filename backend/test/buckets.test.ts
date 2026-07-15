@@ -20,7 +20,7 @@ let companyId: string;
 let otherCompanyId: string;
 let adminToken: string;
 let agentToken: string;
-let bucketIds: Record<string, string> = {};
+const bucketIds: Record<string, string> = {};
 
 async function login(phone: string): Promise<string> {
   const res = await request(app).post("/api/auth/login").send({ phone, password: PASSWORD });

@@ -1,9 +1,10 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
 import '../../core/widgets/state_views.dart';
+import '../../core/utils/parser.dart';
 
 final _rupee = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 
@@ -109,8 +110,8 @@ class _MemberCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final onDuty = member['on_duty'] == true;
     final status = live?['status'] as String?;
-    final minutes = (member['minutes_worked'] as num?)?.toInt() ?? 0;
-    final payTotal = (member['payments_total'] as num?)?.toDouble() ?? 0;
+    final minutes = parseInt(member['minutes_worked']) ?? 0;
+    final payTotal = parseDouble(member['payments_total']) ?? 0;
 
     Color chipColor;
     String chipText;

@@ -412,7 +412,7 @@ router.post(
     );
 
     if (blockedResult.rows.length > 0) {
-      throw new HttpError(409, `Rollback blocked: ${blockedResult.rows.length} customer(s) have been worked since. ${blockedResult.rows.map((r: any) => r.loan_number).join(", ")}`);
+      throw new HttpError(409, `Rollback blocked: ${blockedResult.rows.length} customer(s) have been worked since. ${blockedResult.rows.map((r: { loan_number: string }) => r.loan_number).join(", ")}`);
     }
 
     const client = await pool.connect();
@@ -425,9 +425,9 @@ router.post(
 
         if (kind === "update") {
           // Restore prior field values
-          const priorData = prior_values as Record<string, any>;
+          const priorData = prior_values as Record<string, unknown>;
           const setClauses: string[] = [];
-          const values: any[] = [customer_id];
+          const values: unknown[] = [customer_id];
           let paramIdx = 2;
 
           // Build dynamic SET clause for all fields in prior_values
@@ -456,9 +456,9 @@ router.post(
           );
         } else if (kind === "removal") {
           // Reactivate by restoring prior state
-          const priorData = prior_values as Record<string, any>;
+          const priorData = prior_values as Record<string, unknown>;
           const setClauses: string[] = [];
-          const values: any[] = [customer_id];
+          const values: unknown[] = [customer_id];
           let paramIdx = 2;
 
           for (const [field, value] of Object.entries(priorData)) {

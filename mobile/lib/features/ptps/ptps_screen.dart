@@ -1,9 +1,10 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
 import '../../core/widgets/state_views.dart';
+import '../../core/utils/parser.dart';
 import '../worklist/worklist_provider.dart';
 
 final _rupee = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
@@ -66,7 +67,7 @@ class PtpsScreen extends ConsumerWidget {
             itemBuilder: (ctx, i) {
               final ptp = list[i];
               final status = ptp['status'] as String;
-              final amount = (ptp['amount'] as num?)?.toDouble();
+              final amount = parseDouble(ptp['amount']);
               final promised = ptp['promised_date'] != null
                   ? DateTime.parse(ptp['promised_date'] as String)
                   : null;

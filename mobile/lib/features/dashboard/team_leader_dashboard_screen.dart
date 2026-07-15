@@ -5,6 +5,7 @@ import '../../core/api/api_client.dart';
 import '../../core/auth/auth_provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/state_views.dart';
+import '../../core/utils/parser.dart';
 import 'dashboard_widgets.dart';
 
 String _lakh(num? v) {
@@ -118,7 +119,7 @@ class TeamLeaderDashboardScreen extends ConsumerWidget {
                     DashboardStatCard(
                         label: 'Conversion',
                         value: d['ptp_conversion_pct'] != null
-                            ? '${(d['ptp_conversion_pct'] as num).toStringAsFixed(1)}%'
+                            ? '${parseDouble(d['ptp_conversion_pct'])?.toStringAsFixed(1)}%'
                             : '—'),
                   ]),
                 ),
@@ -194,8 +195,8 @@ class _CollectionsSummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cash = members.fold<double>(0, (s, m) => s + ((m['cash_total'] as num?)?.toDouble() ?? 0));
-    final online = members.fold<double>(0, (s, m) => s + ((m['online_total'] as num?)?.toDouble() ?? 0));
+    final cash = members.fold<double>(0, (s, m) => s + (parseDouble(m['cash_total']) ?? 0.0));
+    final online = members.fold<double>(0, (s, m) => s + (parseDouble(m['online_total']) ?? 0.0));
     return DashboardStatGrid(cards: [
       DashboardStatCard(label: 'Cash', value: '₹ ${_lakh(cash)}', accent: AppColors.success),
       DashboardStatCard(label: 'Online', value: '₹ ${_lakh(online)}', accent: AppColors.info),
@@ -209,10 +210,10 @@ class _ReceiptsSummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final visits = members.fold<int>(0, (s, m) => s + ((m['field_visits'] as num?)?.toInt() ?? 0));
-    final withPhoto = members.fold<int>(0, (s, m) => s + ((m['field_visits_with_photo'] as num?)?.toInt() ?? 0));
+    final visits = members.fold<int>(0, (s, m) => s + (parseInt(m['field_visits']) ?? 0));
+    final withPhoto = members.fold<int>(0, (s, m) => s + (parseInt(m['field_visits_with_photo']) ?? 0));
     final withSig =
-        members.fold<int>(0, (s, m) => s + ((m['field_visits_with_signature'] as num?)?.toInt() ?? 0));
+        members.fold<int>(0, (s, m) => s + (parseInt(m['field_visits_with_signature']) ?? 0));
     return DashboardStatGrid(cards: [
       DashboardStatCard(label: 'Receipts Generated', value: '$visits'),
       DashboardStatCard(label: 'With Photo', value: '$withPhoto'),
@@ -228,9 +229,9 @@ class _FollowUpsSummary extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final count = agents.fold<int>(
-        0, (s, a) => s + (((a['ptps_due'] as Map<String, dynamic>?)?['count'] as num?)?.toInt() ?? 0));
+        0, (s, a) => s + (parseInt((a['ptps_due'] as Map<String, dynamic>?)?['count']) ?? 0));
     final total = agents.fold<double>(
-        0, (s, a) => s + (((a['ptps_due'] as Map<String, dynamic>?)?['total_amount'] as num?)?.toDouble() ?? 0));
+        0, (s, a) => s + (parseDouble((a['ptps_due'] as Map<String, dynamic>?)?['total_amount']) ?? 0.0));
     return DashboardStatGrid(cards: [
       DashboardStatCard(label: 'Due Today', value: '$count'),
       DashboardStatCard(label: 'Promised Amount', value: '₹ ${_lakh(total)}'),
@@ -294,7 +295,7 @@ class _RouteRowState extends ConsumerState<_RouteRow> {
                 Text(widget.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
                 if (_route != null)
                   Text(
-                    '${((_route!['distance_meters'] as num) / 1000).toStringAsFixed(1)} km · '
+                    '${((parseDouble(_route!['distance_meters']) ?? 0.0) / 1000).toStringAsFixed(1)} km · '
                     '${(_route!['points'] as List).length} pings',
                     style: const TextStyle(fontSize: 12, color: AppColors.textSecondary).tabular,
                   )

@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rudrayani CRM - Web Dashboard All Screens</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #00535b;
+      --primary-light: #007a86;
+      --secondary: #2c694e;
+      --accent: #d77a00;
+      --danger: #ba1a1a;
+      --bg: #f4f7f6;
+      --surface: #ffffff;
+      --text-main: #1a1f1e;
+      --text-muted: #535f5d;
+      --border: #dce4e2;
+      --sidebar-width: 260px;
+      --header-height: 64px;
+      --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Inter', sans-serif;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text-main);
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* Top/Role Selector (Floating for mockup purposes) */
+    .mockup-controls {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: var(--text-main);
+      color: white;
+      padding: 15px;
+      border-radius: 8px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .mockup-controls select {
+      padding: 8px;
+      border-radius: 4px;
+      border: none;
+      font-size: 14px;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      width: var(--sidebar-width);
+      background-color: var(--primary);
+      color: white;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      flex-shrink: 0;
+    }
+    .sidebar-header {
+      height: var(--header-height);
+      display: flex;
+      align-items: center;
+      padding: 0 20px;
+      font-size: 20px;
+      font-weight: 700;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    .nav-list {
+      list-style: none;
+      padding: 10px 0;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .nav-item {
+      padding: 12px 20px;
+      cursor: pointer;
+      font-size: 15px;
+      transition: background 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      opacity: 0.8;
+    }
+    .nav-item:hover, .nav-item.active {
+      background-color: rgba(255,255,255,0.1);
+      opacity: 1;
+    }
+    .nav-item.active {
+      border-left: 4px solid var(--accent);
+      font-weight: 600;
+    }
+
+    /* Main Content */
+    .main-layout {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+    .header {
+      height: var(--header-height);
+      background-color: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 30px;
+      flex-shrink: 0;
+    }
+    .header-user {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 500;
+    }
+    .avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: var(--primary-light);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+    }
+    
+    .content-area {
+      flex: 1;
+      overflow-y: auto;
+      padding: 30px;
+    }
+
+    /* Screen Containers */
+    .screen {
+      display: none;
+      animation: fadeIn 0.3s ease;
+    }
+    .screen.active {
+      display: block;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(5px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* UI Components */
+    .page-title {
+      font-size: 24px;
+      margin-bottom: 24px;
+      color: var(--primary);
+    }
+    
+    /* Cards & Grids */
+    .grid-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+    .card {
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 24px;
+      box-shadow: var(--shadow);
+      border: 1px solid var(--border);
+    }
+    .stat-title {
+      color: var(--text-muted);
+      font-size: 14px;
+      font-weight: 500;
+      margin-bottom: 8px;
+    }
+    .stat-value {
+      font-size: 32px;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+    .stat-trend.positive { color: var(--secondary); font-size: 14px; margin-top: 8px;}
+    .stat-trend.negative { color: var(--danger); font-size: 14px; margin-top: 8px;}
+
+    /* Tables */
+    .table-container {
+      background: var(--surface);
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+      border: 1px solid var(--border);
+      overflow: hidden;
+      margin-bottom: 30px;
+    }
+    .table-header {
+      padding: 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+    }
+    th, td {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    th {
+      font-weight: 600;
+      color: var(--text-muted);
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    tr:last-child td { border-bottom: none; }
+    
+    /* Badges */
+    .badge {
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      display: inline-block;
+    }
+    .badge.success { background: #e6f4ea; color: #1e8e3e; }
+    .badge.warning { background: #fef7e0; color: #b06000; }
+    .badge.danger { background: #fce8e6; color: #c5221f; }
+    .badge.info { background: #e8f0fe; color: #1a73e8; }
+
+    /* Buttons */
+    .btn {
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      transition: background 0.2s;
+      font-size: 14px;
+    }
+    .btn-primary {
+      background: var(--primary);
+      color: white;
+    }
+    .btn-primary:hover { background: var(--primary-light); }
+    .btn-outline {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-main);
+    }
+    .btn-outline:hover { background: var(--bg); }
+    .btn-success { background: var(--secondary); color: white; }
+
+    /* Map Placeholder */
+    .map-placeholder {
+      height: 400px;
+      background: #e0e0e0;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-muted);
+      font-size: 18px;
+      margin-bottom: 20px;
+      position: relative;
+    }
+    .map-pin {
+      width: 16px;
+      height: 16px;
+      background: var(--danger);
+      border-radius: 50%;
+      position: absolute;
+      border: 3px solid white;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+    }
+
+    /* Forms */
+    .form-group {
+      margin-bottom: 20px;
+    }
+    .form-group label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+    .form-group input, .form-group select, .form-group textarea {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 14px;
+    }
+
+  </style>
+</head>
+<body>
+
+  <!-- Mockup Controls -->
+  <div class="mockup-controls">
+    <label><strong>Role Perspective:</strong></label>
+    <select id="role-selector" onchange="changeRole()">
+      <option value="agency_admin">Agency Admin</option>
+      <option value="operations_manager">Operations Manager</option>
+      <option value="team_leader">Team Leader</option>
+      <option value="telecaller">Telecaller</option>
+      <option value="field_agent">Field Agent</option>
+    </select>
+  </div>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      Rudrayani CRM
+    </div>
+    <ul class="nav-list" id="nav-list">
+      <!-- Generated via JS based on role -->
+    </ul>
+  </aside>
+
+  <!-- Main Layout -->
+  <main class="main-layout">
+    <header class="header">
+      <div class="header-title" id="header-role">Agency Admin Workspace</div>
+      <div class="header-user">
+        <div class="avatar">AA</div>
+        <span>Admin User</span>
+      </div>
+    </header>
+
+    <div class="content-area">
+      
+      <!-- Management Dashboard Screen -->
+      <div id="screen-management-dashboard" class="screen">
+        <h1 class="page-title">Management Dashboard</h1>
+        
+        <div class="grid-cards">
+          <div class="card">
+            <div class="stat-title">Collection vs Target</div>
+            <div class="stat-value">₹14.2M <span style="font-size: 16px; color: var(--text-muted)">/ ₹20M</span></div>
+            <div class="stat-trend positive">↑ 71% achieved</div>
+          </div>
+          <div class="card">
+            <div class="stat-title">Active Agents Today</div>
+            <div class="stat-value">124</div>
+            <div class="stat-trend">Out of 145 total</div>
+          </div>
+          <div class="card">
+            <div class="stat-title">Attendance</div>
+            <div class="stat-value">85.5%</div>
+            <div class="stat-trend negative">↓ 2% from yesterday</div>
+          </div>
+          <div class="card">
+            <div class="stat-title">Pending Approvals</div>
+            <div class="stat-value">42</div>
+            <div class="stat-trend warning">Needs attention</div>
+          </div>
+        </div>
+
+        <div class="table-container">
+          <div class="table-header">
+            <h3>Top Performing Agents</h3>
+            <button class="btn btn-outline">View All</button>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Agent</th>
+                <th>Role</th>
+                <th>Branch</th>
+                <th>Collected (₹)</th>
+                <th>Target Achieved</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Ramesh Kumar</td>
+                <td>Telecaller</td>
+                <td>North Branch</td>
+                <td>₹450,000</td>
+                <td><span class="badge success">112%</span></td>
+              </tr>
+              <tr>
+                <td>Suresh Patel</td>
+                <td>Field Agent</td>
+                <td>South Branch</td>
+                <td>₹380,000</td>
+                <td><span class="badge success">105%</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- General Dashboard (Agents) -->
+      <div id="screen-dashboard" class="screen">
+        <h1 class="page-title">My Dashboard</h1>
+        <div class="grid-cards">
+          <div class="card">
+            <div class="stat-title">My Collection Today</div>
+            <div class="stat-value">₹12,500</div>
+            <div class="stat-trend">Target: ₹20,000</div>
+          </div>
+          <div class="card">
+            <div class="stat-title">Calls Made</div>
+            <div class="stat-value">64</div>
+            <div class="stat-trend positive">42 Connected (65%)</div>
+          </div>
+          <div class="card">
+            <div class="stat-title">PTPs Due Today</div>
+            <div class="stat-value">12</div>
+            <div class="stat-trend warning">4 Overdue</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Employees Screen -->
+      <div id="screen-employees" class="screen">
+        <h1 class="page-title">Employees Directory</h1>
+        <div class="table-container">
+          <div class="table-header">
+            <h3>All Staff</h3>
+            <button class="btn btn-primary">+ Add Employee</button>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Phone</th>
+                <th>Capabilities</th>
+                <th>Branch/Team</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Amit Singh</td>
+                <td>+91 9876543210</td>
+                <td><span class="badge info">Telecaller</span></td>
+                <td>North / Alpha</td>
+                <td><span class="badge success">Active</span></td>
+                <td><button class="btn btn-outline">Edit</button></td>
+              </tr>
+              <tr>
+                <td>Priya Sharma</td>
+                <td>+91 9876543211</td>
+                <td><span class="badge info">Team Leader</span></td>
+                <td>North / Alpha</td>
+                <td><span class="badge success">Active</span></td>
+                <td><button class="btn btn-outline">Edit</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Customers Screen -->
+      <div id="screen-customers" class="screen">
+        <h1 class="page-title">Master Customer List</h1>
+        <div class="table-container">
+          <div class="table-header">
+            <input type="text" placeholder="Search Loan No, Name..." style="padding: 8px; border:1px solid var(--border); border-radius: 4px; width: 300px;">
+            <button class="btn btn-outline">Filter</button>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Loan No</th>
+                <th>Customer Name</th>
+                <th>Company</th>
+                <th>Bucket</th>
+                <th>Due Amount</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>L-100234</td>
+                <td>Vikram Joshi</td>
+                <td>Hero FinCorp</td>
+                <td><span class="badge warning">B2</span></td>
+                <td>₹45,000</td>
+                <td><span class="badge info">Active</span></td>
+              </tr>
+              <tr>
+                <td>L-100235</td>
+                <td>Neha Gupta</td>
+                <td>Bajaj Finance</td>
+                <td><span class="badge danger">B4</span></td>
+                <td>₹120,000</td>
+                <td><span class="badge info">Active</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- My Worklist Screen -->
+      <div id="screen-worklist" class="screen">
+        <h1 class="page-title">My Worklist</h1>
+        <div class="grid-cards" style="display: grid; grid-template-columns: 1fr; gap: 15px;">
+          
+          <div class="card" style="display:flex; justify-content:space-between; align-items:center; padding: 16px;">
+            <div>
+              <div style="font-weight: 600; font-size: 16px; margin-bottom: 4px;">Vikram Joshi <span class="badge warning" style="margin-left: 10px;">PTP Due Today</span></div>
+              <div style="color: var(--text-muted); font-size: 14px;">L-100234 | Hero FinCorp | Due: ₹45,000</div>
+            </div>
+            <div>
+              <button class="btn btn-success" onclick="alert('Calling...')">📞 Call</button>
+              <button class="btn btn-outline" style="margin-left: 10px;">Log Interaction</button>
+            </div>
+          </div>
+
+          <div class="card" style="display:flex; justify-content:space-between; align-items:center; padding: 16px;">
+            <div>
+              <div style="font-weight: 600; font-size: 16px; margin-bottom: 4px;">Rahul Verma <span class="badge danger" style="margin-left: 10px;">Overdue 3 days</span></div>
+              <div style="color: var(--text-muted); font-size: 14px;">L-883392 | TVS Credit | Due: ₹12,500</div>
+            </div>
+            <div>
+              <button class="btn btn-success" onclick="alert('Calling...')">📞 Call</button>
+              <button class="btn btn-outline" style="margin-left: 10px;">Log Interaction</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Live Tracking -->
+      <div id="screen-tracking" class="screen">
+        <h1 class="page-title">Live Tracking</h1>
+        <div class="map-placeholder">
+          Live Map Rendering
+          <div class="map-pin" style="top: 30%; left: 40%;"></div>
+          <div class="map-pin" style="top: 50%; left: 60%; background: var(--secondary);"></div>
+          <div class="map-pin" style="top: 60%; left: 30%; background: var(--accent);"></div>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Agent</th>
+                <th>Status</th>
+                <th>Last Ping</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Suresh Patel (Field)</td>
+                <td><span class="badge success">Active</span></td>
+                <td>2 mins ago</td>
+                <td><button class="btn btn-outline">View Route</button></td>
+              </tr>
+              <tr>
+                <td>Ramesh Kumar (Field)</td>
+                <td><span class="badge warning">Stationary</span></td>
+                <td>24 mins ago</td>
+                <td><button class="btn btn-outline">View Route</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Approvals -->
+      <div id="screen-approvals" class="screen">
+        <h1 class="page-title">Approvals Queue</h1>
+        <div class="grid-cards" style="grid-template-columns: 1fr;">
+          <div class="card" style="border-left: 4px solid var(--accent);">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 15px;">
+              <div>
+                <strong>Reallocation Request</strong> - by Amit Singh
+                <div style="color: var(--text-muted); font-size:14px; margin-top:5px;">Customer: L-100234 (Vikram Joshi)</div>
+                <div style="font-size:14px; margin-top:5px;">Reason: Customer shifted to South Zone.</div>
+              </div>
+              <div style="font-size: 14px; color: var(--text-muted);">2 hours ago</div>
+            </div>
+            <div style="display: flex; gap: 10px;">
+              <button class="btn btn-primary">Approve</button>
+              <button class="btn btn-outline">Reject</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Import Screen -->
+      <div id="screen-import" class="screen">
+        <h1 class="page-title">Data Import</h1>
+        <div class="card" style="margin-bottom: 30px;">
+          <h3>Upload New Allocation</h3>
+          <div style="border: 2px dashed var(--border); padding: 40px; text-align: center; border-radius: 8px; margin-top: 15px; cursor: pointer;">
+            <div style="font-size: 24px; color: var(--text-muted); margin-bottom: 10px;">📁</div>
+            <p>Drag & Drop Excel/CSV file here or click to browse</p>
+          </div>
+          <div style="margin-top: 15px;">
+             <button class="btn btn-primary">Start Upload</button>
+          </div>
+        </div>
+
+        <div class="table-container">
+          <div class="table-header">
+            <h3>Recent Imports</h3>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>File Name</th>
+                <th>Company</th>
+                <th>Rows</th>
+                <th>Status</th>
+                <th>Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Bajaj_Alloc_May.xlsx</td>
+                <td>Bajaj Finance</td>
+                <td>4,502</td>
+                <td><span class="badge success">Committed</span></td>
+                <td>Today, 10:00 AM</td>
+              </tr>
+              <tr>
+                <td>Hero_Alloc_May.csv</td>
+                <td>Hero FinCorp</td>
+                <td>1,200</td>
+                <td><span class="badge warning">Pending Review</span></td>
+                <td>Today, 09:30 AM</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <script>
+    // Define navigational structure per role
+    const ROLE_SCREENS = {
+      agency_admin: [
+        { id: 'management-dashboard', label: 'Management Dashboard' },
+        { id: 'employees', label: 'Employees' },
+        { id: 'import', label: 'Import & Allocations' },
+        { id: 'customers', label: 'All Customers' },
+        { id: 'tracking', label: 'Live Tracking' },
+        { id: 'approvals', label: 'Approvals' }
+      ],
+      operations_manager: [
+        { id: 'management-dashboard', label: 'Management Dashboard' },
+        { id: 'employees', label: 'Employees' },
+        { id: 'tracking', label: 'Live Tracking' },
+        { id: 'approvals', label: 'Approvals' }
+      ],
+      team_leader: [
+        { id: 'management-dashboard', label: 'Team Dashboard' },
+        { id: 'tracking', label: 'Live Tracking' },
+        { id: 'approvals', label: 'Approvals' },
+        { id: 'worklist', label: 'My Worklist' }
+      ],
+      telecaller: [
+        { id: 'dashboard', label: 'Dashboard' },
+        { id: 'worklist', label: 'My Worklist' }
+      ],
+      field_agent: [
+        { id: 'dashboard', label: 'Dashboard' },
+        { id: 'worklist', label: 'My Visits (Worklist)' }
+      ]
+    };
+
+    function changeRole() {
+      const role = document.getElementById('role-selector').value;
+      const navList = document.getElementById('nav-list');
+      const headerRole = document.getElementById('header-role');
+      
+      const roleNames = {
+        agency_admin: "Agency Admin Workspace",
+        operations_manager: "Ops Manager Workspace",
+        team_leader: "Team Leader Workspace",
+        telecaller: "Telecaller Workspace",
+        field_agent: "Field Agent Workspace"
+      };
+
+      headerRole.innerText = roleNames[role];
+      navList.innerHTML = '';
+      
+      const screens = ROLE_SCREENS[role];
+      screens.forEach((screen, index) => {
+        const li = document.createElement('li');
+        li.className = 'nav-item' + (index === 0 ? ' active' : '');
+        li.innerText = screen.label;
+        li.onclick = () => showScreen(screen.id, li);
+        navList.appendChild(li);
+      });
+
+      // Show the first screen by default
+      if (screens.length > 0) {
+        showScreen(screens[0].id, navList.firstChild);
+      }
+    }
+
+    function showScreen(screenId, navElement) {
+      // Hide all screens
+      document.querySelectorAll('.screen').forEach(el => {
+        el.classList.remove('active');
+      });
+      // Show target screen
+      const target = document.getElementById('screen-' + screenId);
+      if (target) {
+        target.classList.add('active');
+      }
+      
+      // Update nav styles
+      document.querySelectorAll('.nav-item').forEach(el => {
+        el.classList.remove('active');
+      });
+      if (navElement) {
+        navElement.classList.add('active');
+      }
+    }
+
+    // Initialize
+    changeRole();
+  </script>
+</body>
+</html>

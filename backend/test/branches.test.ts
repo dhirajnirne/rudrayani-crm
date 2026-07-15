@@ -21,7 +21,6 @@ const TL_A_PHONE = "7960000035";
 const AGENT_B_PHONE = "7960000036";
 
 const MONTH = "2026-07";
-const MONTH_START = "2026-07-01";
 
 let agencyId: string;
 let companyId: string;

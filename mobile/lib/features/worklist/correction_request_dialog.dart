@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/parser.dart';
 
 const _modeOptions = ['NEFT', 'RTGS', 'Cash', 'UPI', 'Cheque', 'DD'];
 
@@ -160,7 +161,7 @@ Future<void> showCorrectionRequestDialog(
   if (recordType == 'payment' || recordType == 'ptp') {
     final newAmount = double.tryParse(amountCtrl.text);
     if (newAmount != null &&
-        newAmount != (currentValues['amount'] as num?)?.toDouble()) {
+        newAmount != parseDouble(currentValues['amount'])) {
       proposedChanges['amount'] = newAmount;
     }
   }

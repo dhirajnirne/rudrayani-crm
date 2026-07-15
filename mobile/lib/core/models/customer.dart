@@ -1,3 +1,5 @@
+import '../utils/parser.dart';
+
 class Customer {
   final String id;
   final String loanNumber;
@@ -49,14 +51,14 @@ class Customer {
         mobileNumber: (j['mobile_number'] as String?) ?? '',
         product: j['product'] as String?,
         bucket: j['bucket'] as String?,
-        dueAmount: (j['due_amount'] as num?)?.toDouble(),
-        emi: (j['emi'] as num?)?.toDouble(),
+        dueAmount: parseDouble(j['due_amount']),
+        emi: parseDouble(j['emi']),
         customFields: (j['custom_fields'] as Map<String, dynamic>?) ?? {},
         companyName: j['company_name'] as String,
         lastRemark: j['last_remark'] as String?,
         lastCallAt: j['last_call_at'] != null ? DateTime.parse(j['last_call_at'] as String) : null,
         lastResultCode: j['last_result_code'] as String?,
-        ptpAmount: (j['ptp_amount'] as num?)?.toDouble(),
+        ptpAmount: parseDouble(j['ptp_amount']),
         ptpDate: j['ptp_date'] != null ? DateTime.parse(j['ptp_date'] as String) : null,
         status: j['status'] as String? ?? 'active',
         recalledAt: j['recalled_at'] != null ? DateTime.parse(j['recalled_at'] as String) : null,
