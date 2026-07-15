@@ -25,7 +25,7 @@ router.get(
   "/",
   asyncHandler(async (req, res) => {
     const branchId = req.query.branch_id as string | undefined;
-    const { rows } = await pool.query(
+    const { rows: teams } = await pool.query(
       `SELECT t.id, t.name, t.branch_id, b.name AS branch_name, t.created_at
          FROM teams t
          JOIN branches b ON b.id = t.branch_id
@@ -33,7 +33,25 @@ router.get(
         ORDER BY b.name, t.name`,
       [req.user!.agency_id, branchId ?? null],
     );
-    res.json({ teams: rows });
+
+    // Fetch leaders for each team
+    const { rows: allLeaders } = await pool.query(
+      `SELECT tl.team_id, u.id, u.full_name FROM team_leaders tl
+         JOIN users u ON u.id = tl.user_id
+        ORDER BY tl.team_id, u.full_name`,
+    );
+    const leadersByTeam = new Map<string, Array<{ id: string; full_name: string }>>();
+    for (const leader of allLeaders) {
+      if (!leadersByTeam.has(leader.team_id)) leadersByTeam.set(leader.team_id, []);
+      leadersByTeam.get(leader.team_id)!.push({ id: leader.id, full_name: leader.full_name });
+    }
+
+    res.json({
+      teams: teams.map((t) => ({
+        ...t,
+        leaders: leadersByTeam.get(t.id) ?? [],
+      })),
+    });
   }),
 );
 
@@ -68,6 +86,68 @@ router.patch(
     );
     if (!rows[0]) throw new HttpError(404, "Team not found");
     res.json({ team: rows[0] });
+  }),
+);
+
+// Add a team leader (Admin/OM only, not broader teams.manage)
+router.post(
+  "/:id/leaders",
+  asyncHandler(async (req, res) => {
+    // Gate by ops_managers.create so only Admin/OM can assign leadership
+    const allowed = await requirePermission("ops_managers.create")(req, res, () => {});
+    if (allowed instanceof HttpError) throw allowed;
+
+    const body = z.object({ user_id: z.string().uuid() }).parse(req.body);
+
+    // Verify team exists and belongs to agency
+    const { rows: teamRows } = await pool.query(
+      `SELECT t.id FROM teams t JOIN branches b ON b.id = t.branch_id
+        WHERE t.id = $1 AND b.agency_id = $2`,
+      [req.params.id, req.user!.agency_id],
+    );
+    if (!teamRows[0]) throw new HttpError(404, "Team not found");
+
+    // Verify user is a team_leader designation in same agency
+    const { rows: userRows } = await pool.query(
+      `SELECT id FROM users WHERE id = $1 AND agency_id = $2 AND designation = 'team_leader'`,
+      [body.user_id, req.user!.agency_id],
+    );
+    if (!userRows[0]) throw new HttpError(400, "User not found or is not a team leader");
+
+    // Add to team_leaders
+    await pool.query(
+      `INSERT INTO team_leaders (user_id, team_id) VALUES ($1, $2)
+         ON CONFLICT (user_id, team_id) DO NOTHING`,
+      [body.user_id, req.params.id],
+    );
+
+    res.status(201).json({ success: true });
+  }),
+);
+
+// Remove a team leader
+router.delete(
+  "/:id/leaders/:userId",
+  asyncHandler(async (req, res) => {
+    // Gate by ops_managers.create so only Admin/OM can manage leadership
+    const allowed = await requirePermission("ops_managers.create")(req, res, () => {});
+    if (allowed instanceof HttpError) throw allowed;
+
+    // Verify team exists and belongs to agency
+    const { rows: teamRows } = await pool.query(
+      `SELECT t.id FROM teams t JOIN branches b ON b.id = t.branch_id
+        WHERE t.id = $1 AND b.agency_id = $2`,
+      [req.params.id, req.user!.agency_id],
+    );
+    if (!teamRows[0]) throw new HttpError(404, "Team not found");
+
+    // Remove from team_leaders
+    await pool.query(`DELETE FROM team_leaders WHERE user_id = $1 AND team_id = $2`, [
+      req.params.userId,
+      req.params.id,
+    ]);
+
+    res.json({ success: true });
   }),
 );
 

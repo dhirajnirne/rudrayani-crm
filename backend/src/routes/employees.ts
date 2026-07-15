@@ -418,4 +418,45 @@ router.post(
   }),
 );
 
+// Assign branches to a telecaller (replace-set, used for multi-branch assignment)
+router.put(
+  "/:id/branches",
+  requirePermission("employees.update"),
+  asyncHandler(async (req, res) => {
+    const body = z.object({ branch_ids: z.array(z.string().uuid()) }).parse(req.body);
+
+    // Fetch user and verify they're a telecaller
+    const { rows: userRows } = await pool.query<UserRow>(
+      "SELECT * FROM users WHERE id = $1 AND agency_id = $2",
+      [req.params.id, req.user!.agency_id],
+    );
+    if (!userRows[0]) throw new HttpError(404, "Employee not found");
+    if (userRows[0].designation !== "telecaller") {
+      throw new HttpError(400, "Only telecallers can have multiple branches assigned");
+    }
+
+    // Validate all branches belong to this agency
+    if (body.branch_ids.length > 0) {
+      const { rows: branches } = await pool.query(
+        "SELECT id FROM branches WHERE id = ANY($1::uuid[]) AND agency_id = $2",
+        [body.branch_ids, req.user!.agency_id],
+      );
+      if (branches.length !== body.branch_ids.length) {
+        throw new HttpError(400, "One or more branches not found in this agency");
+      }
+    }
+
+    // Replace telecaller_branches entries
+    await pool.query("DELETE FROM telecaller_branches WHERE user_id = $1", [req.params.id]);
+    if (body.branch_ids.length > 0) {
+      await pool.query(
+        "INSERT INTO telecaller_branches (user_id, branch_id) SELECT $1, unnest($2::uuid[])",
+        [req.params.id, body.branch_ids],
+      );
+    }
+
+    res.json({ success: true });
+  }),
+);
+
 export default router;
