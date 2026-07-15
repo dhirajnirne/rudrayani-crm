@@ -178,8 +178,6 @@ router.get(
       q || null,
       isActive,
       designation ?? null,
-      customerBranchId ?? null,
-      product ?? null,
     ];
 
     let conditions = `WHERE u.agency_id = $1
@@ -190,10 +188,12 @@ router.get(
           AND ($6::text IS NULL OR u.designation = $6)`;
 
     if (customerBranchId) {
-      conditions += ` AND EXISTS (SELECT 1 FROM customers c WHERE (c.assigned_agent_id = u.id OR c.assigned_field_agent_id = u.id) AND c.branch_id = $7)`;
+      params.push(customerBranchId);
+      conditions += ` AND EXISTS (SELECT 1 FROM customers c WHERE (c.assigned_agent_id = u.id OR c.assigned_field_agent_id = u.id) AND c.branch_id = $${params.length})`;
     }
     if (product) {
-      conditions += ` AND EXISTS (SELECT 1 FROM customers c WHERE (c.assigned_agent_id = u.id OR c.assigned_field_agent_id = u.id) AND c.product = $${customerBranchId ? '8' : '7'})`;
+      params.push(product);
+      conditions += ` AND EXISTS (SELECT 1 FROM customers c WHERE (c.assigned_agent_id = u.id OR c.assigned_field_agent_id = u.id) AND c.product = $${params.length})`;
     }
 
     const { rows } = await pool.query<UserRow>(
