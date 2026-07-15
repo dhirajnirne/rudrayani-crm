@@ -665,11 +665,39 @@ export async function commitImport(params: {
       const branch = row.customer_branch ? branches.get(row.customer_branch) : undefined;
       if (row.customer_branch && !branch) unknownBranches.add(row.customer_branch);
       const existing = await client.query(
-        `SELECT id, assigned_agent_id FROM customers WHERE id = $1 FOR UPDATE`,
+        `SELECT id, customer_name, mobile_number, product, bucket, due_amount, pos, emi, due_date,
+                custom_fields, assigned_agent_id, assigned_team_id, branch_id
+           FROM customers WHERE id = $1 FOR UPDATE`,
         [customerId],
       );
       const cust = existing.rows[0];
       if (!cust) continue; // deleted between validate and commit — skip quietly
+
+      // Track 6.2: Backup prior state before update
+      await client.query(
+        `INSERT INTO import_row_backups (import_run_id, customer_id, kind, prior_values)
+         VALUES ($1, $2, 'update', $3)
+         ON CONFLICT (import_run_id, customer_id) DO NOTHING`,
+        [
+          runId,
+          customerId,
+          JSON.stringify({
+            customer_name: cust.customer_name,
+            mobile_number: cust.mobile_number,
+            product: cust.product,
+            bucket: cust.bucket,
+            due_amount: cust.due_amount,
+            pos: cust.pos,
+            emi: cust.emi,
+            due_date: cust.due_date,
+            custom_fields: cust.custom_fields,
+            assigned_agent_id: cust.assigned_agent_id,
+            assigned_team_id: cust.assigned_team_id,
+            branch_id: cust.branch_id,
+          }),
+        ],
+      );
+
       // The month's file is authoritative for bucket/amounts; blanks keep old values.
       await client.query(
         `UPDATE customers
