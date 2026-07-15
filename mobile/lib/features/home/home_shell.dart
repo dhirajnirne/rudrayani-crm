@@ -23,7 +23,9 @@ import '../worklist/worklist_screen.dart';
 enum DashboardRole { teamLeader, telecaller, fieldAgent }
 
 DashboardRole? resolveDashboardRole(List<String> capabilities) {
-  if (capabilities.contains('team_leader')) return DashboardRole.teamLeader;
+  if (capabilities.contains('agency_admin') || capabilities.contains('operations_manager') || capabilities.contains('team_leader')) {
+    return DashboardRole.teamLeader;
+  }
   if (capabilities.contains('telecaller')) return DashboardRole.telecaller;
   if (capabilities.contains('field_agent')) return DashboardRole.fieldAgent;
   return null;

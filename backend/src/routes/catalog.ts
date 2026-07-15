@@ -26,16 +26,19 @@ router.get(
   "/products",
   authenticate,
   asyncHandler(async (req, res) => {
-    const companyId = z.string().uuid().parse(req.query.company_id);
-    await assertCompanyInAgency(companyId, req.user!.agency_id);
+    const companyId = req.query.company_id ? z.string().uuid().parse(req.query.company_id) : undefined;
+    if (companyId) {
+      await assertCompanyInAgency(companyId, req.user!.agency_id);
+    }
     const { rows } = await pool.query(
       `SELECT p.id, p.raw_label, p.canonical_label,
               (SELECT COUNT(*)::int FROM customers c
                 WHERE c.company_id = p.company_id AND c.product = p.raw_label) AS customer_count
          FROM products p
-        WHERE p.company_id = $1
+         JOIN companies co ON co.id = p.company_id
+        WHERE co.agency_id = $1 AND ($2::uuid IS NULL OR p.company_id = $2)
         ORDER BY p.canonical_label, p.raw_label`,
-      [companyId],
+      [req.user!.agency_id, companyId ?? null],
     );
     res.json({ products: rows });
   }),
