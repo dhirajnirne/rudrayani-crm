@@ -19,8 +19,6 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { DASHBOARD_WIDGETS, getRoleDefaultLayout, type WidgetLayoutEntry } from "./widgetRegistry";
-import { palette } from "../../theme/tokens";
-
 const TITLES = new Map(DASHBOARD_WIDGETS.map((w) => [w.id, w.title]));
 
 function SortableRow({ entry, onToggle }: { entry: WidgetLayoutEntry; onToggle: (id: string) => void }) {
