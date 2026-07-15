@@ -26,6 +26,7 @@ class WorklistScreen extends ConsumerStatefulWidget {
 
 class _WorklistScreenState extends ConsumerState<WorklistScreen> {
   String _search = '';
+  String? _selectedCompany;
 
   @override
   void initState() {
@@ -79,19 +80,54 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
           const _SyncBanner(),
           Padding(
             padding: const EdgeInsets.all(12),
-            child: TextField(
-              decoration: InputDecoration(
-                hintText: 'Search by name, loan number or mobile…',
-                prefixIcon: const Icon(Icons.search),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
+            child: Column(
+              children: [
+                TextField(
+                  decoration: InputDecoration(
+                    hintText: 'Search by name, loan number or mobile…',
+                    prefixIcon: const Icon(Icons.search),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      vertical: 0,
+                      horizontal: 12,
+                    ),
+                  ),
+                  onChanged: (v) => setState(() => _search = v.toLowerCase()),
                 ),
-                contentPadding: const EdgeInsets.symmetric(
-                  vertical: 0,
-                  horizontal: 12,
+                // Track 7.2: Company filter dropdown
+                const SizedBox(height: 8),
+                wl.maybeWhen(
+                  data: (customers) {
+                    final companies = customers
+                        .map((c) => c.companyName)
+                        .toSet()
+                        .toList()
+                        ..sort();
+                    return DropdownButton<String?>(
+                      isExpanded: true,
+                      value: _selectedCompany,
+                      hint: const Text('Filter by company'),
+                      items: [
+                        const DropdownMenuItem<String?>(
+                          value: null,
+                          child: Text('All companies'),
+                        ),
+                        ...companies.map(
+                          (company) => DropdownMenuItem(
+                            value: company,
+                            child: Text(company),
+                          ),
+                        ),
+                      ],
+                      onChanged: (value) =>
+                          setState(() => _selectedCompany = value),
+                    );
+                  },
+                  orElse: () => const SizedBox.shrink(),
                 ),
-              ),
-              onChanged: (v) => setState(() => _search = v.toLowerCase()),
+              ],
             ),
           ),
           Expanded(
@@ -105,18 +141,33 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
                 },
               ),
               data: (customers) {
-                final filtered = _search.isEmpty
+                // Track 7.2: Client-side company filter
+                var filtered = _selectedCompany != null
                     ? customers
-                    : customers
-                          .where(
-                            (c) =>
-                                c.customerName.toLowerCase().contains(
-                                  _search,
-                                ) ||
-                                c.loanNumber.toLowerCase().contains(_search) ||
-                                c.mobileNumber.contains(_search),
-                          )
-                          .toList();
+                        .where((c) => c.companyName == _selectedCompany)
+                        .toList()
+                    : customers;
+
+                // Apply search filter
+                if (_search.isNotEmpty) {
+                  filtered = filtered
+                      .where(
+                        (c) =>
+                            c.customerName.toLowerCase().contains(
+                              _search,
+                            ) ||
+                            c.loanNumber.toLowerCase().contains(_search) ||
+                            c.mobileNumber.contains(_search),
+                      )
+                      .toList();
+                }
+
+                // Extract distinct companies for filter dropdown
+                final companies = customers
+                    .map((c) => c.companyName)
+                    .toSet()
+                    .toList()
+                    ..sort();
 
                 if (filtered.isEmpty) {
                   return const EmptyState(
@@ -376,6 +427,14 @@ class _CustomerCard extends StatelessWidget {
               if (customer.dueAmount != null)
                 Text(
                   'Due: ${_rupee.format(customer.dueAmount)}',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ).tabular,
+                ),
+              if (customer.emi != null)
+                Text(
+                  'EMI: ${_rupee.format(customer.emi)}',
                   style: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
