@@ -220,6 +220,8 @@ function UnallocatedQueue() {
   const filters = useCompanyFilters();
   const branchTeam = useBranchTeam();
   const agents = useAssignableAgents(branchTeam.branchId, branchTeam.teamId);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [customerBranchId, setCustomerBranchId] = useState<string | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -227,6 +229,10 @@ function UnallocatedQueue() {
   const [selected, setSelected] = useState<string[]>([]);
   const [agentId, setAgentId] = useState<string | null>(null);
   const [assigning, setAssigning] = useState(false);
+
+  useEffect(() => {
+    api.get("/branches").then((res) => setBranches(res.data.branches));
+  }, []);
 
   const load = useCallback(
     async (pg = 1) => {
@@ -236,6 +242,7 @@ function UnallocatedQueue() {
         if (filters.companyId) params.company_id = filters.companyId;
         if (filters.product) params.product = filters.product;
         if (filters.bucket) params.bucket = filters.bucket;
+        if (customerBranchId) params.branch_id = customerBranchId;
         const res = await api.get("/allocations/unallocated", { params });
         setCustomers(res.data.customers);
         setTotal(res.data.total);
@@ -245,7 +252,7 @@ function UnallocatedQueue() {
         setLoading(false);
       }
     },
-    [filters.companyId, filters.product, filters.bucket],
+    [filters.companyId, filters.product, filters.bucket, customerBranchId],
   );
 
   useEffect(() => {
@@ -281,8 +288,21 @@ function UnallocatedQueue() {
     <div>
       <FilterRow filters={filters} branchTeam={branchTeam} agentPickerLabel="Narrows agent picker" />
       <Typography.Text type="secondary" style={{ display: "block", marginBottom: 12, fontSize: 12 }}>
-        Branch / Team filters narrow the agent selector below — not the customer table (unallocated customers have no team yet).
+        Branch / Team filters above narrow the agent selector — not the customer table. Use "Customer branch" below to filter unallocated customers by their assigned branch.
       </Typography.Text>
+
+      <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
+        <Col xs={24} sm={6}>
+          <Select
+            style={{ width: "100%" }}
+            placeholder="All customer branches"
+            allowClear
+            value={customerBranchId}
+            onChange={(v) => setCustomerBranchId(v ?? null)}
+            options={branches.map((b) => ({ value: b.id, label: b.name }))}
+          />
+        </Col>
+      </Row>
 
       {selected.length > 0 && (
         <Alert
