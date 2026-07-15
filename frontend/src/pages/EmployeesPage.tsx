@@ -39,12 +39,16 @@ export default function EmployeesPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
+  const [products, setProducts] = useState<{ raw_label: string; canonical_label: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filterBranch, setFilterBranch] = useState<string | undefined>();
   const [filterTeam, setFilterTeam] = useState<string | undefined>();
   const [filterCapability, setFilterCapability] = useState<string | undefined>();
   const [filterStatus, setFilterStatus] = useState<"active" | "inactive" | undefined>();
+  const [filterDesignation, setFilterDesignation] = useState<string | undefined>();
+  const [filterCustomerBranch, setFilterCustomerBranch] = useState<string | undefined>();
+  const [filterProduct, setFilterProduct] = useState<string | undefined>();
   const [editing, setEditing] = useState<Employee | "new" | null>(null);
   const [resettingFor, setResettingFor] = useState<Employee | null>(null);
   const [form] = Form.useForm<EmployeeFormValues>();
@@ -78,36 +82,45 @@ export default function EmployeesPage() {
       .map((e) => ({ value: e.id, label: e.full_name }));
   }, [employees, selectedBranch, selectedTeam, editing]);
 
-  const filteredEmployees = useMemo(() => {
-    return employees.filter((e) => {
-      if (filterBranch && e.branch_id !== filterBranch) return false;
-      if (filterTeam && e.team_id !== filterTeam) return false;
-      if (filterCapability && !e.capabilities.includes(filterCapability as never)) return false;
-      if (filterStatus === "active" && !e.is_active) return false;
-      if (filterStatus === "inactive" && e.is_active) return false;
-      return true;
-    });
-  }, [employees, filterBranch, filterTeam, filterCapability, filterStatus]);
+  // No client-side filtering - all filtering now done server-side via query params
+  const filteredEmployees = employees;
 
-  const load = useCallback(async (q?: string) => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [emp, br, tm] = await Promise.all([
-        api.get("/employees", { params: q ? { q } : {} }),
+      const params: Record<string, string> = {};
+      if (search) params.q = search;
+      if (filterBranch) params.branch_id = filterBranch;
+      if (filterTeam) params.team_id = filterTeam;
+      if (filterStatus === "active") params.is_active = "true";
+      if (filterStatus === "inactive") params.is_active = "false";
+      if (filterDesignation) params.designation = filterDesignation;
+      if (filterCustomerBranch) params.customer_branch_id = filterCustomerBranch;
+      if (filterProduct) params.product = filterProduct;
+
+      const [emp, br, tm, prod] = await Promise.all([
+        api.get("/employees", { params }),
         api.get("/branches"),
         api.get("/teams"),
+        api.get("/products"),
       ]);
       setEmployees(emp.data.employees);
       setBranches(br.data.branches);
       setTeams(tm.data.teams);
+      setProducts(prod.data.products);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [search, filterBranch, filterTeam, filterStatus, filterDesignation, filterCustomerBranch, filterProduct]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // Update search with debounce-like behavior (load is already memoized with search dependency)
+  const handleSearch = (q: string) => {
+    setSearch(q);
+  };
 
   const branchName = (id: string | null) => branches.find((b) => b.id === id)?.name ?? "—";
   const teamName = (id: string | null) => teams.find((t) => t.id === id)?.name ?? "—";
@@ -201,10 +214,9 @@ export default function EmployeesPage() {
           <Input.Search
             placeholder="Search name or phone"
             allowClear
-            onSearch={(q) => {
-              setSearch(q);
-              load(q);
-            }}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onSearch={() => {/* load() already called via useEffect when search changes */}}
             style={{ width: 260 }}
           />
           {hasPermission("employees.create") && (
@@ -235,6 +247,19 @@ export default function EmployeesPage() {
         />
         <Select
           style={{ width: 160 }}
+          placeholder="All designations"
+          allowClear
+          value={filterDesignation}
+          onChange={(v) => setFilterDesignation(v ?? undefined)}
+          options={[
+            { value: "operations_manager", label: "Ops Manager" },
+            { value: "team_leader", label: "Team Leader" },
+            { value: "telecaller", label: "Telecaller" },
+            { value: "field_agent", label: "Field Agent" },
+          ]}
+        />
+        <Select
+          style={{ width: 160 }}
           placeholder="All capabilities"
           allowClear
           value={filterCapability}
@@ -245,6 +270,25 @@ export default function EmployeesPage() {
             { value: "team_leader", label: "Team Leader" },
             { value: "operations_manager", label: "Ops Manager" },
           ]}
+        />
+        <Select
+          style={{ width: 160 }}
+          placeholder="Customer branch"
+          allowClear
+          value={filterCustomerBranch}
+          onChange={(v) => setFilterCustomerBranch(v ?? undefined)}
+          options={branches.map((b) => ({ value: b.id, label: b.name }))}
+        />
+        <Select
+          style={{ width: 140 }}
+          placeholder="Product"
+          allowClear
+          value={filterProduct}
+          onChange={(v) => setFilterProduct(v ?? undefined)}
+          options={products.map((p) => ({
+            value: p.raw_label,
+            label: p.canonical_label || p.raw_label,
+          }))}
         />
         <Select
           style={{ width: 140 }}

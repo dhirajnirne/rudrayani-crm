@@ -85,12 +85,19 @@ function useBranchTeam() {
 }
 
 /** Agents a TL can allocate to: active users who work customers. */
-function useAssignableAgents(branchId: string | null, teamId: string | null) {
+function useAssignableAgents(
+  branchId: string | null,
+  teamId: string | null,
+  customerBranchId?: string | null,
+  product?: string | null,
+) {
   const [agents, setAgents] = useState<Employee[]>([]);
   useEffect(() => {
     const params: Record<string, string> = {};
     if (branchId) params.branch_id = branchId;
     if (teamId) params.team_id = teamId;
+    if (customerBranchId) params.customer_branch_id = customerBranchId;
+    if (product) params.product = product;
     api.get("/employees", { params }).then((res) => {
       setAgents(
         (res.data.employees as Employee[]).filter(
@@ -102,7 +109,7 @@ function useAssignableAgents(branchId: string | null, teamId: string | null) {
         ),
       );
     });
-  }, [branchId, teamId]);
+  }, [branchId, teamId, customerBranchId, product]);
   return agents;
 }
 
@@ -219,9 +226,9 @@ function FilterRow({
 function UnallocatedQueue() {
   const filters = useCompanyFilters();
   const branchTeam = useBranchTeam();
-  const agents = useAssignableAgents(branchTeam.branchId, branchTeam.teamId);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [customerBranchId, setCustomerBranchId] = useState<string | null>(null);
+  const agents = useAssignableAgents(branchTeam.branchId, branchTeam.teamId, customerBranchId, filters.product);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
