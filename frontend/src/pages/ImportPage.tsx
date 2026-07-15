@@ -883,6 +883,8 @@ function ImportHistory() {
   const [runs, setRuns] = useState<ImportRun[]>([]);
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [rolling, setRolling] = useState<string | null>(null);
+  const [blockedCustomers, setBlockedCustomers] = useState<string[]>([]);
 
   const deleteRun = async (runId: string) => {
     setDeleting(runId);
@@ -894,6 +896,32 @@ function ImportHistory() {
       message.error(errorMessage(err));
     } finally {
       setDeleting(null);
+    }
+  };
+
+  const rollbackRun = async (runId: string) => {
+    setRolling(runId);
+    setBlockedCustomers([]);
+    try {
+      await api.post(`/imports/runs/${runId}/rollback`);
+      message.success("Import rolled back successfully");
+      setRuns((prev) => prev.map((r) => r.id === runId ? { ...r, rolled_back_at: new Date().toISOString() } : r));
+    } catch (err) {
+      const msg = errorMessage(err);
+      if (msg.includes("blocked:") || msg.includes("Rollback blocked")) {
+        const match = msg.match(/(\w+-\d+(?:, \w+-\d+)*)/);
+        if (match) {
+          const customers = match[1].split(", ");
+          setBlockedCustomers(customers);
+          message.error(`Cannot rollback: ${customers.length} customer(s) have been worked since. ${customers.join(", ")}`);
+        } else {
+          message.error(msg);
+        }
+      } else {
+        message.error(msg);
+      }
+    } finally {
+      setRolling(null);
     }
   };
 
@@ -971,6 +999,7 @@ function ImportHistory() {
             width: 110,
             render: (_, r: ImportRun) => {
               if (r.deleted_at) return <Tag color="error">Deleted</Tag>;
+              if (r.rolled_back_at) return <Tag color="orange">Rolled back</Tag>;
               if (r.inserted_rows === 0 && r.error_rows === 0)
                 return <Tag color="default">All dupes</Tag>;
               if (r.error_rows === 0) return <Tag color="success">Clean</Tag>;
@@ -980,29 +1009,42 @@ function ImportHistory() {
           {
             title: "",
             key: "actions",
-            width: 80,
+            width: 120,
             render: (_, r: ImportRun) => {
-              if (!canDelete || r.deleted_at) return null;
-              if (r.mode !== "new") {
+              if (!canDelete || r.deleted_at || r.rolled_back_at) return null;
+
+              if (r.mode === "new") {
                 return (
-                  <Tooltip title="Only new-mode imports can be deleted">
-                    <Button size="small" danger icon={<DeleteOutlined />} disabled />
-                  </Tooltip>
+                  <Popconfirm
+                    title="Delete this import run?"
+                    description="This will remove all customers from this run that haven't been assigned or worked. This cannot be undone."
+                    onConfirm={() => deleteRun(r.id)}
+                    okText="Delete"
+                    okButtonProps={{ danger: true }}
+                  >
+                    <Button
+                      size="small"
+                      danger
+                      icon={<DeleteOutlined />}
+                      loading={deleting === r.id}
+                    />
+                  </Popconfirm>
                 );
               }
+
+              // allocation-mode: show rollback button
               return (
                 <Popconfirm
-                  title="Delete this import run?"
-                  description="This will remove all customers from this run that haven't been assigned or worked. This cannot be undone."
-                  onConfirm={() => deleteRun(r.id)}
-                  okText="Delete"
+                  title="Rollback this import run?"
+                  description="This will reverse all changes from this import. Blocks if any customer has been worked since."
+                  onConfirm={() => rollbackRun(r.id)}
+                  okText="Rollback"
                   okButtonProps={{ danger: true }}
                 >
                   <Button
                     size="small"
-                    danger
-                    icon={<DeleteOutlined />}
-                    loading={deleting === r.id}
+                    icon={<ReloadOutlined />}
+                    loading={rolling === r.id}
                   />
                 </Popconfirm>
               );

@@ -45,19 +45,20 @@ export interface ReportFilters {
 }
 
 export interface ResolvedScope {
-  clampedTo: "agency" | "team" | "self";
+  clampedTo: "agency" | "team" | "teams" | "self";
   filters: ReportFilters;
+  scopeTeamIds?: string[] | null; // For multi-team TLs when no specific team is requested
 }
 
 /**
  * Server-side scope clamp: admin/ops roam the agency; a TL is pinned to their
  * team; everyone else (self-scoped access) is pinned to themselves.
  */
-export function resolveReportScope(
+export async function resolveReportScope(
   user: UserRow,
   requested: ReportFilters,
   hasFullView: boolean,
-): ResolvedScope {
+): Promise<ResolvedScope> {
   if (!hasFullView) {
     if (requested.agent_id && requested.agent_id !== user.id) {
       throw new HttpError(403, "You can only view your own performance");
@@ -71,18 +72,102 @@ export function resolveReportScope(
     return { clampedTo: "agency", filters: requested };
   }
   if (user.is_team_leader) {
-    // TL without a team sees nothing rather than everything.
-    const teamId = user.team_id ?? "00000000-0000-0000-0000-000000000000";
-    if (requested.team_id && requested.team_id !== teamId) {
-      throw new HttpError(403, "Team leaders can only view their own team");
+    // Multi-team TL: fetch led team IDs from team_leaders table
+    const { rows } = await pool.query<{ team_id: string }>(
+      "SELECT team_id FROM team_leaders WHERE user_id = $1 ORDER BY team_id",
+      [user.id],
+    );
+    const teamIds = rows.map((r) => r.team_id);
+
+    if (requested.team_id) {
+      // Specific team requested: validate it's in the TL's led set
+      if (!teamIds.includes(requested.team_id)) {
+        throw new HttpError(403, "You do not lead this team");
+      }
+      // Single specific team
+      return { clampedTo: "team", filters: { ...requested, team_id: requested.team_id, branch_id: undefined } };
     }
-    return { clampedTo: "team", filters: { ...requested, team_id: teamId, branch_id: undefined } };
+
+    // No specific team requested: aggregate across all led teams
+    return {
+      clampedTo: "teams",
+      filters: { ...requested, team_id: undefined, branch_id: undefined },
+      scopeTeamIds: teamIds.length > 0 ? teamIds : null,
+    };
   }
   // reports.view holders that fit none of the above shouldn't exist, but fail shut.
   return {
     clampedTo: "self",
     filters: { ...requested, agent_id: user.id, branch_id: undefined, team_id: undefined },
   };
+}
+
+/**
+ * Build team_id WHERE clause for multi-team TL support.
+ * Returns the WHERE fragment and updates params array.
+ *
+ * Handles two scenarios:
+ * 1. Single team: team_id = $N
+ * 2. Multi-team TL with scopeTeamIds: team_id = ANY($N) where $N is array
+ * 3. No team restriction: null (no clause added)
+ */
+function buildTeamClause(scope: ResolvedScope, params: unknown[]): string | null {
+  if (scope.scopeTeamIds?.length) {
+    params.push(scope.scopeTeamIds);
+    return `s.assigned_team_id = ANY($${params.length})`;
+  }
+  if (scope.filters.team_id) {
+    params.push(scope.filters.team_id);
+    return `s.assigned_team_id = $${params.length}`;
+  }
+  return null;
+}
+
+/**
+ * Build report WHERE conditions with multi-team TL support.
+ * Like baseConditions() but replaces the team clause with buildTeamClause()
+ * to handle scopeTeamIds from multi-team TLs.
+ */
+function buildReportConditions(scope: ResolvedScope, params: unknown[]): string[] {
+  const conditions: string[] = [];
+  const filters = scope.filters;
+
+  if (filters.company_id) {
+    params.push(filters.company_id);
+    conditions.push(`s.company_id = $${params.length}`);
+  }
+  if (filters.branch_id) {
+    params.push(filters.branch_id);
+    conditions.push(`tm.branch_id = $${params.length}`);
+  }
+
+  // Team handling with multi-team support
+  const teamClause = buildTeamClause(scope, params);
+  if (teamClause) conditions.push(teamClause);
+
+  if (filters.agent_id) {
+    params.push(filters.agent_id);
+    conditions.push(`s.assigned_agent_id = $${params.length}`);
+  }
+  if (filters.product) {
+    params.push(filters.product);
+    conditions.push(
+      `(lower(s.product) = lower($${params.length}) OR EXISTS (
+          SELECT 1 FROM products pr
+           WHERE pr.company_id = s.company_id
+             AND lower(pr.raw_label) = lower(s.product)
+             AND lower(pr.canonical_label) = lower($${params.length})))`,
+    );
+  }
+  if (filters.bucket) {
+    params.push(filters.bucket);
+    conditions.push(`lower(s.bucket) = lower($${params.length})`);
+  }
+  if (filters.status) {
+    params.push(filters.status);
+    conditions.push(`c.status = $${params.length}`);
+  }
+  return conditions;
 }
 
 export interface MonthDays {
@@ -434,9 +519,11 @@ async function classify(
   agencyId: string,
   filters: ReportFilters,
   useTransition: boolean,
+  scope?: ResolvedScope,
 ): Promise<ClassifiedAggregates> {
   const params: unknown[] = [agencyId, filters.month, useTransition];
-  const conditions = baseConditions(filters, params);
+  // Use buildReportConditions if scope provided (handles multi-team), else fallback to baseConditions
+  const conditions = scope ? buildReportConditions(scope, params) : baseConditions(filters, params);
   const { rows } = await pool.query(
     `WITH ${classifiedCtes(conditions)}
      SELECT ${AGGREGATE_SELECT} FROM class`,
@@ -611,6 +698,55 @@ function paymentConditions(filters: ReportFilters, params: unknown[]): string[] 
   return conditions;
 }
 
+/**
+ * Payment conditions with multi-team TL support.
+ * Like paymentConditions() but replaces team_id with buildTeamClause()
+ * to handle scopeTeamIds from multi-team TLs.
+ * Note: Uses cu.team_id since we're checking collector's team, not customer's allocation.
+ */
+function buildPaymentConditions(scope: ResolvedScope, params: unknown[]): string[] {
+  const conditions: string[] = [];
+  const filters = scope.filters;
+
+  if (filters.company_id) {
+    params.push(filters.company_id);
+    conditions.push(`c.company_id = $${params.length}`);
+  }
+  if (filters.agent_id) {
+    params.push(filters.agent_id);
+    conditions.push(`p.collected_by_user_id = $${params.length}`);
+  }
+
+  // Team handling with multi-team support (collector's team)
+  if (scope.scopeTeamIds?.length) {
+    params.push(scope.scopeTeamIds);
+    conditions.push(`cu.team_id = ANY($${params.length})`);
+  } else if (filters.team_id) {
+    params.push(filters.team_id);
+    conditions.push(`cu.team_id = $${params.length}`);
+  }
+
+  if (filters.branch_id) {
+    params.push(filters.branch_id);
+    conditions.push(`cu.branch_id = $${params.length}`);
+  }
+  if (filters.product) {
+    params.push(filters.product);
+    conditions.push(
+      `(lower(c.product) = lower($${params.length}) OR EXISTS (
+          SELECT 1 FROM products pr
+           WHERE pr.company_id = c.company_id
+             AND lower(pr.raw_label) = lower(c.product)
+             AND lower(pr.canonical_label) = lower($${params.length})))`,
+    );
+  }
+  if (filters.bucket) {
+    params.push(filters.bucket);
+    conditions.push(`lower(c.bucket) = lower($${params.length})`);
+  }
+  return conditions;
+}
+
 export interface DepositTotals {
   collected: number;
   deposited: number;
@@ -646,9 +782,13 @@ export async function depositsByRange(
 // Exported (not just used by dashboard()) so the branch drill-down (Phase 9)
 // can pull the same collected/deposited/pending math for a branch_id scope
 // without re-deriving the payment-conditions logic.
-export async function depositTotals(agencyId: string, filters: ReportFilters): Promise<DepositTotals> {
+export async function depositTotals(
+  agencyId: string,
+  filters: ReportFilters,
+  scope?: ResolvedScope,
+): Promise<DepositTotals> {
   const params: unknown[] = [agencyId, filters.month];
-  const conditions = paymentConditions(filters, params);
+  const conditions = scope ? buildPaymentConditions(scope, params) : paymentConditions(filters, params);
   const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
   const { rows } = await pool.query(
     `SELECT COALESCE(SUM(p.amount), 0)::float AS collected,
@@ -674,9 +814,13 @@ export async function depositTotals(agencyId: string, filters: ReportFilters): P
  * paymentConditions() with the MTD figure so both use identical scope
  * narrowing, just a different time window.
  */
-export async function collectedToday(agencyId: string, filters: ReportFilters): Promise<number> {
+export async function collectedToday(
+  agencyId: string,
+  filters: ReportFilters,
+  scope?: ResolvedScope,
+): Promise<number> {
   const params: unknown[] = [agencyId];
-  const conditions = paymentConditions(filters, params);
+  const conditions = scope ? buildPaymentConditions(scope, params) : paymentConditions(filters, params);
   const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
   const { rows } = await pool.query(
     `SELECT COALESCE(SUM(p.amount), 0)::float AS today
@@ -701,9 +845,10 @@ export interface PaymentTypeSplit {
 export async function collectionByType(
   agencyId: string,
   filters: ReportFilters,
+  scope?: ResolvedScope,
 ): Promise<PaymentTypeSplit> {
   const params: unknown[] = [agencyId, filters.month];
-  const conditions = paymentConditions(filters, params);
+  const conditions = scope ? buildPaymentConditions(scope, params) : paymentConditions(filters, params);
   const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
   const { rows } = await pool.query(
     `SELECT COALESCE(SUM(p.amount) FILTER (WHERE p.type = 'settlement'), 0)::float AS settlement,
@@ -739,9 +884,10 @@ export interface CollectionChannelSplit {
 export async function collectionByChannel(
   agencyId: string,
   filters: ReportFilters,
+  scope?: ResolvedScope,
 ): Promise<CollectionChannelSplit> {
   const params: unknown[] = [agencyId, filters.month];
-  const conditions = paymentConditions(filters, params);
+  const conditions = scope ? buildPaymentConditions(scope, params) : paymentConditions(filters, params);
   const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
   const { rows } = await pool.query(
     `SELECT
@@ -930,12 +1076,12 @@ export async function dashboard(
   requested: ReportFilters,
   hasFullView: boolean,
 ): Promise<DashboardResult> {
-  const scope = resolveReportScope(user, requested, hasFullView);
+  const scope = await resolveReportScope(user, requested, hasFullView);
   const filters = scope.filters;
   const days = monthDays(filters.month.slice(0, 7));
   const useTransition = await hasNextMonthSnapshot(user.agency_id, filters);
-  const agg = await classify(user.agency_id, filters, useTransition);
-  const deposits = await depositTotals(user.agency_id, filters);
+  const agg = await classify(user.agency_id, filters, useTransition, scope);
+  const deposits = await depositTotals(user.agency_id, filters, scope);
 
   const basisOf = (metric: ReportMetric): "transition" | "payments" =>
     metric === "recovery" ? "payments" : useTransition ? "transition" : "payments";
@@ -974,9 +1120,9 @@ export async function dashboard(
       : null;
   const collectionBook = await bookTotals(user.agency_id, filters);
   const [todayAmount, byType, byChannel] = await Promise.all([
-    collectedToday(user.agency_id, filters),
-    collectionByType(user.agency_id, filters),
-    collectionByChannel(user.agency_id, filters),
+    collectedToday(user.agency_id, filters, scope),
+    collectionByType(user.agency_id, filters, scope),
+    collectionByChannel(user.agency_id, filters, scope),
   ]);
 
   return {
@@ -1100,12 +1246,12 @@ export async function agentBreakdown(
   requested: ReportFilters,
   hasFullView: boolean,
 ): Promise<AgentReportRow[]> {
-  const scope = resolveReportScope(user, requested, hasFullView);
+  const scope = await resolveReportScope(user, requested, hasFullView);
   const filters = scope.filters;
   const useTransition = await hasNextMonthSnapshot(user.agency_id, filters);
 
   const params: unknown[] = [user.agency_id, filters.month, useTransition];
-  const conditions = baseConditions(filters, params);
+  const conditions = scope ? buildReportConditions(scope, params) : baseConditions(filters, params);
   const { rows } = await pool.query(
     `WITH ${classifiedCtes(conditions)}
      SELECT class.assigned_agent_id AS agent_id, ${AGGREGATE_SELECT}
@@ -1118,7 +1264,7 @@ export async function agentBreakdown(
   // Separately query collected amounts by who actually recorded the payment
   // (paymentConditions uses p.collected_by_user_id, unlike classifiedCtes which uses allocated agent).
   const payParams: unknown[] = [user.agency_id, filters.month];
-  const payConditions = paymentConditions(filters, payParams);
+  const payConditions = scope ? buildPaymentConditions(scope, payParams) : paymentConditions(filters, payParams);
   const payWhere = payConditions.length > 0 ? `AND ${payConditions.join(" AND ")}` : "";
   const { rows: collectedRows } = await pool.query(
     `SELECT p.collected_by_user_id AS agent_id, SUM(p.amount)::float AS collected_amount
@@ -1211,11 +1357,11 @@ export async function dimensionBreakdown(
   hasFullView: boolean,
   dimension: BreakdownDimension,
 ): Promise<BreakdownRow[]> {
-  const scope = resolveReportScope(user, requested, hasFullView);
+  const scope = await resolveReportScope(user, requested, hasFullView);
   const filters = scope.filters;
   const useTransition = await hasNextMonthSnapshot(user.agency_id, filters);
   const params: unknown[] = [user.agency_id, filters.month, useTransition];
-  const conditions = baseConditions(filters, params);
+  const conditions = scope ? buildReportConditions(scope, params) : baseConditions(filters, params);
   const dim = DIMENSION_GROUP[dimension];
   const orderBy = dimension === "bucket" ? "MIN(class.cur_sort) ASC NULLS LAST" : "allocated_amount DESC";
 
@@ -1241,7 +1387,7 @@ export async function dimensionBreakdown(
     bucket:  "c.bucket",
   };
   const payParams: unknown[] = [user.agency_id, filters.month];
-  const payConditions = paymentConditions(filters, payParams);
+  const payConditions = scope ? buildPaymentConditions(scope, payParams) : paymentConditions(filters, payParams);
   const payWhere = payConditions.length > 0 ? `AND ${payConditions.join(" AND ")}` : "";
   const dimPayGroup = DIM_PAYMENT_GROUP[dimension];
   const { rows: collectedRows } = await pool.query(

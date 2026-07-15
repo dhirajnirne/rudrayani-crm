@@ -29,10 +29,10 @@ async function run(): Promise<void> {
 
   const passwordHash = await hashPassword(password);
   const { rows } = await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin)
-     VALUES ($1, $2, $3, $4, true)
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin, designation)
+     VALUES ($1, $2, $3, $4, true, 'agency_admin')
      ON CONFLICT (phone) DO UPDATE
-       SET password_hash = EXCLUDED.password_hash, is_agency_admin = true
+       SET password_hash = EXCLUDED.password_hash, is_agency_admin = true, designation = 'agency_admin'
      RETURNING id`,
     [agencyId, fullName, phone, passwordHash],
   );

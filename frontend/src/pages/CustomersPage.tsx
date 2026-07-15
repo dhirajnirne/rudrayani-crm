@@ -12,7 +12,7 @@ import { SearchOutlined } from "@ant-design/icons";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api/client";
 import CustomerDetailDrawer from "../components/CustomerDetailDrawer";
-import type { Company, Customer } from "../types";
+import type { Branch, Company, Customer } from "../types";
 
 const STATUS_TAG: Record<string, { color: string; label: string }> = {
   active: { color: "green", label: "Active" },
@@ -28,7 +28,9 @@ interface Product {
 
 export default function CustomersPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [companyId, setCompanyId] = useState<string | null>(null);
+  const [branchId, setBranchId] = useState<string | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [buckets, setBuckets] = useState<string[]>([]);
   const [product, setProduct] = useState<string | null>(null);
@@ -43,7 +45,13 @@ export default function CustomersPage() {
   const [detailId, setDetailId] = useState<string | null>(null);
 
   useEffect(() => {
-    api.get("/companies").then((res) => setCompanies(res.data.companies));
+    Promise.all([
+      api.get("/companies"),
+      api.get("/branches"),
+    ]).then(([cRes, bRes]) => {
+      setCompanies(cRes.data.companies);
+      setBranches(bRes.data.branches);
+    });
   }, []);
 
   useEffect(() => {
@@ -68,6 +76,7 @@ export default function CustomersPage() {
     try {
       const params: Record<string, string | number> = { page: pg, limit: 50 };
       if (companyId) params.company_id = companyId;
+      if (branchId) params.branch_id = branchId;
       if (product) params.product = product;
       if (bucket) params.bucket = bucket;
       if (status) params.status = status;
@@ -79,7 +88,7 @@ export default function CustomersPage() {
     } finally {
       setLoading(false);
     }
-  }, [companyId, product, bucket, status, query]);
+  }, [companyId, branchId, product, bucket, status, query]);
 
   useEffect(() => {
     load(1);
@@ -99,7 +108,7 @@ export default function CustomersPage() {
 
       {/* Filters */}
       <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
-        <Col xs={24} sm={7}>
+        <Col xs={24} sm={6}>
           <Select
             style={{ width: "100%" }}
             placeholder="All companies"
@@ -110,6 +119,16 @@ export default function CustomersPage() {
           />
         </Col>
         <Col xs={12} sm={4}>
+          <Select
+            style={{ width: "100%" }}
+            placeholder="All branches"
+            allowClear
+            value={branchId}
+            onChange={(v) => setBranchId(v ?? null)}
+            options={branches.map((b) => ({ value: b.id, label: b.name }))}
+          />
+        </Col>
+        <Col xs={12} sm={3}>
           <Select
             style={{ width: "100%" }}
             placeholder="All products"
@@ -123,7 +142,7 @@ export default function CustomersPage() {
             }))}
           />
         </Col>
-        <Col xs={12} sm={4}>
+        <Col xs={12} sm={3}>
           <Select
             style={{ width: "100%" }}
             placeholder="All buckets"
@@ -134,7 +153,7 @@ export default function CustomersPage() {
             options={buckets.map((b) => ({ value: b, label: b }))}
           />
         </Col>
-        <Col xs={12} sm={4}>
+        <Col xs={12} sm={3}>
           <Select
             style={{ width: "100%" }}
             placeholder="All statuses"

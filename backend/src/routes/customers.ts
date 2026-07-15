@@ -80,7 +80,9 @@ router.get(
     }
     if (q.branch_id) {
       params.push(q.branch_id);
-      conditions.push(`EXISTS (SELECT 1 FROM teams tm WHERE tm.id = c.assigned_team_id AND tm.branch_id = $${params.length})`);
+      conditions.push(
+        `(c.branch_id = $${params.length} OR EXISTS (SELECT 1 FROM teams tm WHERE tm.id = c.assigned_team_id AND tm.branch_id = $${params.length}))`
+      );
     }
     if (q.q) {
       params.push(`%${q.q}%`);
@@ -106,12 +108,14 @@ router.get(
     const { rows } = await pool.query(
       `SELECT c.id, c.loan_number, c.customer_name, c.mobile_number,
               c.product, c.bucket, c.due_amount, c.pos, c.emi, c.status, c.recalled_at,
-              c.custom_fields, c.created_at, c.assigned_agent_id,
+              c.custom_fields, c.created_at, c.assigned_agent_id, c.assigned_field_agent_id, c.branch_id,
               a.full_name AS assigned_agent_name,
+              f.full_name AS assigned_field_agent_name,
               co.name AS company_name, co.id AS company_id
          FROM customers c
          JOIN companies co ON co.id = c.company_id
          LEFT JOIN users a ON a.id = c.assigned_agent_id
+         LEFT JOIN users f ON f.id = c.assigned_field_agent_id
         WHERE ${where}
         ORDER BY c.created_at DESC
         LIMIT $${params.length - 1} OFFSET $${params.length}`,
@@ -262,6 +266,42 @@ router.get(
       field_visits: fieldVisits.rows,
       attachments: attachments.rows,
     });
+  }),
+);
+
+// Update customer branch_id (Track 3, Phase 3.2)
+router.patch(
+  "/:id/branch",
+  requirePermission("customers.allocate"),
+  asyncHandler(async (req, res) => {
+    const id = z.string().uuid().parse(req.params.id);
+    const body = z.object({ branch_id: z.string().uuid().optional().nullable() }).parse(req.body);
+
+    // Verify customer exists
+    const { rows: customerRows } = await pool.query(
+      `SELECT c.id FROM customers c
+        JOIN companies co ON co.id = c.company_id
+       WHERE c.id = $1 AND co.agency_id = $2`,
+      [id, req.user!.agency_id],
+    );
+    if (!customerRows[0]) throw new HttpError(404, "Customer not found");
+
+    // Validate branch if provided
+    if (body.branch_id) {
+      const { rows: branchRows } = await pool.query(
+        "SELECT 1 FROM branches WHERE id = $1 AND agency_id = $2",
+        [body.branch_id, req.user!.agency_id],
+      );
+      if (!branchRows[0]) throw new HttpError(400, "Branch not found in this agency");
+    }
+
+    // Update customer branch_id
+    await pool.query("UPDATE customers SET branch_id = $1 WHERE id = $2", [
+      body.branch_id ?? null,
+      id,
+    ]);
+
+    res.json({ success: true });
   }),
 );
 

@@ -8,17 +8,12 @@ import { hashPassword } from "../services/auth-service";
 import { capabilitiesHavePermission } from "../services/permission-service";
 import { getSmsProvider } from "../services/sms/sms-provider";
 import { logger } from "../config/logger";
-import { capabilitiesOf, publicUser, type UserRow } from "../types/user";
+import { capabilitiesOf, publicUser, booleansForDesignation, type UserRow, type Capability } from "../types/user";
 
 const router = Router();
 router.use(authenticate);
 
-const capabilitySchema = z.object({
-  is_operations_manager: z.boolean().optional(),
-  is_team_leader: z.boolean().optional(),
-  is_telecaller: z.boolean().optional(),
-  is_field_agent: z.boolean().optional(),
-});
+const designationSchema = z.enum(["operations_manager", "team_leader", "telecaller", "field_agent"]);
 
 const createSchema = z.object({
   full_name: z.string().trim().min(1).max(200),
@@ -28,7 +23,7 @@ const createSchema = z.object({
   branch_id: z.string().uuid().optional().nullable(),
   team_id: z.string().uuid().optional().nullable(),
   manager_id: z.string().uuid().optional().nullable(),
-  capabilities: capabilitySchema.default({}),
+  designation: designationSchema,
 });
 
 const updateSchema = z.object({
@@ -38,7 +33,7 @@ const updateSchema = z.object({
   team_id: z.string().uuid().optional().nullable(),
   manager_id: z.string().uuid().optional().nullable(),
   is_active: z.boolean().optional(),
-  capabilities: capabilitySchema.optional(),
+  designation: designationSchema.optional(),
 });
 
 /**
@@ -48,10 +43,13 @@ const updateSchema = z.object({
  *  - Granting or revoking Operations Manager requires the ops_managers.create
  *    permission — which only the Agency Admin capability holds.
  */
-async function assertCanEditOpsManager(actor: UserRow): Promise<void> {
-  const allowed = await capabilitiesHavePermission(capabilitiesOf(actor), "ops_managers.create");
-  if (!allowed) {
-    throw new HttpError(403, "Only the Agency Admin can add or remove an Operations Manager");
+async function assertCanEditOpsManager(actor: UserRow, designation?: Capability): Promise<void> {
+  // Only check if setting designation to operations_manager
+  if (designation === "operations_manager") {
+    const allowed = await capabilitiesHavePermission(capabilitiesOf(actor), "ops_managers.create");
+    if (!allowed) {
+      throw new HttpError(403, "Only the Agency Admin can add or remove an Operations Manager");
+    }
   }
 }
 
@@ -98,25 +96,63 @@ async function assertBranchAndTeam(
 }
 
 /**
- * manager_id is informational only (brief: no permission implications), but
- * it must still resolve to a real employee in the same agency -- otherwise
- * the org chart could point at a manager from another tenant. Self-reference
- * is also rejected: an employee cannot report to themselves.
+ * Hard hierarchy enforcement: non-admin designations MUST have a manager
+ * whose designation is exactly the next rank up in the fixed chain:
+ * - operations_manager → manager is agency_admin (via assertCanEditOpsManager)
+ * - team_leader → manager is operations_manager
+ * - telecaller / field_agent → manager is team_leader
+ * - agency_admin → no manager allowed
+ *
+ * Forward-only enforcement: only validates when designation or manager_id
+ * is part of the write payload, not on every unrelated edit.
  */
 async function assertManager(
   agencyId: string,
+  designation: Capability | null,
   managerId: string | null | undefined,
   selfId?: string,
 ): Promise<void> {
-  if (!managerId) return;
+  if (!designation || designation === "agency_admin") {
+    // Admin requires no manager
+    if (managerId) {
+      throw new HttpError(400, "An agency admin cannot have a manager");
+    }
+    return;
+  }
+
+  if (!managerId) {
+    throw new HttpError(400, `${designation} requires a manager`);
+  }
+
   if (selfId && managerId === selfId) {
     throw new HttpError(400, "An employee cannot be their own manager");
   }
-  const { rows } = await pool.query("SELECT 1 FROM users WHERE id = $1 AND agency_id = $2", [
-    managerId,
-    agencyId,
-  ]);
-  if (rows.length === 0) throw new HttpError(400, "Manager not found in this agency");
+
+  // Look up manager's designation and validate it's exactly one rank up
+  const expectedManagerDesignation: Record<Capability, Capability> = {
+    operations_manager: "agency_admin",
+    team_leader: "operations_manager",
+    telecaller: "team_leader",
+    field_agent: "team_leader",
+    agency_admin: "agency_admin", // unreachable but needed for type completeness
+  };
+
+  const requiredDesignation = expectedManagerDesignation[designation];
+  const { rows } = await pool.query<{ designation: string }>(
+    "SELECT designation FROM users WHERE id = $1 AND agency_id = $2",
+    [managerId, agencyId],
+  );
+
+  if (rows.length === 0) {
+    throw new HttpError(400, "Manager not found in this agency");
+  }
+
+  if (rows[0].designation !== requiredDesignation) {
+    throw new HttpError(
+      400,
+      `Manager must be a ${requiredDesignation} (this employee is a ${designation})`,
+    );
+  }
 }
 
 router.get(
@@ -126,20 +162,43 @@ router.get(
     const q = (req.query.q as string | undefined)?.trim();
     const branchId = req.query.branch_id as string | undefined;
     const teamId = req.query.team_id as string | undefined;
+    const designation = req.query.designation as string | undefined;
+    const customerBranchId = req.query.customer_branch_id as string | undefined;
+    const product = req.query.product as string | undefined;
     // Phase 12 (Management Dashboard "Active Agents" KPI): lets the client
     // get a pre-filtered count instead of fetching everyone and filtering
     // client-side. Omitted -> unfiltered (unchanged pre-Phase-12 behavior).
     const isActiveRaw = req.query.is_active as string | undefined;
     const isActive = isActiveRaw === undefined ? null : isActiveRaw === "true";
-    const { rows } = await pool.query<UserRow>(
-      `SELECT u.* FROM users u
-        WHERE u.agency_id = $1
+
+    const params: unknown[] = [
+      req.user!.agency_id,
+      branchId ?? null,
+      teamId ?? null,
+      q || null,
+      isActive,
+      designation ?? null,
+      customerBranchId ?? null,
+      product ?? null,
+    ];
+
+    let conditions = `WHERE u.agency_id = $1
           AND ($2::uuid IS NULL OR u.branch_id = $2)
           AND ($3::uuid IS NULL OR u.team_id = $3)
           AND ($4::text IS NULL OR u.full_name ILIKE '%' || $4 || '%' OR u.phone LIKE $4 || '%')
           AND ($5::boolean IS NULL OR u.is_active = $5)
-        ORDER BY u.full_name`,
-      [req.user!.agency_id, branchId ?? null, teamId ?? null, q || null, isActive],
+          AND ($6::text IS NULL OR u.designation = $6)`;
+
+    if (customerBranchId) {
+      conditions += ` AND EXISTS (SELECT 1 FROM customers c WHERE (c.assigned_agent_id = u.id OR c.assigned_field_agent_id = u.id) AND c.branch_id = $7)`;
+    }
+    if (product) {
+      conditions += ` AND EXISTS (SELECT 1 FROM customers c WHERE (c.assigned_agent_id = u.id OR c.assigned_field_agent_id = u.id) AND c.product = $${customerBranchId ? '8' : '7'})`;
+    }
+
+    const { rows } = await pool.query<UserRow>(
+      `SELECT u.* FROM users u ${conditions} ORDER BY u.full_name`,
+      params,
     );
     res.json({
       employees: rows.map((u) => ({ ...publicUser(u), is_active: u.is_active })),
@@ -152,16 +211,17 @@ router.post(
   requirePermission("employees.create"),
   asyncHandler(async (req, res) => {
     const body = createSchema.parse(req.body);
-    if (body.capabilities.is_operations_manager) await assertCanEditOpsManager(req.user!);
+    await assertCanEditOpsManager(req.user!, body.designation);
     await assertBranchAndTeam(req.user!.agency_id, body.branch_id, body.team_id);
-    await assertManager(req.user!.agency_id, body.manager_id);
+    await assertManager(req.user!.agency_id, body.designation as Capability, body.manager_id);
 
     const passwordHash = await hashPassword(body.password);
+    const booleans = booleansForDesignation(body.designation);
     const { rows } = await pool.query<UserRow>(
       `INSERT INTO users
-         (agency_id, full_name, phone, email, password_hash, branch_id, team_id, manager_id,
+         (agency_id, full_name, phone, email, password_hash, branch_id, team_id, manager_id, designation,
           is_operations_manager, is_team_leader, is_telecaller, is_field_agent)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
        RETURNING *`,
       [
         req.user!.agency_id,
@@ -172,10 +232,11 @@ router.post(
         body.branch_id ?? null,
         body.team_id ?? null,
         body.manager_id ?? null,
-        body.capabilities.is_operations_manager ?? false,
-        body.capabilities.is_team_leader ?? false,
-        body.capabilities.is_telecaller ?? false,
-        body.capabilities.is_field_agent ?? false,
+        body.designation,
+        booleans.is_operations_manager,
+        booleans.is_team_leader,
+        booleans.is_telecaller,
+        booleans.is_field_agent,
       ],
     );
     await notifyCredentials(body.phone, body.password, false);
@@ -215,7 +276,21 @@ router.get(
       [agencyId],
     );
 
+    // Fetch team_leaders for multi-team TL support
+    const { rows: teamLeaders } = await pool.query<{ user_id: string; team_id: string }>(
+      `SELECT tl.user_id, tl.team_id FROM team_leaders tl
+         JOIN users u ON u.id = tl.user_id
+        WHERE u.agency_id = $1`,
+      [agencyId],
+    );
+    const leadersByTeam = new Map<string, string[]>();
+    for (const tl of teamLeaders) {
+      if (!leadersByTeam.has(tl.team_id)) leadersByTeam.set(tl.team_id, []);
+      leadersByTeam.get(tl.team_id)!.push(tl.user_id);
+    }
+
     const nameById = new Map(users.map((u) => [u.id, u.full_name]));
+    const userById = new Map(users.map((u) => [u.id, u]));
     const toAgent = (u: UserRow) => ({
       ...publicUser(u),
       is_active: u.is_active,
@@ -227,17 +302,23 @@ router.get(
       name: b.name,
       teams: teams
         .filter((t) => t.branch_id === b.id)
-        .map((t) => ({
-          id: t.id,
-          name: t.name,
-          agents: users.filter((u) => u.team_id === t.id).map(toAgent),
-        })),
+        .map((t) => {
+          const agentsInTeam = users.filter((u) => u.team_id === t.id);
+          const leadersInTeam = (leadersByTeam.get(t.id) ?? [])
+            .map((lid) => userById.get(lid))
+            .filter((u): u is UserRow => u !== undefined);
+          return {
+            id: t.id,
+            name: t.name,
+            agents: [...agentsInTeam, ...leadersInTeam].map(toAgent),
+          };
+        }),
       unassigned_agents: users
-        .filter((u) => u.branch_id === b.id && !u.team_id)
+        .filter((u) => u.branch_id === b.id && !u.team_id && u.designation !== 'team_leader')
         .map(toAgent),
     }));
 
-    const agencyUnassigned = users.filter((u) => !u.branch_id).map(toAgent);
+    const agencyUnassigned = users.filter((u) => !u.branch_id && u.designation !== 'team_leader').map(toAgent);
 
     res.json({
       agency: agencyRows[0] ?? null,
@@ -275,10 +356,9 @@ router.patch(
       throw new HttpError(403, "The Agency Admin account cannot be modified here");
     }
 
-    const opsFlagChanging =
-      body.capabilities?.is_operations_manager !== undefined &&
-      body.capabilities.is_operations_manager !== existing.is_operations_manager;
-    if (opsFlagChanging) await assertCanEditOpsManager(req.user!);
+    if (body.designation) {
+      await assertCanEditOpsManager(req.user!, body.designation);
+    }
 
     if (body.is_active === false) {
       const allowed = await capabilitiesHavePermission(
@@ -293,11 +373,14 @@ router.patch(
       body.branch_id ?? existing.branch_id,
       body.team_id ?? existing.team_id,
     );
-    if (body.manager_id !== undefined) {
-      await assertManager(req.user!.agency_id, body.manager_id, existing.id);
+    // Validate hierarchy only if designation or manager_id is being changed
+    if (body.manager_id !== undefined || body.designation) {
+      const designation = (body.designation ?? existing.designation) as Capability;
+      const managerId = body.manager_id !== undefined ? body.manager_id : existing.manager_id;
+      await assertManager(req.user!.agency_id, designation, managerId, existing.id);
     }
 
-    const caps = body.capabilities ?? {};
+    const booleans = body.designation ? booleansForDesignation(body.designation) : null;
     const { rows } = await pool.query<UserRow>(
       `UPDATE users SET
           full_name = COALESCE($3, full_name),
@@ -305,11 +388,12 @@ router.patch(
           branch_id = CASE WHEN $5::boolean THEN $6::uuid ELSE branch_id END,
           team_id = CASE WHEN $7::boolean THEN $8::uuid ELSE team_id END,
           manager_id = CASE WHEN $14::boolean THEN $15::uuid ELSE manager_id END,
+          designation = COALESCE($16, designation),
           is_active = COALESCE($9, is_active),
-          is_operations_manager = COALESCE($10, is_operations_manager),
-          is_team_leader = COALESCE($11, is_team_leader),
-          is_telecaller = COALESCE($12, is_telecaller),
-          is_field_agent = COALESCE($13, is_field_agent)
+          is_operations_manager = CASE WHEN $16::text IS NOT NULL THEN $17::boolean ELSE is_operations_manager END,
+          is_team_leader = CASE WHEN $16::text IS NOT NULL THEN $18::boolean ELSE is_team_leader END,
+          is_telecaller = CASE WHEN $16::text IS NOT NULL THEN $19::boolean ELSE is_telecaller END,
+          is_field_agent = CASE WHEN $16::text IS NOT NULL THEN $20::boolean ELSE is_field_agent END
         WHERE id = $1 AND agency_id = $2
         RETURNING *`,
       [
@@ -322,12 +406,17 @@ router.patch(
         body.team_id !== undefined,
         body.team_id ?? null,
         body.is_active ?? null,
-        caps.is_operations_manager ?? null,
-        caps.is_team_leader ?? null,
-        caps.is_telecaller ?? null,
-        caps.is_field_agent ?? null,
+        null, // $10 (unused)
+        null, // $11 (unused)
+        null, // $12 (unused)
+        null, // $13 (unused)
         body.manager_id !== undefined,
         body.manager_id ?? null,
+        body.designation ?? null,
+        booleans?.is_operations_manager ?? null,
+        booleans?.is_team_leader ?? null,
+        booleans?.is_telecaller ?? null,
+        booleans?.is_field_agent ?? null,
       ],
     );
 
@@ -369,6 +458,47 @@ router.post(
     );
     await notifyCredentials(rows[0].phone, body.new_password, true);
     res.json({ ok: true });
+  }),
+);
+
+// Assign branches to a telecaller (replace-set, used for multi-branch assignment)
+router.put(
+  "/:id/branches",
+  requirePermission("employees.update"),
+  asyncHandler(async (req, res) => {
+    const body = z.object({ branch_ids: z.array(z.string().uuid()) }).parse(req.body);
+
+    // Fetch user and verify they're a telecaller
+    const { rows: userRows } = await pool.query<UserRow>(
+      "SELECT * FROM users WHERE id = $1 AND agency_id = $2",
+      [req.params.id, req.user!.agency_id],
+    );
+    if (!userRows[0]) throw new HttpError(404, "Employee not found");
+    if (userRows[0].designation !== "telecaller") {
+      throw new HttpError(400, "Only telecallers can have multiple branches assigned");
+    }
+
+    // Validate all branches belong to this agency
+    if (body.branch_ids.length > 0) {
+      const { rows: branches } = await pool.query(
+        "SELECT id FROM branches WHERE id = ANY($1::uuid[]) AND agency_id = $2",
+        [body.branch_ids, req.user!.agency_id],
+      );
+      if (branches.length !== body.branch_ids.length) {
+        throw new HttpError(400, "One or more branches not found in this agency");
+      }
+    }
+
+    // Replace telecaller_branches entries
+    await pool.query("DELETE FROM telecaller_branches WHERE user_id = $1", [req.params.id]);
+    if (body.branch_ids.length > 0) {
+      await pool.query(
+        "INSERT INTO telecaller_branches (user_id, branch_id) SELECT $1, unnest($2::uuid[])",
+        [req.params.id, body.branch_ids],
+      );
+    }
+
+    res.json({ success: true });
   }),
 );
 

@@ -85,12 +85,19 @@ function useBranchTeam() {
 }
 
 /** Agents a TL can allocate to: active users who work customers. */
-function useAssignableAgents(branchId: string | null, teamId: string | null) {
+function useAssignableAgents(
+  branchId: string | null,
+  teamId: string | null,
+  customerBranchId?: string | null,
+  product?: string | null,
+) {
   const [agents, setAgents] = useState<Employee[]>([]);
   useEffect(() => {
     const params: Record<string, string> = {};
     if (branchId) params.branch_id = branchId;
     if (teamId) params.team_id = teamId;
+    if (customerBranchId) params.customer_branch_id = customerBranchId;
+    if (product) params.product = product;
     api.get("/employees", { params }).then((res) => {
       setAgents(
         (res.data.employees as Employee[]).filter(
@@ -102,7 +109,7 @@ function useAssignableAgents(branchId: string | null, teamId: string | null) {
         ),
       );
     });
-  }, [branchId, teamId]);
+  }, [branchId, teamId, customerBranchId, product]);
   return agents;
 }
 
@@ -219,14 +226,24 @@ function FilterRow({
 function UnallocatedQueue() {
   const filters = useCompanyFilters();
   const branchTeam = useBranchTeam();
-  const agents = useAssignableAgents(branchTeam.branchId, branchTeam.teamId);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [customerBranchId, setCustomerBranchId] = useState<string | null>(null);
+  const agents = useAssignableAgents(branchTeam.branchId, branchTeam.teamId, customerBranchId, filters.product);
+  const telecallers = useMemo(() => agents.filter((a) => a.capabilities.includes("telecaller")), [agents]);
+  const fieldAgents = useMemo(() => agents.filter((a) => a.capabilities.includes("field_agent")), [agents]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [agentId, setAgentId] = useState<string | null>(null);
+  const [fieldAgentId, setFieldAgentId] = useState<string | null>(null);
   const [assigning, setAssigning] = useState(false);
+  const [assigningField, setAssigningField] = useState(false);
+
+  useEffect(() => {
+    api.get("/branches").then((res) => setBranches(res.data.branches));
+  }, []);
 
   const load = useCallback(
     async (pg = 1) => {
@@ -236,6 +253,7 @@ function UnallocatedQueue() {
         if (filters.companyId) params.company_id = filters.companyId;
         if (filters.product) params.product = filters.product;
         if (filters.bucket) params.bucket = filters.bucket;
+        if (customerBranchId) params.branch_id = customerBranchId;
         const res = await api.get("/allocations/unallocated", { params });
         setCustomers(res.data.customers);
         setTotal(res.data.total);
@@ -245,7 +263,7 @@ function UnallocatedQueue() {
         setLoading(false);
       }
     },
-    [filters.companyId, filters.product, filters.bucket],
+    [filters.companyId, filters.product, filters.bucket, customerBranchId],
   );
 
   useEffect(() => {
@@ -277,42 +295,108 @@ function UnallocatedQueue() {
     });
   };
 
+  const assignField = () => {
+    if (!fieldAgentId) return message.error("Pick a field agent first");
+    const fieldAgentName = agents.find((a) => a.id === fieldAgentId)?.full_name;
+    Modal.confirm({
+      title: `Assign ${selected.length} customer(s) to field agent ${fieldAgentName}?`,
+      content: "This will move them out of the unallocated queue immediately.",
+      okText: "Assign",
+      onOk: async () => {
+        setAssigningField(true);
+        try {
+          const res = await api.post("/allocations/assign-field-agent", {
+            customer_ids: selected,
+            agent_id: fieldAgentId,
+          });
+          message.success(`${res.data.assigned} customer(s) assigned to field agent ${res.data.agent_name}`);
+          load(page);
+        } catch (err) {
+          message.error(errorMessage(err));
+        } finally {
+          setAssigningField(false);
+        }
+      },
+    });
+  };
+
   return (
     <div>
       <FilterRow filters={filters} branchTeam={branchTeam} agentPickerLabel="Narrows agent picker" />
       <Typography.Text type="secondary" style={{ display: "block", marginBottom: 12, fontSize: 12 }}>
-        Branch / Team filters narrow the agent selector below — not the customer table (unallocated customers have no team yet).
+        Branch / Team filters above narrow the agent selector — not the customer table. Use "Customer branch" below to filter unallocated customers by their assigned branch.
       </Typography.Text>
 
+      <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
+        <Col xs={24} sm={6}>
+          <Select
+            style={{ width: "100%" }}
+            placeholder="All customer branches"
+            allowClear
+            value={customerBranchId}
+            onChange={(v) => setCustomerBranchId(v ?? null)}
+            options={branches.map((b) => ({ value: b.id, label: b.name }))}
+          />
+        </Col>
+      </Row>
+
       {selected.length > 0 && (
-        <Alert
-          type="info"
-          style={{ marginBottom: 12 }}
-          message={
-            <Space wrap>
-              <span>
-                <b>{selected.length}</b> customer(s) selected — assign to:
-              </span>
-              <Select
-                style={{ width: 240 }}
-                placeholder="Choose agent"
-                showSearch
-                optionFilterProp="label"
-                value={agentId}
-                onChange={setAgentId}
-                options={agents.map((a) => ({ value: a.id, label: a.full_name }))}
-              />
-              <Button
-                type="primary"
-                icon={<UserSwitchOutlined />}
-                loading={assigning}
-                onClick={assign}
-              >
-                Assign
-              </Button>
-            </Space>
-          }
-        />
+        <>
+          <Alert
+            type="info"
+            style={{ marginBottom: 12 }}
+            message={
+              <Space wrap>
+                <span>
+                  <b>{selected.length}</b> customer(s) selected — assign to:
+                </span>
+                <Select
+                  style={{ width: 200 }}
+                  placeholder="Choose telecaller"
+                  showSearch
+                  optionFilterProp="label"
+                  value={agentId}
+                  onChange={setAgentId}
+                  options={telecallers.map((a) => ({ value: a.id, label: a.full_name }))}
+                />
+                <Button
+                  type="primary"
+                  icon={<UserSwitchOutlined />}
+                  loading={assigning}
+                  onClick={assign}
+                >
+                  Assign Telecaller
+                </Button>
+              </Space>
+            }
+          />
+          <Alert
+            type="info"
+            style={{ marginBottom: 12 }}
+            message={
+              <Space wrap>
+                <span>Or assign to field agent:</span>
+                <Select
+                  style={{ width: 200 }}
+                  placeholder="Choose field agent"
+                  showSearch
+                  optionFilterProp="label"
+                  value={fieldAgentId}
+                  onChange={setFieldAgentId}
+                  options={fieldAgents.map((a) => ({ value: a.id, label: a.full_name }))}
+                />
+                <Button
+                  type="primary"
+                  icon={<UserSwitchOutlined />}
+                  loading={assigningField}
+                  onClick={assignField}
+                >
+                  Assign Field Agent
+                </Button>
+              </Space>
+            }
+          />
+        </>
       )}
 
       <Table
@@ -425,24 +509,42 @@ function AllocatedList() {
     () => [
       ...baseColumns,
       {
-        title: "Assigned To",
+        title: "Telecaller",
         dataIndex: "assigned_agent_name",
-        width: 160,
+        width: 140,
         render: (v: string | null) => (v ? <Tag color="blue">{v}</Tag> : "—"),
+      },
+      {
+        title: "Field Agent",
+        dataIndex: "assigned_field_agent_name",
+        width: 140,
+        render: (v: string | null) => (v ? <Tag color="green">{v}</Tag> : "—"),
       },
       {
         title: "",
         key: "actions",
-        width: 90,
+        width: 120,
         render: (_: unknown, record: Customer) => (
-          <Button
-            type="link"
-            size="small"
-            icon={<HistoryOutlined />}
-            onClick={() => openHistory(record)}
-          >
-            History
-          </Button>
+          <Space>
+            <Button
+              type="link"
+              size="small"
+              onClick={() => {
+                setAgentId(record.assigned_agent_id);
+                setReallocOpen(true);
+              }}
+            >
+              Reallocate
+            </Button>
+            <Button
+              type="link"
+              size="small"
+              icon={<HistoryOutlined />}
+              onClick={() => openHistory(record)}
+            >
+              History
+            </Button>
+          </Space>
         ),
       },
     ],

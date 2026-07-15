@@ -14,6 +14,7 @@ export interface UserRow {
   branch_id: string | null;
   team_id: string | null;
   manager_id: string | null;
+  designation: Capability;
   full_name: string;
   phone: string;
   email: string | null;
@@ -36,6 +37,23 @@ export function capabilitiesOf(user: UserRow): Capability[] {
   );
 }
 
+/** Convert a designation to the corresponding boolean flags (all others false) */
+export function booleansForDesignation(designation: Capability): {
+  is_agency_admin: boolean;
+  is_operations_manager: boolean;
+  is_team_leader: boolean;
+  is_telecaller: boolean;
+  is_field_agent: boolean;
+} {
+  return {
+    is_agency_admin: designation === "agency_admin",
+    is_operations_manager: designation === "operations_manager",
+    is_team_leader: designation === "team_leader",
+    is_telecaller: designation === "telecaller",
+    is_field_agent: designation === "field_agent",
+  };
+}
+
 /** Shape returned to clients — never includes password_hash. */
 export function publicUser(user: UserRow) {
   return {
@@ -44,6 +62,7 @@ export function publicUser(user: UserRow) {
     branch_id: user.branch_id,
     team_id: user.team_id,
     manager_id: user.manager_id,
+    designation: user.designation,
     full_name: user.full_name,
     phone: user.phone,
     email: user.email,

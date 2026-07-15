@@ -25,12 +25,10 @@ interface EmployeeFormValues {
   email?: string;
   password?: string;
   branch_id?: string | null;
+  branch_ids?: string[]; // Multi-branch for telecallers
   team_id?: string | null;
   manager_id?: string | null;
-  is_operations_manager?: boolean;
-  is_team_leader?: boolean;
-  is_telecaller?: boolean;
-  is_field_agent?: boolean;
+  designation?: "operations_manager" | "team_leader" | "telecaller" | "field_agent";
   is_active?: boolean;
 }
 
@@ -41,12 +39,16 @@ export default function EmployeesPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
+  const [products, setProducts] = useState<{ raw_label: string; canonical_label: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filterBranch, setFilterBranch] = useState<string | undefined>();
   const [filterTeam, setFilterTeam] = useState<string | undefined>();
   const [filterCapability, setFilterCapability] = useState<string | undefined>();
   const [filterStatus, setFilterStatus] = useState<"active" | "inactive" | undefined>();
+  const [filterDesignation, setFilterDesignation] = useState<string | undefined>();
+  const [filterCustomerBranch, setFilterCustomerBranch] = useState<string | undefined>();
+  const [filterProduct, setFilterProduct] = useState<string | undefined>();
   const [editing, setEditing] = useState<Employee | "new" | null>(null);
   const [resettingFor, setResettingFor] = useState<Employee | null>(null);
   const [form] = Form.useForm<EmployeeFormValues>();
@@ -80,36 +82,45 @@ export default function EmployeesPage() {
       .map((e) => ({ value: e.id, label: e.full_name }));
   }, [employees, selectedBranch, selectedTeam, editing]);
 
-  const filteredEmployees = useMemo(() => {
-    return employees.filter((e) => {
-      if (filterBranch && e.branch_id !== filterBranch) return false;
-      if (filterTeam && e.team_id !== filterTeam) return false;
-      if (filterCapability && !e.capabilities.includes(filterCapability as never)) return false;
-      if (filterStatus === "active" && !e.is_active) return false;
-      if (filterStatus === "inactive" && e.is_active) return false;
-      return true;
-    });
-  }, [employees, filterBranch, filterTeam, filterCapability, filterStatus]);
+  // No client-side filtering - all filtering now done server-side via query params
+  const filteredEmployees = employees;
 
-  const load = useCallback(async (q?: string) => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [emp, br, tm] = await Promise.all([
-        api.get("/employees", { params: q ? { q } : {} }),
+      const params: Record<string, string> = {};
+      if (search) params.q = search;
+      if (filterBranch) params.branch_id = filterBranch;
+      if (filterTeam) params.team_id = filterTeam;
+      if (filterStatus === "active") params.is_active = "true";
+      if (filterStatus === "inactive") params.is_active = "false";
+      if (filterDesignation) params.designation = filterDesignation;
+      if (filterCustomerBranch) params.customer_branch_id = filterCustomerBranch;
+      if (filterProduct) params.product = filterProduct;
+
+      const [emp, br, tm, prod] = await Promise.all([
+        api.get("/employees", { params }),
         api.get("/branches"),
         api.get("/teams"),
+        api.get("/products"),
       ]);
       setEmployees(emp.data.employees);
       setBranches(br.data.branches);
       setTeams(tm.data.teams);
+      setProducts(prod.data.products);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [search, filterBranch, filterTeam, filterStatus, filterDesignation, filterCustomerBranch, filterProduct]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // Update search with debounce-like behavior (load is already memoized with search dependency)
+  const handleSearch = (q: string) => {
+    setSearch(q);
+  };
 
   const branchName = (id: string | null) => branches.find((b) => b.id === id)?.name ?? "—";
   const teamName = (id: string | null) => teams.find((t) => t.id === id)?.name ?? "—";
@@ -120,17 +131,16 @@ export default function EmployeesPage() {
   };
 
   const openEdit = (e: Employee) => {
+    const isTelecaller = e.capabilities.includes("telecaller");
     form.setFieldsValue({
       full_name: e.full_name,
       phone: e.phone,
       email: e.email ?? undefined,
-      branch_id: e.branch_id,
+      branch_id: !isTelecaller ? e.branch_id : undefined,
+      branch_ids: isTelecaller ? (e.branch_ids ?? (e.branch_id ? [e.branch_id] : [])) : undefined,
       team_id: e.team_id,
       manager_id: e.manager_id,
-      is_operations_manager: e.capabilities.includes("operations_manager"),
-      is_team_leader: e.capabilities.includes("team_leader"),
-      is_telecaller: e.capabilities.includes("telecaller"),
-      is_field_agent: e.capabilities.includes("field_agent"),
+      designation: e.designation as any,
       is_active: e.is_active,
     });
     setEditing(e);
@@ -138,12 +148,8 @@ export default function EmployeesPage() {
 
   const save = async () => {
     const v = await form.validateFields();
-    const capabilities = {
-      is_operations_manager: v.is_operations_manager ?? false,
-      is_team_leader: v.is_team_leader ?? false,
-      is_telecaller: v.is_telecaller ?? false,
-      is_field_agent: v.is_field_agent ?? false,
-    };
+    const isTelecaller = v.designation === "telecaller";
+
     try {
       if (editing === "new") {
         await api.post("/employees", {
@@ -151,23 +157,30 @@ export default function EmployeesPage() {
           phone: v.phone,
           email: v.email || null,
           password: v.password,
-          branch_id: v.branch_id ?? null,
+          branch_id: isTelecaller ? null : (v.branch_id ?? null),
           team_id: v.team_id ?? null,
           manager_id: v.manager_id ?? null,
-          capabilities,
+          designation: v.designation,
         });
         message.success("Employee created");
       } else if (editing) {
         await api.patch(`/employees/${editing.id}`, {
           full_name: v.full_name,
           email: v.email || null,
-          branch_id: v.branch_id ?? null,
+          branch_id: isTelecaller ? null : (v.branch_id ?? null),
           team_id: v.team_id ?? null,
           manager_id: v.manager_id ?? null,
           is_active: v.is_active,
-          capabilities,
+          designation: v.designation,
         });
         message.success("Employee updated");
+
+        // Handle multi-branch assignment for telecallers
+        if (isTelecaller) {
+          await api.put(`/employees/${editing.id}/branches`, {
+            branch_ids: v.branch_ids ?? [],
+          });
+        }
       }
       setEditing(null);
       form.resetFields();
@@ -201,10 +214,9 @@ export default function EmployeesPage() {
           <Input.Search
             placeholder="Search name or phone"
             allowClear
-            onSearch={(q) => {
-              setSearch(q);
-              load(q);
-            }}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onSearch={() => {/* load() already called via useEffect when search changes */}}
             style={{ width: 260 }}
           />
           {hasPermission("employees.create") && (
@@ -235,6 +247,19 @@ export default function EmployeesPage() {
         />
         <Select
           style={{ width: 160 }}
+          placeholder="All designations"
+          allowClear
+          value={filterDesignation}
+          onChange={(v) => setFilterDesignation(v ?? undefined)}
+          options={[
+            { value: "operations_manager", label: "Ops Manager" },
+            { value: "team_leader", label: "Team Leader" },
+            { value: "telecaller", label: "Telecaller" },
+            { value: "field_agent", label: "Field Agent" },
+          ]}
+        />
+        <Select
+          style={{ width: 160 }}
           placeholder="All capabilities"
           allowClear
           value={filterCapability}
@@ -245,6 +270,25 @@ export default function EmployeesPage() {
             { value: "team_leader", label: "Team Leader" },
             { value: "operations_manager", label: "Ops Manager" },
           ]}
+        />
+        <Select
+          style={{ width: 160 }}
+          placeholder="Customer branch"
+          allowClear
+          value={filterCustomerBranch}
+          onChange={(v) => setFilterCustomerBranch(v ?? undefined)}
+          options={branches.map((b) => ({ value: b.id, label: b.name }))}
+        />
+        <Select
+          style={{ width: 140 }}
+          placeholder="Product"
+          allowClear
+          value={filterProduct}
+          onChange={(v) => setFilterProduct(v ?? undefined)}
+          options={products.map((p) => ({
+            value: p.raw_label,
+            label: p.canonical_label || p.raw_label,
+          }))}
         />
         <Select
           style={{ width: 140 }}
@@ -349,17 +393,58 @@ export default function EmployeesPage() {
               <Input.Password />
             </Form.Item>
           )}
-          <Form.Item name="branch_id" label="Branch">
+          <Form.Item name="designation" label="Designation" rules={[{ required: true }]}>
             <Select
-              allowClear
-              options={branches.map((b) => ({ value: b.id, label: b.name }))}
-              onChange={() => form.setFieldValue("team_id", undefined)}
+              options={[
+                canEditOps ? { value: "operations_manager", label: "Operations Manager" } : null,
+                { value: "team_leader", label: "Team Leader" },
+                { value: "telecaller", label: "Telecaller" },
+                { value: "field_agent", label: "Field Agent" },
+              ].filter((o): o is any => o !== null)}
             />
           </Form.Item>
-          <Form.Item name="team_id" label="Team">
-            <Select allowClear options={teamOptions} />
-          </Form.Item>
-          <Form.Item name="manager_id" label="Reports to">
+
+          {form.getFieldValue("designation") === "team_leader" ? (
+            <Form.Item label="Branches">
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                Derived from led teams. Set via "Manage leaders" in Teams page.
+              </Typography.Text>
+            </Form.Item>
+          ) : form.getFieldValue("designation") === "telecaller" ? (
+            <Form.Item name="branch_ids" label="Branches" rules={[{ required: true, message: "At least one branch required" }]}>
+              <Select
+                mode="multiple"
+                allowClear
+                options={branches.map((b) => ({ value: b.id, label: b.name }))}
+                placeholder="Select one or more branches"
+              />
+            </Form.Item>
+          ) : (
+            <Form.Item name="branch_id" label="Branch">
+              <Select
+                allowClear
+                options={branches.map((b) => ({ value: b.id, label: b.name }))}
+                onChange={() => form.setFieldValue("team_id", undefined)}
+              />
+            </Form.Item>
+          )}
+
+          {form.getFieldValue("designation") !== "team_leader" && (
+            <Form.Item name="team_id" label="Team">
+              <Select allowClear options={teamOptions} />
+            </Form.Item>
+          )}
+
+          <Form.Item
+            name="manager_id"
+            label="Reports to"
+            rules={[
+              {
+                required: form.getFieldValue("designation") && form.getFieldValue("designation") !== "agency_admin",
+                message: "Manager required for non-admin designations",
+              },
+            ]}
+          >
             <Select
               allowClear
               showSearch
@@ -368,27 +453,6 @@ export default function EmployeesPage() {
               options={managerOptions}
             />
           </Form.Item>
-          <Typography.Text strong>Capabilities</Typography.Text>
-          <div style={{ display: "grid", gap: 4, margin: "8px 0 16px" }}>
-            <Tooltip
-              title={
-                canEditOps ? "" : "Only the Agency Admin can add or remove an Operations Manager"
-              }
-            >
-              <Form.Item name="is_operations_manager" valuePropName="checked" noStyle>
-                <Checkbox disabled={!canEditOps}>Operations Manager</Checkbox>
-              </Form.Item>
-            </Tooltip>
-            <Form.Item name="is_team_leader" valuePropName="checked" noStyle>
-              <Checkbox>Team Leader (designation)</Checkbox>
-            </Form.Item>
-            <Form.Item name="is_telecaller" valuePropName="checked" noStyle>
-              <Checkbox>Telecaller</Checkbox>
-            </Form.Item>
-            <Form.Item name="is_field_agent" valuePropName="checked" noStyle>
-              <Checkbox>Field Agent</Checkbox>
-            </Form.Item>
-          </div>
           {editing !== "new" && hasPermission("employees.deactivate") && (
             <Form.Item name="is_active" label="Active" valuePropName="checked">
               <Switch />

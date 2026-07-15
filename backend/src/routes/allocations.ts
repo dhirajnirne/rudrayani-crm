@@ -21,6 +21,7 @@ router.get(
         company_id: z.string().uuid().optional(),
         product: z.string().optional(),
         bucket: z.string().optional(),
+        branch_id: z.string().uuid().optional(),
         page: z.coerce.number().int().min(1).default(1),
         limit: z.coerce.number().int().min(1).max(200).default(50),
       })
@@ -45,6 +46,10 @@ router.get(
       params.push(q.bucket);
       conditions.push(`c.bucket = $${params.length}`);
     }
+    if (q.branch_id) {
+      params.push(q.branch_id);
+      conditions.push(`c.branch_id = $${params.length}`);
+    }
 
     const where = conditions.join(" AND ");
     const countResult = await pool.query(
@@ -57,7 +62,7 @@ router.get(
     params.push(q.limit, (q.page - 1) * q.limit);
     const { rows } = await pool.query(
       `SELECT c.id, c.loan_number, c.customer_name, c.mobile_number,
-              c.product, c.bucket, c.due_amount, c.pos, c.emi,
+              c.product, c.bucket, c.due_amount, c.pos, c.emi, c.branch_id,
               co.name AS company_name
          FROM customers c JOIN companies co ON co.id = c.company_id
         WHERE ${where}

@@ -59,6 +59,7 @@ export interface MappedRow {
   emi: number | null;
   emi_due_date: string | null; // 'YYYY-MM-DD'
   agent_phone: string | null;
+  customer_branch: string | null; // Branch name/code to resolve to branch_id
   custom_fields: Record<string, string>;
 }
 
@@ -490,6 +491,29 @@ async function resolveAgents(
   return resolved;
 }
 
+// Resolve branch names/codes to branch IDs (Track 3, Phase 3.4)
+async function resolveBranches(
+  client: PoolClient,
+  companyId: string,
+  rows: MappedRow[],
+): Promise<Map<string, string>> {
+  const branchNames = [...new Set(rows.map((r) => r.customer_branch).filter((b): b is string => !!b))];
+  const resolved = new Map<string, string>();
+  if (branchNames.length === 0) return resolved;
+  const { rows: branches } = await client.query(
+    `SELECT b.id, b.name FROM branches b
+       JOIN companies co ON co.agency_id = b.agency_id
+      WHERE co.id = $1 AND (b.name = ANY($2) OR b.id::text = ANY($2))`,
+    [companyId, branchNames],
+  );
+  for (const b of branches) {
+    resolved.set(b.name as string, b.id as string);
+    // Also map by ID for flexibility
+    resolved.set(b.id as string, b.id as string);
+  }
+  return resolved;
+}
+
 export async function commitImport(params: {
   companyId: string;
   templateId: string | null;
@@ -584,17 +608,25 @@ export async function commitImport(params: {
       ...toInsert,
       ...toUpdate.map((u) => u.row),
     ]);
+    // Branch resolution for customer_branch field (Track 3, Phase 3.4)
+    const branches = await resolveBranches(client, params.companyId, [
+      ...toInsert,
+      ...toUpdate.map((u) => u.row),
+    ]);
     const unknownPhones = new Set<string>();
+    const unknownBranches = new Set<string>();
     const snapshotIds: string[] = [];
 
     for (const row of toInsert) {
       const agent = row.agent_phone ? agents.get(row.agent_phone) : undefined;
       if (row.agent_phone && !agent) unknownPhones.add(row.agent_phone);
+      const branch = row.customer_branch ? branches.get(row.customer_branch) : undefined;
+      if (row.customer_branch && !branch) unknownBranches.add(row.customer_branch);
       const inserted = await client.query(
         `INSERT INTO customers
            (company_id, loan_number, customer_name, mobile_number, product, bucket,
-            due_amount, pos, emi, due_date, custom_fields, assigned_agent_id, assigned_team_id, import_run_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+            due_amount, pos, emi, due_date, custom_fields, assigned_agent_id, assigned_team_id, branch_id, import_run_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
          ON CONFLICT (company_id, loan_number) DO NOTHING
          RETURNING id`,
         [
@@ -611,6 +643,7 @@ export async function commitImport(params: {
           JSON.stringify(row.custom_fields),
           agent?.id ?? null,
           agent?.team_id ?? null,
+          branch?.id ?? null,
           mode === "new" ? runId : null,
         ],
       );
@@ -629,12 +662,42 @@ export async function commitImport(params: {
     for (const { row, customerId } of toUpdate) {
       const agent = row.agent_phone ? agents.get(row.agent_phone) : undefined;
       if (row.agent_phone && !agent) unknownPhones.add(row.agent_phone);
+      const branch = row.customer_branch ? branches.get(row.customer_branch) : undefined;
+      if (row.customer_branch && !branch) unknownBranches.add(row.customer_branch);
       const existing = await client.query(
-        `SELECT id, assigned_agent_id FROM customers WHERE id = $1 FOR UPDATE`,
+        `SELECT id, customer_name, mobile_number, product, bucket, due_amount, pos, emi, due_date,
+                custom_fields, assigned_agent_id, assigned_team_id, branch_id
+           FROM customers WHERE id = $1 FOR UPDATE`,
         [customerId],
       );
       const cust = existing.rows[0];
       if (!cust) continue; // deleted between validate and commit — skip quietly
+
+      // Track 6.2: Backup prior state before update
+      await client.query(
+        `INSERT INTO import_row_backups (import_run_id, customer_id, kind, prior_values)
+         VALUES ($1, $2, 'update', $3)
+         ON CONFLICT (import_run_id, customer_id) DO NOTHING`,
+        [
+          runId,
+          customerId,
+          JSON.stringify({
+            customer_name: cust.customer_name,
+            mobile_number: cust.mobile_number,
+            product: cust.product,
+            bucket: cust.bucket,
+            due_amount: cust.due_amount,
+            pos: cust.pos,
+            emi: cust.emi,
+            due_date: cust.due_date,
+            custom_fields: cust.custom_fields,
+            assigned_agent_id: cust.assigned_agent_id,
+            assigned_team_id: cust.assigned_team_id,
+            branch_id: cust.branch_id,
+          }),
+        ],
+      );
+
       // The month's file is authoritative for bucket/amounts; blanks keep old values.
       await client.query(
         `UPDATE customers
@@ -648,7 +711,8 @@ export async function commitImport(params: {
                 due_date        = COALESCE($9, due_date),
                 custom_fields   = custom_fields || $10::jsonb,
                 assigned_agent_id = COALESCE($11, assigned_agent_id),
-                assigned_team_id  = COALESCE($12, assigned_team_id)
+                assigned_team_id  = COALESCE($12, assigned_team_id),
+                branch_id       = COALESCE($13, branch_id)
           WHERE id = $1`,
         [
           cust.id,
@@ -663,6 +727,7 @@ export async function commitImport(params: {
           JSON.stringify(row.custom_fields),
           agent?.id ?? null,
           agent?.team_id ?? null,
+          branch ?? null,
         ],
       );
       snapshotIds.push(cust.id as string);
@@ -776,6 +841,7 @@ export async function commitImport(params: {
       duplicate_rows: duplicateRows,
       error_rows: validation.errors.length,
       unknown_agent_phones: [...unknownPhones],
+      unknown_branches: [...unknownBranches],
       pending_review: pendingReviewRows,
       removal_flagged: reviewRemovals.length,
       new_buckets: newBuckets,

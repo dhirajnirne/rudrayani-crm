@@ -9,11 +9,13 @@ export interface User {
   id: string;
   agency_id: string;
   branch_id: string | null;
+  branch_ids?: string[]; // Multi-branch for telecallers
   team_id: string | null;
   manager_id: string | null;
   full_name: string;
   phone: string;
   email: string | null;
+  designation?: "operations_manager" | "team_leader" | "telecaller" | "field_agent" | "agency_admin";
   capabilities: Capability[];
 }
 
@@ -57,6 +59,7 @@ export interface Team {
   branch_id: string;
   branch_name?: string;
   created_at: string;
+  leaders?: Array<{ id: string; full_name: string }>;
 }
 
 export interface Company {
@@ -89,6 +92,7 @@ export interface ImportRun {
   error_rows: number;
   created_at: string;
   deleted_at: string | null;
+  rolled_back_at: string | null;
 }
 
 export interface DispositionCode {
@@ -125,6 +129,7 @@ export interface Customer {
   assigned_agent_name: string | null;
   assigned_field_agent_id: string | null;
   assigned_field_agent_name: string | null;
+  branch_id: string | null;
   custom_fields: Record<string, unknown>;
   created_at: string;
   company_name: string;

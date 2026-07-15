@@ -30,7 +30,7 @@ router.get(
       .parse(req.query);
     const date = q.date ?? new Date().toISOString().slice(0, 10);
 
-    const scope = scopeFilter(me);
+    const scope = await scopeFilter(me);
     const params: unknown[] = [me.agency_id, date];
     let scopeClause = "";
     if (scope.param !== null) {
@@ -140,7 +140,7 @@ router.get(
       .parse(req.query);
     const date = q.date ?? new Date().toISOString().slice(0, 10);
 
-    const scope = scopeFilter(me);
+    const scope = await scopeFilter(me);
     const targetParams: unknown[] = [req.params.id, me.agency_id];
     let scopeClause = "";
     if (scope.param !== null) {
