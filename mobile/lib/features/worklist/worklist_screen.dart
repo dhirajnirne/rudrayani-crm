@@ -6,7 +6,6 @@ import '../../core/auth/auth_provider.dart';
 import '../../core/models/customer.dart';
 import '../../core/offline/offline_queue.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/tracking/attendance_provider.dart';
 import '../../core/tracking/tracking_service.dart';
 import '../../core/widgets/state_views.dart';
 import 'worklist_provider.dart';
@@ -32,8 +31,6 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
   @override
   void initState() {
     super.initState();
-    // Resume/stop tracking to match the server's view of the shift.
-    Future.microtask(() => ref.read(attendanceProvider.notifier).init());
   }
 
   @override
@@ -77,7 +74,6 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
       ),
       body: Column(
         children: [
-          const _DutyBanner(),
           const _SyncBanner(),
           const TodaySection(),
           Padding(
@@ -289,101 +285,7 @@ class _SyncBanner extends ConsumerWidget {
 /// Explicit duty/tracking state (brief §10: "punch-in starts the
 /// location-tracking session; punch-out ends it. Make this explicit in the
 /// UI, not implicit").
-class _DutyBanner extends ConsumerWidget {
-  const _DutyBanner();
 
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final att = ref.watch(attendanceProvider);
-    final notifier = ref.read(attendanceProvider.notifier);
-    final onDuty = att.punchedIn;
-
-    return Container(
-      width: double.infinity,
-      color: onDuty ? AppColors.successContainer : AppColors.neutralContainer,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                onDuty ? Icons.gps_fixed : Icons.gps_off,
-                size: 18,
-                color: onDuty
-                    ? AppColors.successStrong
-                    : AppColors.textSecondary,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      onDuty
-                          ? 'On duty — location tracking active'
-                          : 'Off duty',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.bold,
-                        color: onDuty
-                            ? AppColors.successStrong
-                            : AppColors.textSecondary,
-                      ),
-                    ),
-                    if (onDuty && att.punchInAt != null)
-                      Text(
-                        'Punched in at ${DateFormat('HH:mm').format(att.punchInAt!.toLocal())}',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: AppColors.successStrong,
-                        ).tabular,
-                      ),
-                  ],
-                ),
-              ),
-              SizedBox(
-                // Explicit tap-target height (design brief: 48px strict
-                // minimum on all buttons) — do not shrink below this.
-                height: AppDimens.tapTarget,
-                child: att.busy
-                    ? const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 16),
-                        child: SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                      )
-                    : ElevatedButton(
-                        onPressed: onDuty
-                            ? notifier.punchOut
-                            : notifier.punchIn,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: onDuty
-                              ? AppColors.error
-                              : AppColors.primary,
-                          foregroundColor: AppColors.onPrimary,
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                        ),
-                        child: Text(onDuty ? 'Punch Out' : 'Punch In'),
-                      ),
-              ),
-            ],
-          ),
-          if (att.error != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(
-                att.error!,
-                style: const TextStyle(fontSize: 12, color: AppColors.error),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
 
 class _CustomerCard extends StatelessWidget {
   final Customer customer;

@@ -5,6 +5,7 @@ import '../../core/api/api_client.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/state_views.dart';
 import '../../core/utils/parser.dart';
+import 'package:go_router/go_router.dart';
 import 'dashboard_widgets.dart';
 
 String _lakh(num? v) {
@@ -117,11 +118,20 @@ class TelecallerDashboardScreen extends ConsumerWidget {
                   loading: () => const SizedBox.shrink(),
                   error: (e, _) => InlineErrorNote(message: 'PTP summary: $e'),
                   data: (t) => DashboardStatGrid(cards: [
-                    DashboardStatCard(label: 'Created', value: '${t['ptps_created'] ?? 0}'),
                     DashboardStatCard(
-                        label: 'Kept', value: '${t['ptps_kept'] ?? 0}', accent: AppColors.success),
+                        label: 'Created',
+                        value: '${t['ptps_created'] ?? 0}',
+                        onTap: () => context.push('/account/ptps/pending')),
                     DashboardStatCard(
-                        label: 'Broken', value: '${t['ptps_broken'] ?? 0}', accent: AppColors.error),
+                        label: 'Kept',
+                        value: '${t['ptps_kept'] ?? 0}',
+                        accent: AppColors.success,
+                        onTap: () => context.push('/account/ptps/kept')),
+                    DashboardStatCard(
+                        label: 'Broken',
+                        value: '${t['ptps_broken'] ?? 0}',
+                        accent: AppColors.error,
+                        onTap: () => context.push('/account/ptps/broken')),
                     DashboardStatCard(
                         label: 'Pending Value', value: '₹ ${_lakh(parseDouble(t['ptps_pending_value']))}'),
                   ]),

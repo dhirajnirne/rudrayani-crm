@@ -16,6 +16,31 @@ router.use(authenticate, requirePermission("calls.log"));
 router.get(
   "/",
   asyncHandler(async (req, res) => {
+    const q = (req.query.q as string | undefined)?.trim();
+    const branchId = req.query.branch_id as string | undefined;
+    const product = req.query.product as string | undefined;
+    const bucket = req.query.bucket as string | undefined;
+
+    const params: unknown[] = [req.user!.id];
+    let conditions = `(c.assigned_agent_id = $1 OR c.assigned_field_agent_id = $1) AND c.status = 'active'`;
+
+    if (q) {
+      params.push(q);
+      conditions += ` AND (c.customer_name ILIKE '%' || $${params.length} || '%' OR c.loan_number ILIKE '%' || $${params.length} || '%')`;
+    }
+    if (branchId) {
+      params.push(branchId);
+      conditions += ` AND c.branch_id = $${params.length}`;
+    }
+    if (product) {
+      params.push(product);
+      conditions += ` AND c.product = $${params.length}`;
+    }
+    if (bucket) {
+      params.push(bucket);
+      conditions += ` AND c.bucket = $${params.length}`;
+    }
+
     const { rows } = await pool.query(
       `SELECT c.id, c.loan_number, c.customer_name, c.mobile_number,
               c.product, c.bucket, c.due_amount, c.pos, c.emi, c.custom_fields,
@@ -50,9 +75,9 @@ router.get(
                    AND m.month = date_trunc('month', now())
               ) AS normalized_pending
          ) bm ON true
-        WHERE (c.assigned_agent_id = $1 OR c.assigned_field_agent_id = $1) AND c.status = 'active'
+        WHERE ${conditions}
         ORDER BY pp.promised_date ASC NULLS LAST, c.due_amount DESC NULLS LAST`,
-      [req.user!.id],
+      params,
     );
     res.json({ customers: rows, total: rows.length });
   }),

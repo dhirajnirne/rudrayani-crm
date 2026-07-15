@@ -1,4 +1,4 @@
-import { Alert, Badge, Button, Collapse, Input, Modal, Space, Table, Tag, Typography, message } from "antd";
+import { Alert, Badge, Button, Collapse, Input, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
 import { CalendarOutlined, PhoneOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
@@ -8,7 +8,7 @@ import CustomerDetailDrawer from "../components/CustomerDetailDrawer";
 import LogCallModal from "../components/LogCallModal";
 import RecordPaymentModal from "../components/RecordPaymentModal";
 import { palette } from "../theme/tokens";
-import type { DispositionCode, WorklistCustomer } from "../types";
+import type { Branch, DispositionCode, WorklistCustomer } from "../types";
 
 dayjs.extend(relativeTime);
 
@@ -43,6 +43,15 @@ export default function MyWorklistPage() {
   const [customers, setCustomers] = useState<WorklistCustomer[]>([]);
   const [reminders, setReminders] = useState<ReminderDue[]>([]);
   const [ptpsDue, setPtpsDue] = useState<PtpDue[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [products, setProducts] = useState<{ raw_label: string; canonical_label: string }[]>([]);
+  const [buckets, setBuckets] = useState<{ id: string; name: string }[]>([]);
+
+  const [search, setSearch] = useState("");
+  const [filterBranch, setFilterBranch] = useState<string | undefined>();
+  const [filterProduct, setFilterProduct] = useState<string | undefined>();
+  const [filterBucket, setFilterBucket] = useState<string | undefined>();
+
   const [loading, setLoading] = useState(true);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [dispositionCodes, setDispositionCodes] = useState<DispositionCode[]>([]);
@@ -56,8 +65,14 @@ export default function MyWorklistPage() {
     setLoading(true);
     try {
       const today = dayjs().format("YYYY-MM-DD");
+      const params: Record<string, string> = {};
+      if (search) params.q = search;
+      if (filterBranch) params.branch_id = filterBranch;
+      if (filterProduct) params.product = filterProduct;
+      if (filterBucket) params.bucket = filterBucket;
+
       const [worklistRes, remindersRes, ptpsRes] = await Promise.all([
-        api.get("/worklist"),
+        api.get("/worklist", { params }),
         api.get("/reminders", { params: { status: "pending", date: today } }),
         api.get("/ptps/due", { params: { date: today } }),
       ]);
@@ -69,10 +84,13 @@ export default function MyWorklistPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [search, filterBranch, filterProduct, filterBucket]);
 
   useEffect(() => {
     api.get("/dispositions").then((res) => setDispositionCodes(res.data.disposition_codes));
+    api.get("/branches").then((res) => setBranches(res.data.branches));
+    api.get("/products").then((res) => setProducts(res.data.products));
+    api.get("/buckets").then((res) => setBuckets(res.data.buckets));
   }, []);
 
   useEffect(() => {
@@ -109,6 +127,45 @@ export default function MyWorklistPage() {
         My Worklist
       </Typography.Title>
       <Typography.Text type="secondary">{customers.length} customers assigned to you</Typography.Text>
+
+      <div style={{ marginTop: 16, display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <Input.Search
+          placeholder="Search name or phone..."
+          allowClear
+          onSearch={(v) => setSearch(v)}
+          style={{ width: 240 }}
+        />
+        <Select
+          placeholder="All branches"
+          allowClear
+          style={{ width: 180 }}
+          value={filterBranch}
+          onChange={(v) => setFilterBranch(v ?? undefined)}
+          options={branches.map((b) => ({ value: b.id, label: b.name }))}
+        />
+        <Select
+          placeholder="All products"
+          allowClear
+          style={{ width: 160 }}
+          value={filterProduct}
+          onChange={(v) => setFilterProduct(v ?? undefined)}
+          options={Array.from(new Set(products.map((p) => p.raw_label))).map((label) => ({
+            value: label,
+            label,
+          }))}
+        />
+        <Select
+          placeholder="All buckets"
+          allowClear
+          style={{ width: 140 }}
+          value={filterBucket}
+          onChange={(v) => setFilterBucket(v ?? undefined)}
+          options={Array.from(new Set(buckets.map((b) => b.name))).map((label) => ({
+            value: label,
+            label,
+          }))}
+        />
+      </div>
 
       <div style={{ marginTop: 16, marginBottom: 16 }}>
         <Collapse
@@ -203,6 +260,13 @@ export default function MyWorklistPage() {
           {
             title: "Due Amount",
             dataIndex: "due_amount",
+            width: 120,
+            align: "right" as const,
+            render: (v: string | null) => <span className="money">{fmtAmount(v)}</span>,
+          },
+          {
+            title: "EMI",
+            dataIndex: "emi",
             width: 120,
             align: "right" as const,
             render: (v: string | null) => <span className="money">{fmtAmount(v)}</span>,

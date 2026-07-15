@@ -15,37 +15,42 @@ class DashboardStatCard extends StatelessWidget {
   final String value;
   final String? sub;
   final Color? accent;
-  const DashboardStatCard({super.key, required this.label, required this.value, this.sub, this.accent});
+  final VoidCallback? onTap;
+  const DashboardStatCard({super.key, required this.label, required this.value, this.sub, this.accent, this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      constraints: const BoxConstraints(minHeight: AppDimens.listRow),
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.sm),
-      decoration: BoxDecoration(
-        color: AppColors.primarySurface,
-        borderRadius: BorderRadius.circular(AppRadius.md),
-        border: Border(left: BorderSide(color: accent ?? AppColors.primary, width: 3)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            label,
-            style: const TextStyle(fontSize: 11, color: AppColors.textSecondary, letterSpacing: 0.3),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            value,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.primaryDark)
-                .tabular,
-          ),
-          if (sub != null) ...[
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppRadius.md),
+      child: Container(
+        constraints: const BoxConstraints(minHeight: AppDimens.listRow),
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+        decoration: BoxDecoration(
+          color: AppColors.primarySurface,
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          border: Border(left: BorderSide(color: accent ?? AppColors.primary, width: 3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              label,
+              style: const TextStyle(fontSize: 11, color: AppColors.textSecondary, letterSpacing: 0.3),
+            ),
             const SizedBox(height: 2),
-            Text(sub!, style: const TextStyle(fontSize: 11, color: AppColors.textTertiary).tabular),
+            Text(
+              value,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.primaryDark)
+                  .tabular,
+            ),
+            if (sub != null) ...[
+              const SizedBox(height: 2),
+              Text(sub!, style: const TextStyle(fontSize: 11, color: AppColors.textTertiary).tabular),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }

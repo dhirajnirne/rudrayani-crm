@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button, Drawer, Space, Switch, Typography, message } from "antd";
+import { Button, Drawer, Space, Switch, Typography, message, theme } from "antd";
 import { HolderOutlined } from "@ant-design/icons";
 import {
   DndContext,
@@ -24,6 +24,7 @@ import { palette } from "../../theme/tokens";
 const TITLES = new Map(DASHBOARD_WIDGETS.map((w) => [w.id, w.title]));
 
 function SortableRow({ entry, onToggle }: { entry: WidgetLayoutEntry; onToggle: (id: string) => void }) {
+  const { token } = theme.useToken();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: entry.id,
   });
@@ -39,12 +40,12 @@ function SortableRow({ entry, onToggle }: { entry: WidgetLayoutEntry; onToggle: 
         gap: 10,
         padding: "8px 10px",
         borderRadius: 6,
-        border: `1px solid ${palette.border}`,
+        border: `1px solid ${token.colorBorderSecondary}`,
         marginBottom: 6,
-        background: palette.surface,
+        background: token.colorBgContainer,
       }}
     >
-      <span {...attributes} {...listeners} style={{ cursor: "grab", color: palette.textMuted, display: "flex" }}>
+      <span {...attributes} {...listeners} style={{ cursor: "grab", color: token.colorTextSecondary, display: "flex" }}>
         <HolderOutlined />
       </span>
       <Typography.Text style={{ flex: 1 }}>{TITLES.get(entry.id) ?? entry.id}</Typography.Text>

@@ -8,6 +8,7 @@ import '../dashboard/telecaller_dashboard_screen.dart';
 import '../performance/performance_screen.dart';
 import '../team/team_screen.dart';
 import '../worklist/worklist_screen.dart';
+import '../account/account_screen.dart';
 
 /// Which role-specific dashboard tab (if any) a user's capability set maps
 /// to. A user can only hold one of team_leader/telecaller/field_agent as
@@ -60,6 +61,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       if (isTelecaller) const TelecallerDashboardScreen(),
       if (isFieldAgent) const FieldExecutiveDashboardScreen(),
       const PerformanceScreen(),
+      const AccountScreen(),
     ];
     final destinations = [
       const NavigationDestination(
@@ -86,6 +88,10 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       const NavigationDestination(
         icon: Icon(Icons.insights),
         label: 'My Performance',
+      ),
+      const NavigationDestination(
+        icon: Icon(Icons.person),
+        label: 'Account',
       ),
     ];
 
