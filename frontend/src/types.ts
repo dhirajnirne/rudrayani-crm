@@ -92,6 +92,7 @@ export interface ImportRun {
   error_rows: number;
   created_at: string;
   deleted_at: string | null;
+  rolled_back_at: string | null;
 }
 
 export interface DispositionCode {
