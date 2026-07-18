@@ -568,7 +568,18 @@ router.patch(
     let newAgentType: AgentType | null = existing.agent_type;
     if (agentTypeChanging) {
       const effectiveDesignation = (body.designation ?? existing.designation) as Capability;
-      const requestedAgentType = body.agent_type !== undefined ? body.agent_type : existing.agent_type;
+      const isAgentDesignation = effectiveDesignation === "telecaller" || effectiveDesignation === "field_agent";
+      // telecaller/field_agent always auto-mirror their own agent_type
+      // regardless of history, so a stale existing.agent_type left over from
+      // a *different* prior designation must never be treated as an explicit
+      // (and possibly conflicting) request here -- e.g. changing a telecaller
+      // to a field_agent without resending agent_type would otherwise compare
+      // the new "field_agent" designation against the old "telecaller" value
+      // and wrongly reject the edit. branch_manager/team_leader still carry
+      // the existing value over unless the client overrides it, preserving
+      // dual-capability across a promotion between the two management ranks.
+      const requestedAgentType =
+        body.agent_type !== undefined ? body.agent_type : isAgentDesignation ? undefined : existing.agent_type;
       newAgentType = assertAgentType(effectiveDesignation, requestedAgentType);
     }
 
@@ -601,14 +612,14 @@ router.patch(
           email = COALESCE($4, email),
           branch_id = CASE WHEN $5::boolean THEN $6::uuid ELSE branch_id END,
           team_id = CASE WHEN $7::boolean THEN $8::uuid ELSE team_id END,
-          manager_id = CASE WHEN $14::boolean THEN $15::uuid ELSE manager_id END,
-          designation = COALESCE($16, designation),
-          agent_type = CASE WHEN $21::boolean THEN $22::text ELSE agent_type END,
+          manager_id = CASE WHEN $10::boolean THEN $11::uuid ELSE manager_id END,
+          designation = COALESCE($12, designation),
+          agent_type = CASE WHEN $17::boolean THEN $18::text ELSE agent_type END,
           is_active = COALESCE($9, is_active),
-          is_operations_manager = CASE WHEN $16::text IS NOT NULL THEN $17::boolean ELSE is_operations_manager END,
-          is_team_leader = CASE WHEN $16::text IS NOT NULL THEN $18::boolean ELSE is_team_leader END,
-          is_telecaller = CASE WHEN $21::boolean THEN $19::boolean ELSE is_telecaller END,
-          is_field_agent = CASE WHEN $21::boolean THEN $20::boolean ELSE is_field_agent END
+          is_operations_manager = CASE WHEN $12::text IS NOT NULL THEN $13::boolean ELSE is_operations_manager END,
+          is_team_leader = CASE WHEN $12::text IS NOT NULL THEN $14::boolean ELSE is_team_leader END,
+          is_telecaller = CASE WHEN $17::boolean THEN $15::boolean ELSE is_telecaller END,
+          is_field_agent = CASE WHEN $17::boolean THEN $16::boolean ELSE is_field_agent END
         WHERE id = $1 AND agency_id = $2
         RETURNING *`,
       [
@@ -621,10 +632,6 @@ router.patch(
         body.team_id !== undefined,
         body.team_id ?? null,
         body.is_active ?? null,
-        null, // $10 (unused)
-        null, // $11 (unused)
-        null, // $12 (unused)
-        null, // $13 (unused)
         body.manager_id !== undefined,
         body.manager_id ?? null,
         body.designation ?? null,
