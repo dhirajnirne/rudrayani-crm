@@ -26,20 +26,31 @@ async function assertBranchManager(
   excludeBranchId?: string,
 ): Promise<void> {
   if (!userId) return;
-  const { rows } = await pool.query<{ designation: string }>(
-    "SELECT designation FROM users WHERE id = $1 AND agency_id = $2",
+  const { rows } = await pool.query<{ designation: string; full_name: string }>(
+    "SELECT designation, full_name FROM users WHERE id = $1 AND agency_id = $2",
     [userId, agencyId],
   );
-  if (rows.length === 0) throw new HttpError(400, "Branch manager not found in this agency");
-  if (rows[0].designation !== "branch_manager") {
-    throw new HttpError(400, "Branch manager must have the branch_manager designation");
+  if (rows.length === 0) {
+    throw new HttpError(
+      400,
+      "The selected branch manager could not be found. Please choose someone from the list.",
+    );
   }
-  const { rows: existing } = await pool.query<{ id: string }>(
-    "SELECT id FROM branches WHERE branch_manager_id = $1",
+  if (rows[0].designation !== "branch_manager") {
+    throw new HttpError(
+      400,
+      `${rows[0].full_name} is not a Branch Manager. Change their designation to Branch Manager on the Employees page first, or pick someone who already has that designation.`,
+    );
+  }
+  const { rows: existing } = await pool.query<{ id: string; name: string }>(
+    "SELECT id, name FROM branches WHERE branch_manager_id = $1",
     [userId],
   );
   if (existing.length > 0 && existing[0].id !== excludeBranchId) {
-    throw new HttpError(400, "This user already manages another branch");
+    throw new HttpError(
+      400,
+      `${rows[0].full_name} already manages "${existing[0].name}". A Branch Manager can only be responsible for one branch -- remove them from that branch first, or choose someone else.`,
+    );
   }
 }
 

@@ -48,6 +48,17 @@ const updateSchema = z.object({
   agent_type: agentTypeSchema.optional().nullable(),
 });
 
+/** Human-readable names for error messages -- never surface raw enum values to users. */
+const DESIGNATION_LABELS: Record<Capability, string> = {
+  agency_admin: "Agency Admin",
+  operations_manager: "Operations Manager",
+  branch_manager: "Branch Manager",
+  team_leader: "Team Leader",
+  telecaller: "Telecaller",
+  field_agent: "Field Agent",
+};
+const label = (d: string): string => DESIGNATION_LABELS[d as Capability] ?? d;
+
 /**
  * Brief Section 3 rules:
  *  - There is exactly one Agency Admin; it can never be granted through the API
@@ -60,7 +71,10 @@ async function assertCanEditOpsManager(actor: UserRow, designation?: Capability)
   if (designation === "operations_manager") {
     const allowed = await capabilitiesHavePermission(capabilitiesOf(actor), "ops_managers.create");
     if (!allowed) {
-      throw new HttpError(403, "Only the Agency Admin can add or remove an Operations Manager");
+      throw new HttpError(
+        403,
+        "Only the Agency Admin can create or edit Operations Managers. Ask your Agency Admin to make this change.",
+      );
     }
   }
 }
@@ -92,7 +106,9 @@ async function assertBranchAndTeam(
       branchId,
       agencyId,
     ]);
-    if (rows.length === 0) throw new HttpError(400, "Branch not found in this agency");
+    if (rows.length === 0) {
+      throw new HttpError(400, "The selected branch could not be found. Please choose a branch from the list.");
+    }
   }
   if (teamId) {
     const { rows } = await pool.query(
@@ -100,9 +116,14 @@ async function assertBranchAndTeam(
         WHERE t.id = $1 AND b.agency_id = $2`,
       [teamId, agencyId],
     );
-    if (rows.length === 0) throw new HttpError(400, "Team not found in this agency");
+    if (rows.length === 0) {
+      throw new HttpError(400, "The selected team could not be found. Please choose a team from the list.");
+    }
     if (branchId && rows[0].branch_id !== branchId) {
-      throw new HttpError(400, "Team does not belong to the selected branch");
+      throw new HttpError(
+        400,
+        "The selected team belongs to a different branch. Choose a team from the selected branch, or clear the branch first.",
+      );
     }
   }
 }
@@ -118,6 +139,19 @@ async function assertBranchAndTeam(
  * Forward-only enforcement: only validates when designation or manager_id
  * is part of the write payload, not on every unrelated edit.
  */
+// branch_manager is a sibling of team_leader in this chain (both report to
+// operations_manager) -- its authority over a branch's teams comes from a
+// wider scope (see scope.ts/report-service.ts), not from being anyone's
+// formal manager.
+const EXPECTED_MANAGER_DESIGNATION: Record<Capability, Capability> = {
+  operations_manager: "agency_admin",
+  branch_manager: "operations_manager",
+  team_leader: "operations_manager",
+  telecaller: "team_leader",
+  field_agent: "team_leader",
+  agency_admin: "agency_admin", // unreachable but needed for type completeness
+};
+
 async function assertManager(
   agencyId: string,
   designation: Capability | null,
@@ -127,47 +161,49 @@ async function assertManager(
   if (!designation || designation === "agency_admin") {
     // Admin requires no manager
     if (managerId) {
-      throw new HttpError(400, "An agency admin cannot have a manager");
+      throw new HttpError(
+        400,
+        "Agency Admin is the top of the hierarchy and cannot report to anyone. Clear the \"Reports to\" field to continue.",
+      );
     }
     return;
   }
 
+  // Look up this designation's required manager rank up front so every
+  // message below can say exactly what to pick, not just what's wrong.
+  const requiredDesignation = EXPECTED_MANAGER_DESIGNATION[designation];
+
   if (!managerId) {
-    throw new HttpError(400, `${designation} requires a manager`);
+    throw new HttpError(
+      400,
+      `A ${label(designation)} must report to a manager. Select a ${label(requiredDesignation)} in "Reports to" before saving.`,
+    );
   }
 
   if (selfId && managerId === selfId) {
-    throw new HttpError(400, "An employee cannot be their own manager");
+    throw new HttpError(
+      400,
+      "An employee cannot report to themselves. Choose a different manager in \"Reports to\".",
+    );
   }
 
-  // Look up manager's designation and validate it's exactly one rank up.
-  // branch_manager is a sibling of team_leader in this chain (both report to
-  // operations_manager) -- its authority over a branch's teams comes from a
-  // wider scope (see scope.ts/report-service.ts), not from being anyone's
-  // formal manager.
-  const expectedManagerDesignation: Record<Capability, Capability> = {
-    operations_manager: "agency_admin",
-    branch_manager: "operations_manager",
-    team_leader: "operations_manager",
-    telecaller: "team_leader",
-    field_agent: "team_leader",
-    agency_admin: "agency_admin", // unreachable but needed for type completeness
-  };
-
-  const requiredDesignation = expectedManagerDesignation[designation];
   const { rows } = await pool.query<{ designation: string }>(
     "SELECT designation FROM users WHERE id = $1 AND agency_id = $2",
     [managerId, agencyId],
   );
 
   if (rows.length === 0) {
-    throw new HttpError(400, "Manager not found in this agency");
+    throw new HttpError(
+      400,
+      "The selected manager could not be found. Please pick another manager from the list.",
+    );
   }
 
   if (rows[0].designation !== requiredDesignation) {
     throw new HttpError(
       400,
-      `Manager must be a ${requiredDesignation} (this employee is a ${designation})`,
+      `You selected ${label(rows[0].designation)} as the manager, but a ${label(designation)} must report ` +
+        `to a ${label(requiredDesignation)} directly. Please select a ${label(requiredDesignation)} in "Reports to" instead.`,
     );
   }
 }
@@ -190,7 +226,10 @@ function assertAgentType(
 ): AgentType | null {
   if (designation === "telecaller" || designation === "field_agent") {
     if (agentType !== undefined && agentType !== null && agentType !== designation) {
-      throw new HttpError(400, `agent_type must be "${designation}" (or omitted) for this designation`);
+      throw new HttpError(
+        400,
+        `A ${label(designation)}'s work type is always "${label(designation)}" -- it's set automatically and doesn't need to be chosen separately.`,
+      );
     }
     return designation;
   }
@@ -199,7 +238,10 @@ function assertAgentType(
   }
   // agency_admin / operations_manager
   if (agentType) {
-    throw new HttpError(400, `${designation} cannot have an agent_type`);
+    throw new HttpError(
+      400,
+      `${label(designation)} is a management-only role and cannot also do collections work. Remove the "Also does collections work as" selection.`,
+    );
   }
   return null;
 }

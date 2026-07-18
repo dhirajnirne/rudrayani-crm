@@ -53,7 +53,9 @@ export default function EmployeesPage() {
   const [filterBranch, setFilterBranch] = useState<string | undefined>();
   const [filterTeam, setFilterTeam] = useState<string | undefined>();
   const [filterCapability, setFilterCapability] = useState<string | undefined>();
-  const [filterStatus, setFilterStatus] = useState<"active" | "inactive" | undefined>();
+  // Default to Active so newly-deactivated/legacy inactive employees don't
+  // clutter the default view -- switch to "Deactivated" via the filter to see them.
+  const [filterStatus, setFilterStatus] = useState<"active" | "inactive" | undefined>("active");
   const [filterDesignation, setFilterDesignation] = useState<string | undefined>();
   const [filterCustomerBranch, setFilterCustomerBranch] = useState<string | undefined>();
   const [filterProduct, setFilterProduct] = useState<string | undefined>();
@@ -159,6 +161,31 @@ export default function EmployeesPage() {
 
   const branchName = (id: string | null) => branches.find((b) => b.id === id)?.name ?? "—";
   const teamName = (id: string | null) => teams.find((t) => t.id === id)?.name ?? "—";
+
+  // Telecaller-type employees (plain telecallers, or branch_manager/team_leader
+  // with agent_type=telecaller) carry their real assignment in branch_ids/team_ids
+  // (multi-branch, multi-team) -- their scalar branch_id/team_id is always null,
+  // so falling back to those columns would wrongly show "—" for them.
+  const branchCell = (e: Employee) =>
+    e.branch_ids && e.branch_ids.length > 0 ? (
+      <Space size={[0, 4]} wrap>
+        {e.branch_ids.map((id) => (
+          <Tag key={id}>{branchName(id)}</Tag>
+        ))}
+      </Space>
+    ) : (
+      branchName(e.branch_id)
+    );
+  const teamCell = (e: Employee) =>
+    e.team_ids && e.team_ids.length > 0 ? (
+      <Space size={[0, 4]} wrap>
+        {e.team_ids.map((id) => (
+          <Tag key={id}>{teamName(id)}</Tag>
+        ))}
+      </Space>
+    ) : (
+      teamName(e.team_id)
+    );
 
   const openCreate = () => {
     form.resetFields();
@@ -363,8 +390,8 @@ export default function EmployeesPage() {
         columns={[
           { title: "Name", dataIndex: "full_name" },
           { title: "Phone", dataIndex: "phone" },
-          { title: "Branch", dataIndex: "branch_id", render: branchName },
-          { title: "Team", dataIndex: "team_id", render: teamName },
+          { title: "Branch", render: (_, e) => branchCell(e) },
+          { title: "Team", render: (_, e) => teamCell(e) },
           {
             title: "Capabilities",
             dataIndex: "capabilities",
@@ -423,7 +450,7 @@ export default function EmployeesPage() {
         destroyOnClose
         width={520}
       >
-        <Form form={form} layout="vertical">
+        <Form form={form} layout="vertical" scrollToFirstError={{ behavior: "smooth", block: "center" }}>
           <Form.Item name="full_name" label="Full name" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
