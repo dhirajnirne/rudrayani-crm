@@ -116,7 +116,7 @@ export default function DepositsPage() {
         />
         <Select
           style={{ width: 240 }}
-          placeholder="All companies"
+          title="All companies" placeholder="All companies"
           allowClear
           value={companyId}
           onChange={(v) => setCompanyId(v ?? null)}

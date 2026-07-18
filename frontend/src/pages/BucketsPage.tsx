@@ -94,7 +94,7 @@ export default function BucketsPage() {
       <Space style={{ marginBottom: 16 }}>
         <Select
           style={{ width: 280 }}
-          placeholder="Select company"
+          title="Select company" placeholder="Select company"
           value={companyId}
           onChange={setCompanyId}
           options={companies.map((c) => ({ value: c.id, label: c.name }))}

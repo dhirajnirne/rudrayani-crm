@@ -196,7 +196,7 @@ export default function ReallocationRequestsPage() {
         </Typography.Paragraph>
         <Select
           style={{ width: "100%" }}
-          placeholder="Return to unallocated pool"
+          title="Return to unallocated pool" placeholder="Return to unallocated pool"
           allowClear
           value={newAgentId}
           onChange={(v) => setNewAgentId(v ?? undefined)}

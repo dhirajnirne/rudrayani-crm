@@ -136,7 +136,7 @@ export default function MyWorklistPage() {
           style={{ width: 240 }}
         />
         <Select
-          placeholder="All branches"
+          title="All branches" placeholder="All branches"
           allowClear
           style={{ width: 180 }}
           value={filterBranch}
@@ -144,7 +144,7 @@ export default function MyWorklistPage() {
           options={branches.map((b) => ({ value: b.id, label: b.name }))}
         />
         <Select
-          placeholder="All products"
+          title="All products" placeholder="All products"
           allowClear
           style={{ width: 160 }}
           value={filterProduct}
@@ -155,7 +155,7 @@ export default function MyWorklistPage() {
           }))}
         />
         <Select
-          placeholder="All buckets"
+          title="All buckets" placeholder="All buckets"
           allowClear
           style={{ width: 140 }}
           value={filterBucket}

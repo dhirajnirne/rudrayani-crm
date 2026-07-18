@@ -111,7 +111,7 @@ export default function CustomersPage() {
         <Col xs={24} sm={6}>
           <Select
             style={{ width: "100%" }}
-            placeholder="All companies"
+            title="All companies" placeholder="All companies"
             allowClear
             value={companyId}
             onChange={(v) => { setCompanyId(v ?? null); setProduct(null); setBucket(null); }}
@@ -121,7 +121,7 @@ export default function CustomersPage() {
         <Col xs={12} sm={4}>
           <Select
             style={{ width: "100%" }}
-            placeholder="All branches"
+            title="All branches" placeholder="All branches"
             allowClear
             value={branchId}
             onChange={(v) => setBranchId(v ?? null)}
@@ -131,7 +131,7 @@ export default function CustomersPage() {
         <Col xs={12} sm={3}>
           <Select
             style={{ width: "100%" }}
-            placeholder="All products"
+            title="All products" placeholder="All products"
             allowClear
             value={product}
             onChange={(v) => setProduct(v ?? null)}
@@ -145,7 +145,7 @@ export default function CustomersPage() {
         <Col xs={12} sm={3}>
           <Select
             style={{ width: "100%" }}
-            placeholder="All buckets"
+            title="All buckets" placeholder="All buckets"
             allowClear
             value={bucket}
             onChange={(v) => setBucket(v ?? null)}
@@ -156,7 +156,7 @@ export default function CustomersPage() {
         <Col xs={12} sm={3}>
           <Select
             style={{ width: "100%" }}
-            placeholder="All statuses"
+            title="All statuses" placeholder="All statuses"
             allowClear
             value={status}
             onChange={(v) => setStatus(v ?? null)}

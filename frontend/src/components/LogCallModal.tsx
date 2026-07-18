@@ -169,7 +169,7 @@ export default function LogCallModal({
             </Typography.Text>
             <Select
               style={{ width: "100%", marginTop: 4 }}
-              placeholder="Choose a result code"
+              title="Choose a result code" placeholder="Choose a result code"
               showSearch
               optionFilterProp="label"
               value={codeId}

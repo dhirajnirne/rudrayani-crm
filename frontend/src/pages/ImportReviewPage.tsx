@@ -164,7 +164,7 @@ export default function ImportReviewPage() {
       <Space style={{ marginBottom: 16 }} wrap>
         <Select
           style={{ width: 260 }}
-          placeholder="Select company"
+          title="Select company" placeholder="Select company"
           value={companyId}
           onChange={setCompanyId}
           options={companies.map((c) => ({ value: c.id, label: c.name }))}
@@ -183,7 +183,7 @@ export default function ImportReviewPage() {
         />
         <Select
           style={{ width: 160 }}
-          placeholder="All types"
+          title="All types" placeholder="All types"
           allowClear
           value={type}
           onChange={setType}

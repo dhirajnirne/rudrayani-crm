@@ -206,7 +206,7 @@ export default function TeamsPage() {
         <Form form={leadersForm} layout="vertical">
           <Form.Item name="leader_id" label="Select team leader" rules={[{ required: true }]}>
             <Select
-              placeholder="Select a team leader"
+              title="Select a team leader" placeholder="Select a team leader"
               options={employees
                 .filter((e) => e.designation === "team_leader")
                 .map((e) => ({ value: e.id, label: e.full_name }))}

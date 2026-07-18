@@ -162,7 +162,7 @@ export default function AttendancePage() {
         />
         <Select
           style={{ width: 160 }}
-          placeholder="All branches"
+          title="All branches" placeholder="All branches"
           allowClear
           value={branchId}
           onChange={(v) => { setBranchId(v ?? undefined); setTeamId(undefined); }}
@@ -170,7 +170,7 @@ export default function AttendancePage() {
         />
         <Select
           style={{ width: 160 }}
-          placeholder="All teams"
+          title="All teams" placeholder="All teams"
           allowClear
           value={teamId}
           onChange={(v) => setTeamId(v ?? undefined)}
@@ -180,7 +180,7 @@ export default function AttendancePage() {
         />
         <Select
           style={{ width: 180 }}
-          placeholder="All agents"
+          title="All agents" placeholder="All agents"
           allowClear
           showSearch
           optionFilterProp="label"

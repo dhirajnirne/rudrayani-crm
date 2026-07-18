@@ -302,7 +302,7 @@ function ImportWizard() {
       <Form.Item label="Company" required>
         <Select
           style={{ width: 320 }}
-          placeholder="Select a company"
+          title="Select a company" placeholder="Select a company"
           value={companyId}
           onChange={setCompanyId}
           options={companies.map((c) => ({ value: c.id, label: c.name }))}
@@ -413,7 +413,7 @@ function ImportWizard() {
           <Typography.Text type="secondary">Load existing template:</Typography.Text>
           <Select
             style={{ marginLeft: 12, width: 260 }}
-            placeholder="Choose a saved template…"
+            title="Choose a saved template…" placeholder="Choose a saved template…"
             allowClear
             options={templates.map((t) => ({ value: t.id, label: `${t.name} (v${t.version})` }))}
             onChange={(id) => { if (id) applyTemplate(id); }}
@@ -448,7 +448,7 @@ function ImportWizard() {
             render: (_: string, record: { col: string }) => (
               <Select
                 style={{ width: "100%" }}
-                placeholder="Skip this column"
+                title="Skip this column" placeholder="Skip this column"
                 allowClear
                 value={mapping[record.col] || undefined}
                 onChange={(v) =>
@@ -945,7 +945,7 @@ function ImportHistory() {
     <Space direction="vertical" style={{ width: "100%" }} size="large">
       <Select
         style={{ width: 320 }}
-        placeholder="Select a company to view history"
+        title="Select a company to view history" placeholder="Select a company to view history"
         value={companyId}
         onChange={setCompanyId}
         options={companies.map((c) => ({ value: c.id, label: c.name }))}

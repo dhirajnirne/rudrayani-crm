@@ -213,7 +213,7 @@ export default function DashboardPage() {
           {isTeamLeader && myLedTeams.length > 1 && (
             <Select
               style={{ width: 160 }}
-              placeholder="My Team"
+              title="My Team" placeholder="My Team"
               value={undefined}
               onChange={(id) => {
                 const t = myLedTeams.find((mt) => mt.id === id);
@@ -242,7 +242,7 @@ export default function DashboardPage() {
         {isManager && (
           <Select
             style={{ width: 200 }}
-            placeholder="All companies"
+            title="All companies" placeholder="All companies"
             allowClear
             value={companyId}
             onChange={(v) => setCompanyId(v ?? undefined)}
@@ -257,7 +257,7 @@ export default function DashboardPage() {
         />
         <Select
           style={{ width: 170 }}
-          placeholder="All Buckets"
+          title="All Buckets" placeholder="All Buckets"
           allowClear
           value={bucket}
           onChange={setBucket}
@@ -265,7 +265,7 @@ export default function DashboardPage() {
         />
         <Select
           style={{ width: 150 }}
-          placeholder="All Statuses"
+          title="All Statuses" placeholder="All Statuses"
           allowClear
           value={status}
           onChange={(v) => setStatus(v ?? undefined)}
@@ -281,7 +281,7 @@ export default function DashboardPage() {
               <>
                 <Select
                   style={{ width: 170 }}
-                  placeholder="All branches"
+                  title="All branches" placeholder="All branches"
                   allowClear
                   value={branchId}
                   onChange={(v) => {
@@ -293,7 +293,7 @@ export default function DashboardPage() {
                 />
                 <Select
                   style={{ width: 170 }}
-                  placeholder="All teams"
+                  title="All teams" placeholder="All teams"
                   allowClear
                   value={teamId}
                   onChange={(v) => {
@@ -306,7 +306,7 @@ export default function DashboardPage() {
             )}
             <Select
               style={{ width: 190 }}
-              placeholder="All agents"
+              title="All agents" placeholder="All agents"
               allowClear
               showSearch
               optionFilterProp="label"

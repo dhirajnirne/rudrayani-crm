@@ -14,10 +14,11 @@ import {
   Typography,
   message,
 } from "antd";
-import { HistoryOutlined, UserSwitchOutlined } from "@ant-design/icons";
+import { HistoryOutlined, UserSwitchOutlined, PlusOutlined } from "@ant-design/icons";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, errorMessage } from "../api/client";
 import type { AllocationLog, Company, Customer, Employee } from "../types";
+import CustomerDetailDrawer from "../components/CustomerDetailDrawer";
 
 interface Product {
   id: string;
@@ -29,7 +30,20 @@ const fmtAmount = (v: string | null) =>
   v == null ? "—" : Number(v).toLocaleString("en-IN", { maximumFractionDigits: 0 });
 
 /** Shared column set for both queues. */
-const baseColumns = [
+const getBaseColumns = (onOpenDetail: (customerId: string) => void) => [
+  {
+    title: "",
+    key: "details",
+    width: 40,
+    render: (_: unknown, record: Customer) => (
+      <Button
+        type="text"
+        icon={<PlusOutlined />}
+        title="View Details"
+        onClick={() => onOpenDetail(record.id)}
+      />
+    ),
+  },
   {
     title: "Loan No",
     dataIndex: "loan_number",
@@ -159,7 +173,7 @@ function FilterRow({
       <Col xs={24} sm={8}>
         <Select
           style={{ width: "100%" }}
-          placeholder="All companies"
+          title="All companies" placeholder="All companies"
           allowClear
           value={filters.companyId}
           onChange={(v) => {
@@ -173,7 +187,7 @@ function FilterRow({
       <Col xs={12} sm={3}>
         <Select
           style={{ width: "100%" }}
-          placeholder={agentPickerLabel ? "Branch (agent filter)" : "All branches"}
+          title={agentPickerLabel ? "Branch (agent filter)" : "All branches"} placeholder={agentPickerLabel ? "Branch (agent filter)" : "All branches"}
           allowClear
           value={branchTeam.branchId}
           onChange={(v) => { branchTeam.setBranchId(v ?? null); branchTeam.setTeamId(null); }}
@@ -183,7 +197,7 @@ function FilterRow({
       <Col xs={12} sm={3}>
         <Select
           style={{ width: "100%" }}
-          placeholder={agentPickerLabel ? "Team (agent filter)" : "All teams"}
+          title={agentPickerLabel ? "Team (agent filter)" : "All teams"} placeholder={agentPickerLabel ? "Team (agent filter)" : "All teams"}
           allowClear
           value={branchTeam.teamId}
           onChange={(v) => branchTeam.setTeamId(v ?? null)}
@@ -193,7 +207,7 @@ function FilterRow({
       <Col xs={12} sm={5}>
         <Select
           style={{ width: "100%" }}
-          placeholder="All products"
+          title="All products" placeholder="All products"
           allowClear
           value={filters.product}
           onChange={(v) => filters.setProduct(v ?? null)}
@@ -207,7 +221,7 @@ function FilterRow({
       <Col xs={12} sm={5}>
         <Select
           style={{ width: "100%" }}
-          placeholder="All buckets"
+          title="All buckets" placeholder="All buckets"
           allowClear
           value={filters.bucket}
           onChange={(v) => filters.setBucket(v ?? null)}
@@ -223,13 +237,14 @@ function FilterRow({
 // Unallocated queue: filter → multi-select → assign
 // ──────────────────────────────────────────────────────────────────────────────
 
-function UnallocatedQueue() {
+function UnallocatedQueue({ onOpenDetail }: { onOpenDetail: (id: string) => void }) {
   const filters = useCompanyFilters();
   const branchTeam = useBranchTeam();
   const [branches, setBranches] = useState<Branch[]>([]);
   const [customerBranchId, setCustomerBranchId] = useState<string | null>(null);
   const agents = useAssignableAgents(branchTeam.branchId, branchTeam.teamId, customerBranchId, filters.product);
-  const telecallers = useMemo(() => agents.filter((a) => a.capabilities.includes("telecaller")), [agents]);
+  const allAgents = useAssignableAgents(null, null, null, null);
+  const telecallers = useMemo(() => allAgents.filter((a) => a.capabilities.includes("telecaller")), [allAgents]);
   const fieldAgents = useMemo(() => agents.filter((a) => a.capabilities.includes("field_agent")), [agents]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [total, setTotal] = useState(0);
@@ -331,7 +346,7 @@ function UnallocatedQueue() {
         <Col xs={24} sm={6}>
           <Select
             style={{ width: "100%" }}
-            placeholder="All customer branches"
+            title="All customer branches" placeholder="All customer branches"
             allowClear
             value={customerBranchId}
             onChange={(v) => setCustomerBranchId(v ?? null)}
@@ -352,7 +367,7 @@ function UnallocatedQueue() {
                 </span>
                 <Select
                   style={{ width: 200 }}
-                  placeholder="Choose telecaller"
+                  title="Choose telecaller" placeholder="Choose telecaller"
                   showSearch
                   optionFilterProp="label"
                   value={agentId}
@@ -378,7 +393,7 @@ function UnallocatedQueue() {
                 <span>Or assign to field agent:</span>
                 <Select
                   style={{ width: 200 }}
-                  placeholder="Choose field agent"
+                  title="Choose field agent" placeholder="Choose field agent"
                   showSearch
                   optionFilterProp="label"
                   value={fieldAgentId}
@@ -416,7 +431,7 @@ function UnallocatedQueue() {
           onChange: (pg) => load(pg),
         }}
         scroll={{ x: 800 }}
-        columns={baseColumns}
+        columns={getBaseColumns(onOpenDetail)}
       />
     </div>
   );
@@ -426,7 +441,7 @@ function UnallocatedQueue() {
 // Allocated list: see who has what, reallocate with reason, view history
 // ──────────────────────────────────────────────────────────────────────────────
 
-function AllocatedList() {
+function AllocatedList({ onOpenDetail }: { onOpenDetail: (id: string) => void }) {
   const filters = useCompanyFilters();
   const branchTeam = useBranchTeam();
   const agents = useAssignableAgents(null, null);
@@ -507,7 +522,7 @@ function AllocatedList() {
 
   const columns = useMemo(
     () => [
-      ...baseColumns,
+      ...getBaseColumns(onOpenDetail),
       {
         title: "Telecaller",
         dataIndex: "assigned_agent_name",
@@ -548,7 +563,7 @@ function AllocatedList() {
         ),
       },
     ],
-    [],
+    [onOpenDetail],
   );
 
   return (
@@ -609,7 +624,7 @@ function AllocatedList() {
             <Typography.Text type="secondary">New agent</Typography.Text>
             <Select
               style={{ width: "100%", marginTop: 4 }}
-              placeholder="Choose agent"
+              title="Choose agent" placeholder="Choose agent"
               showSearch
               optionFilterProp="label"
               value={agentId}
@@ -679,6 +694,8 @@ function AllocatedList() {
 }
 
 export default function AllocationPage() {
+  const [detailDrawerId, setDetailDrawerId] = useState<string | null>(null);
+
   return (
     <div>
       <Typography.Title level={3} style={{ marginBottom: 24 }}>
@@ -687,9 +704,14 @@ export default function AllocationPage() {
       <Tabs
         defaultActiveKey="unallocated"
         items={[
-          { key: "unallocated", label: "Unallocated Queue", children: <UnallocatedQueue /> },
-          { key: "allocated", label: "Allocated", children: <AllocatedList /> },
+          { key: "unallocated", label: "Unallocated Queue", children: <UnallocatedQueue onOpenDetail={setDetailDrawerId} /> },
+          { key: "allocated", label: "Allocated", children: <AllocatedList onOpenDetail={setDetailDrawerId} /> },
         ]}
+      />
+      <CustomerDetailDrawer
+        customerId={detailDrawerId}
+        open={detailDrawerId !== null}
+        onClose={() => setDetailDrawerId(null)}
       />
     </div>
   );

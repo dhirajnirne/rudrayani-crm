@@ -265,7 +265,7 @@ export default function DispositionsPage() {
             tooltip="Which flow this code appears in: Field Visit (FV) or On-Call (OC)"
           >
             <Select
-              placeholder="Select channel"
+              title="Select channel" placeholder="Select channel"
               options={[
                 { value: "FV", label: "Field Visit (FV)" },
                 { value: "OC", label: "On-Call (OC)" },

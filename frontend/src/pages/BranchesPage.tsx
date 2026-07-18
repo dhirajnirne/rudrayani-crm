@@ -184,7 +184,7 @@ export default function BranchesPage() {
               allowClear
               showSearch
               optionFilterProp="label"
-              placeholder="Assign later"
+              title="Assign later" placeholder="Assign later"
               options={availableManagerOptions}
             />
           </Form.Item>

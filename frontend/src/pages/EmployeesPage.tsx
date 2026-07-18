@@ -307,7 +307,7 @@ export default function EmployeesPage() {
       <Space wrap style={{ marginBottom: 16 }}>
         <Select
           style={{ width: 160 }}
-          placeholder="All branches"
+          title="All branches" placeholder="All branches"
           allowClear
           value={filterBranch}
           onChange={(v) => { setFilterBranch(v ?? undefined); setFilterTeam(undefined); }}
@@ -315,7 +315,7 @@ export default function EmployeesPage() {
         />
         <Select
           style={{ width: 160 }}
-          placeholder="All teams"
+          title="All teams" placeholder="All teams"
           allowClear
           value={filterTeam}
           onChange={(v) => setFilterTeam(v ?? undefined)}
@@ -325,7 +325,7 @@ export default function EmployeesPage() {
         />
         <Select
           style={{ width: 160 }}
-          placeholder="All designations"
+          title="All designations" placeholder="All designations"
           allowClear
           value={filterDesignation}
           onChange={(v) => setFilterDesignation(v ?? undefined)}
@@ -339,7 +339,7 @@ export default function EmployeesPage() {
         />
         <Select
           style={{ width: 160 }}
-          placeholder="All capabilities"
+          title="All capabilities" placeholder="All capabilities"
           allowClear
           value={filterCapability}
           onChange={(v) => setFilterCapability(v ?? undefined)}
@@ -353,7 +353,7 @@ export default function EmployeesPage() {
         />
         <Select
           style={{ width: 160 }}
-          placeholder="Customer branch"
+          title="Customer branch" placeholder="Customer branch"
           allowClear
           value={filterCustomerBranch}
           onChange={(v) => setFilterCustomerBranch(v ?? undefined)}
@@ -361,7 +361,7 @@ export default function EmployeesPage() {
         />
         <Select
           style={{ width: 140 }}
-          placeholder="Product"
+          title="Product" placeholder="Product"
           allowClear
           value={filterProduct}
           onChange={(v) => setFilterProduct(v ?? undefined)}
@@ -372,7 +372,7 @@ export default function EmployeesPage() {
         />
         <Select
           style={{ width: 140 }}
-          placeholder="All statuses"
+          title="All statuses" placeholder="All statuses"
           allowClear
           value={filterStatus}
           onChange={(v) => setFilterStatus(v ?? undefined)}
@@ -496,7 +496,7 @@ export default function EmployeesPage() {
             <Form.Item name="agent_type" label="Also does collections work as">
               <Select
                 allowClear
-                placeholder="No — management only"
+                title="No — management only" placeholder="No — management only"
                 options={[
                   { value: "telecaller", label: "Telecaller-type (remote calling)" },
                   { value: "field_agent", label: "Field Agent-type (in-person visits)" },
@@ -599,7 +599,7 @@ export default function EmployeesPage() {
             <Select
               allowClear
               showSearch
-              placeholder="No manager"
+              title="No manager" placeholder="No manager"
               optionFilterProp="label"
               options={managerOptions}
             />

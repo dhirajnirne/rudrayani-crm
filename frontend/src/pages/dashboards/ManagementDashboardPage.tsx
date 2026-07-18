@@ -158,7 +158,7 @@ export default function ManagementDashboardPage() {
         <Space wrap>
           <Select
             style={{ width: 200 }}
-            placeholder="All companies"
+            title="All companies" placeholder="All companies"
             allowClear
             value={companyId}
             onChange={(v) => setCompanyId(v ?? undefined)}

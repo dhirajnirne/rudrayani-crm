@@ -226,7 +226,7 @@ export default function FieldConfigPage() {
       <Card title="Per-company configuration">
         <Select
           style={{ width: 320, marginBottom: 16 }}
-          placeholder="Select a company"
+          title="Select a company" placeholder="Select a company"
           value={companyId}
           onChange={setCompanyId}
           options={companies.map((c) => ({ value: c.id, label: c.name }))}
