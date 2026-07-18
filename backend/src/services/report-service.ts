@@ -45,7 +45,7 @@ export interface ReportFilters {
 }
 
 export interface ResolvedScope {
-  clampedTo: "agency" | "team" | "teams" | "self";
+  clampedTo: "agency" | "branch" | "team" | "teams" | "self";
   filters: ReportFilters;
   scopeTeamIds?: string[] | null; // For multi-team TLs when no specific team is requested
 }
@@ -70,6 +70,27 @@ export async function resolveReportScope(
   }
   if (user.is_agency_admin || user.is_operations_manager) {
     return { clampedTo: "agency", filters: requested };
+  }
+  if (user.designation === "branch_manager") {
+    const { rows } = await pool.query<{ id: string }>(
+      "SELECT id FROM branches WHERE branch_manager_id = $1",
+      [user.id],
+    );
+    const branchId = rows[0]?.id;
+    if (requested.branch_id && requested.branch_id !== branchId) {
+      throw new HttpError(403, "You do not manage this branch");
+    }
+    // Not yet assigned to a branch (optional-at-creation) -> sees nothing,
+    // same sentinel-UUID pattern used elsewhere for "no scope yet" rather
+    // than a 500 or an accidental agency-wide fallthrough.
+    return {
+      clampedTo: "branch",
+      filters: {
+        ...requested,
+        branch_id: branchId ?? "00000000-0000-0000-0000-000000000000",
+        team_id: undefined,
+      },
+    };
   }
   if (user.is_team_leader) {
     // Multi-team TL: fetch led team IDs from team_leaders table
@@ -1802,4 +1823,58 @@ export async function filterOptions(
     products: products.map((r) => r.label as string),
     buckets: buckets.map((r) => r.label as string),
   };
+}
+
+export interface AgentActivityRow {
+  kind: "call" | "payment" | "ptp" | "field_visit";
+  id: string;
+  at: string;
+  customer_name: string;
+  loan_number: string;
+  detail: string | null;
+}
+
+/**
+ * One agent's recent collections activity across ALL their customers --
+ * the gap the customer-360 trail (GET /customers/:id) and the per-agent-
+ * per-day aggregate counts (/tracking/team-day) don't cover between them.
+ * Access control is the caller's job (see GET /reports/agent-activity,
+ * which reuses scopeFilter() the same way /tracking/team-day does).
+ */
+export async function agentRecentActivity(
+  agencyId: string,
+  agentId: string,
+  limit: number,
+): Promise<AgentActivityRow[]> {
+  const { rows } = await pool.query<AgentActivityRow>(
+    `(SELECT 'call' AS kind, cl.id::text AS id, cl.created_at AS at,
+             c.customer_name, c.loan_number, dc.action_code AS detail
+        FROM call_logs cl
+        JOIN customers c ON c.id = cl.customer_id
+        JOIN companies co ON co.id = c.company_id
+        LEFT JOIN disposition_codes dc ON dc.id = cl.disposition_code_id
+       WHERE cl.agent_id = $1 AND co.agency_id = $2)
+     UNION ALL
+     (SELECT 'payment', p.id::text, p.paid_at, c.customer_name, c.loan_number, p.amount::text
+        FROM payments p
+        JOIN customers c ON c.id = p.customer_id
+        JOIN companies co ON co.id = c.company_id
+       WHERE p.collected_by_user_id = $1 AND co.agency_id = $2)
+     UNION ALL
+     (SELECT 'ptp', pt.id::text, pt.created_at, c.customer_name, c.loan_number, pt.status
+        FROM ptps pt
+        JOIN customers c ON c.id = pt.customer_id
+        JOIN companies co ON co.id = c.company_id
+       WHERE pt.agent_id = $1 AND co.agency_id = $2)
+     UNION ALL
+     (SELECT 'field_visit', fv.id::text, fv.created_at, c.customer_name, c.loan_number, fv.remark
+        FROM field_visits fv
+        JOIN customers c ON c.id = fv.customer_id
+        JOIN companies co ON co.id = c.company_id
+       WHERE fv.agent_id = $1 AND co.agency_id = $2)
+     ORDER BY at DESC
+     LIMIT $3`,
+    [agentId, agencyId, limit],
+  );
+  return rows;
 }

@@ -101,8 +101,33 @@ final routerProvider = Provider<GoRouter>((ref) {
           parser: (e) => e,
           builder: (e) => ListTile(
             title: Text(e['name'] ?? 'Unknown'),
+            subtitle: Text(e['branch_name'] ?? ''),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => ctx.push('/account/team/${e['id']}/members'),
           ),
         ),
+      ),
+      // Team roster drill-down (branch_manager's "Teams in this Branch" and
+      // the generic Teams list both land here) -- reuses GenericListScreen +
+      // the existing server-side team_id filter on GET /employees, same as
+      // /account/employees above, just pre-filtered to one team.
+      GoRoute(
+        path: '/account/team/:id/members',
+        builder: (ctx, s) {
+          final teamId = s.pathParameters['id']!;
+          return GenericListScreen<Map<String, dynamic>>(
+            title: 'Team Members',
+            endpoint: '/employees?team_id=$teamId',
+            dataKey: 'employees',
+            parser: (e) => e,
+            builder: (e) => ListTile(
+              title: Text(e['full_name'] ?? 'Unknown'),
+              subtitle: Text(e['designation'] ?? ''),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => ctx.push('/account/employee/${e['id']}'),
+            ),
+          );
+        },
       ),
       GoRoute(
         path: '/account/branches',

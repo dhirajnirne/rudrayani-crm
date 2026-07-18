@@ -39,7 +39,7 @@ router.get(
     let scopeClause = "";
     if (scope.param !== null) {
       params.push(scope.param);
-      scopeClause = scope.clause.replace("$SCOPE", `$${params.length}`);
+      scopeClause = scope.clause.replaceAll("$SCOPE", `$${params.length}`);
     }
 
     let extraClause = "";

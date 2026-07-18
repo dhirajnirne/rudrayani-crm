@@ -56,7 +56,7 @@ router.get(
     let scopeClause = "";
     if (scope.param !== null) {
       params.push(scope.param);
-      scopeClause = scope.clause.replace("$SCOPE", `$${params.length}`);
+      scopeClause = scope.clause.replaceAll("$SCOPE", `$${params.length}`);
     }
 
     const { rows } = await pool.query(
@@ -169,7 +169,7 @@ router.get(
     let scopeClause = "";
     if (scope.param !== null) {
       targetParams.push(scope.param);
-      scopeClause = scope.clause.replace("$SCOPE", `$${targetParams.length}`);
+      scopeClause = scope.clause.replaceAll("$SCOPE", `$${targetParams.length}`);
     }
     const target = await pool.query(
       `SELECT u.id, u.full_name FROM users u
@@ -251,7 +251,7 @@ router.get(
     let scopeClause = "";
     if (scope.param !== null) {
       params.push(scope.param);
-      scopeClause = scope.clause.replace("$SCOPE", `$${params.length}`);
+      scopeClause = scope.clause.replaceAll("$SCOPE", `$${params.length}`);
     }
 
     const dayStart = `($2::date::timestamp AT TIME ZONE '${IST}')`;

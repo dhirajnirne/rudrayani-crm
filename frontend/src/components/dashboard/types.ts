@@ -19,7 +19,7 @@ export type MetricKey = "resolution" | "rollback" | "normalization" | "recovery"
 export interface DashboardData {
   month: string;
   days: { in_month: number; elapsed: number; left: number };
-  scope: { clamped_to: "agency" | "team" | "self" };
+  scope: { clamped_to: "agency" | "branch" | "team" | "teams" | "self" };
   allocated: { amount: number; count: number };
   metrics: Record<MetricKey, MetricBlock>;
   collection: {

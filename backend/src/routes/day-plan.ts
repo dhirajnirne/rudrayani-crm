@@ -35,7 +35,7 @@ router.get(
     let scopeClause = "";
     if (scope.param !== null) {
       params.push(scope.param);
-      scopeClause = scope.clause.replace("$SCOPE", `$${params.length}`);
+      scopeClause = scope.clause.replaceAll("$SCOPE", `$${params.length}`);
     }
     let extraClause = "";
     if (q.branch_id) {
@@ -145,7 +145,7 @@ router.get(
     let scopeClause = "";
     if (scope.param !== null) {
       targetParams.push(scope.param);
-      scopeClause = scope.clause.replace("$SCOPE", `$${targetParams.length}`);
+      scopeClause = scope.clause.replaceAll("$SCOPE", `$${targetParams.length}`);
     }
     const target = await pool.query(
       `SELECT u.id FROM users u WHERE u.id = $1 AND u.agency_id = $2 ${scopeClause}`,

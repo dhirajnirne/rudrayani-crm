@@ -1,21 +1,35 @@
-import { Button, Form, Input, Modal, Table, Typography, message } from "antd";
+import { Alert, Button, Form, Input, Modal, Select, Space, Table, Typography, message } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, errorMessage } from "../api/client";
 import BranchDetailDrawer from "../components/BranchDetailDrawer";
-import type { Branch } from "../types";
+import type { Branch, Employee, Team } from "../types";
+
+interface BranchFormValues {
+  name: string;
+  branch_manager_id?: string | null;
+}
 
 export default function BranchesPage() {
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [branchManagers, setBranchManagers] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Branch | "new" | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
-  const [form] = Form.useForm<{ name: string }>();
+  const [form] = Form.useForm<BranchFormValues>();
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setBranches((await api.get("/branches")).data.branches);
+      const [br, tm, bm] = await Promise.all([
+        api.get("/branches"),
+        api.get("/teams"),
+        api.get("/employees", { params: { designation: "branch_manager" } }),
+      ]);
+      setBranches(br.data.branches);
+      setTeams(tm.data.teams);
+      setBranchManagers(bm.data.employees);
     } finally {
       setLoading(false);
     }
@@ -25,6 +39,26 @@ export default function BranchesPage() {
     load();
   }, [load]);
 
+  // Non-blocking prompts (Requirement B): surface the gaps that matter for
+  // this hierarchy without blocking anyone from saving -- reuses the same
+  // Ant Design Alert pattern already used elsewhere (AllocationPage etc.)
+  // rather than inventing a new UI language.
+  const unmanagedBranches = useMemo(() => branches.filter((b) => !b.branch_manager_id), [branches]);
+  const leaderlessTeams = useMemo(() => teams.filter((t) => !t.leaders || t.leaders.length === 0), [teams]);
+  const unassignedManagers = useMemo(
+    () => branchManagers.filter((bm) => !branches.some((b) => b.branch_manager_id === bm.id)),
+    [branchManagers, branches],
+  );
+
+  const editingId = editing !== "new" && editing ? editing.id : undefined;
+  const availableManagerOptions = useMemo(
+    () =>
+      branchManagers
+        .filter((bm) => !branches.some((b) => b.branch_manager_id === bm.id && b.id !== editingId))
+        .map((bm) => ({ value: bm.id, label: bm.full_name })),
+    [branchManagers, branches, editingId],
+  );
+
   const save = async () => {
     const values = await form.validateFields();
     try {
@@ -33,7 +67,7 @@ export default function BranchesPage() {
         message.success("Branch created");
       } else if (editing) {
         await api.patch(`/branches/${editing.id}`, values);
-        message.success("Branch renamed");
+        message.success("Branch updated");
       }
       setEditing(null);
       form.resetFields();
@@ -60,6 +94,39 @@ export default function BranchesPage() {
           Add branch
         </Button>
       </div>
+
+      {(unmanagedBranches.length > 0 || leaderlessTeams.length > 0 || unassignedManagers.length > 0) && (
+        <Space direction="vertical" style={{ width: "100%", marginBottom: 16 }}>
+          {unmanagedBranches.length > 0 && (
+            <Alert
+              type="warning"
+              showIcon
+              closable
+              message={`${unmanagedBranches.length} branch${unmanagedBranches.length > 1 ? "es have" : " has"} no manager assigned yet`}
+              description={unmanagedBranches.map((b) => b.name).join(", ")}
+            />
+          )}
+          {leaderlessTeams.length > 0 && (
+            <Alert
+              type="warning"
+              showIcon
+              closable
+              message={`${leaderlessTeams.length} team${leaderlessTeams.length > 1 ? "s have" : " has"} no leader assigned yet`}
+              description={leaderlessTeams.map((t) => t.name).join(", ")}
+            />
+          )}
+          {unassignedManagers.length > 0 && (
+            <Alert
+              type="info"
+              showIcon
+              closable
+              message={`${unassignedManagers.length} branch manager${unassignedManagers.length > 1 ? "s are" : " is"} not linked to any branch`}
+              description={unassignedManagers.map((bm) => bm.full_name).join(", ")}
+            />
+          )}
+        </Space>
+      )}
+
       <Table
         rowKey="id"
         loading={loading}
@@ -73,6 +140,12 @@ export default function BranchesPage() {
         columns={[
           { title: "Name", dataIndex: "name" },
           {
+            title: "Branch Manager",
+            dataIndex: "branch_manager_name",
+            render: (name: string | null) =>
+              name ?? <Typography.Text type="secondary">Not assigned</Typography.Text>,
+          },
+          {
             title: "",
             width: 100,
             render: (_, record) => (
@@ -80,11 +153,11 @@ export default function BranchesPage() {
                 type="link"
                 onClick={(e) => {
                   e.stopPropagation();
-                  form.setFieldsValue({ name: record.name });
+                  form.setFieldsValue({ name: record.name, branch_manager_id: record.branch_manager_id ?? undefined });
                   setEditing(record);
                 }}
               >
-                Rename
+                Edit
               </Button>
             ),
           },
@@ -97,7 +170,7 @@ export default function BranchesPage() {
       />
       <Modal
         open={editing !== null}
-        title={editing === "new" ? "Add branch" : "Rename branch"}
+        title={editing === "new" ? "Add branch" : "Edit branch"}
         onOk={save}
         onCancel={() => setEditing(null)}
         destroyOnClose
@@ -105,6 +178,15 @@ export default function BranchesPage() {
         <Form form={form} layout="vertical">
           <Form.Item name="name" label="Branch name" rules={[{ required: true }]}>
             <Input placeholder="e.g. Sangli" />
+          </Form.Item>
+          <Form.Item name="branch_manager_id" label="Branch Manager (optional)">
+            <Select
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              placeholder="Assign later"
+              options={availableManagerOptions}
+            />
           </Form.Item>
         </Form>
       </Modal>

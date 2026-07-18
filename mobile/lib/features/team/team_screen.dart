@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
 import '../../core/widgets/state_views.dart';
@@ -132,42 +133,47 @@ class _MemberCard extends StatelessWidget {
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(member['full_name'] as String,
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: chipColor.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => context.push('/account/employee/${member['user_id']}'),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(member['full_name'] as String,
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                   ),
-                  child: Text(chipText,
-                      style: TextStyle(
-                          fontSize: 11, color: chipColor, fontWeight: FontWeight.w600)),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Text(
-              '${minutes ~/ 60}h ${minutes % 60}m worked · '
-              '${member['calls']} calls · ${member['ptps']} PTPs · '
-              '${member['payments_count']} payments (${_rupee.format(payTotal)})',
-              style: const TextStyle(fontSize: 12, color: AppColors.textSecondary).tabular,
-            ),
-            if (live?['last_ping_at'] != null)
-              Text(
-                'Last ping ${DateFormat('HH:mm').format(DateTime.parse(live!['last_ping_at'] as String).toLocal())}',
-                style: const TextStyle(fontSize: 11, color: AppColors.textSecondary).tabular,
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: chipColor.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(chipText,
+                        style: TextStyle(
+                            fontSize: 11, color: chipColor, fontWeight: FontWeight.w600)),
+                  ),
+                  const Icon(Icons.chevron_right, size: 18, color: AppColors.textSecondary),
+                ],
               ),
-          ],
+              const SizedBox(height: 6),
+              Text(
+                '${minutes ~/ 60}h ${minutes % 60}m worked · '
+                '${member['calls']} calls · ${member['ptps']} PTPs · '
+                '${member['payments_count']} payments (${_rupee.format(payTotal)})',
+                style: const TextStyle(fontSize: 12, color: AppColors.textSecondary).tabular,
+              ),
+              if (live?['last_ping_at'] != null)
+                Text(
+                  'Last ping ${DateFormat('HH:mm').format(DateTime.parse(live!['last_ping_at'] as String).toLocal())}',
+                  style: const TextStyle(fontSize: 11, color: AppColors.textSecondary).tabular,
+                ),
+            ],
+          ),
         ),
       ),
     );

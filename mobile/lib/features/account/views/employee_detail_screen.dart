@@ -1,7 +1,31 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/theme/app_theme.dart';
+
+const Map<String, String> _designationLabels = {
+  'agency_admin': 'Agency Admin',
+  'operations_manager': 'Operations Manager',
+  'branch_manager': 'Branch Manager',
+  'team_leader': 'Team Leader',
+  'telecaller': 'Telecaller',
+  'field_agent': 'Field Agent',
+};
+
+const Map<String, IconData> _activityIcons = {
+  'call': Icons.phone,
+  'payment': Icons.payments,
+  'ptp': Icons.description,
+  'field_visit': Icons.location_on,
+};
+
+const Map<String, String> _activityLabels = {
+  'call': 'Call logged',
+  'payment': 'Payment collected',
+  'ptp': 'PTP',
+  'field_visit': 'Field visit',
+};
 
 class EmployeeDetailScreen extends ConsumerStatefulWidget {
   final String employeeId;
@@ -13,6 +37,7 @@ class EmployeeDetailScreen extends ConsumerStatefulWidget {
 
 class _EmployeeDetailScreenState extends ConsumerState<EmployeeDetailScreen> {
   Map<String, dynamic>? _employee;
+  List<Map<String, dynamic>>? _activity;
   String? _error;
 
   @override
@@ -25,10 +50,22 @@ class _EmployeeDetailScreenState extends ConsumerState<EmployeeDetailScreen> {
     try {
       final api = ref.read(apiClientProvider);
       final res = await api.get('/employees/${widget.employeeId}');
-      if (mounted) {
-        setState(() {
-          _employee = res.data['employee'] as Map<String, dynamic>;
+      final employee = res.data['employee'] as Map<String, dynamic>;
+      if (mounted) setState(() => _employee = employee);
+
+      // Only agent-type rows (plain telecaller/field_agent, or a
+      // branch_manager/team_leader with agent_type set) have collections
+      // activity to show -- everyone else's feed would just be empty.
+      final capabilities = (employee['capabilities'] as List?)?.cast<String>() ?? const [];
+      if (capabilities.contains('telecaller') || capabilities.contains('field_agent')) {
+        final actRes = await api.get('/reports/agent-activity', query: {
+          'agent_id': widget.employeeId,
+          'limit': '20',
         });
+        final activity = (actRes.data['activity'] as List).cast<Map<String, dynamic>>();
+        if (mounted) setState(() => _activity = activity);
+      } else {
+        if (mounted) setState(() => _activity = const []);
       }
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
@@ -52,10 +89,12 @@ class _EmployeeDetailScreenState extends ConsumerState<EmployeeDetailScreen> {
     }
 
     final emp = _employee!;
-    final name = emp['full_name'] ?? 'Unknown';
-    final email = emp['email'] ?? 'No email';
-    final phone = emp['phone_number'] ?? 'No phone';
-    final role = emp['role'] ?? 'Unknown role';
+    final name = emp['full_name'] as String? ?? 'Unknown';
+    final email = emp['email'] as String? ?? 'No email';
+    final phone = emp['phone'] as String? ?? 'No phone';
+    final designation = emp['designation'] as String?;
+    final role = _designationLabels[designation] ?? designation ?? 'Unknown role';
+    final agentType = emp['agent_type'] as String?;
     final isActive = emp['is_active'] == true;
 
     return Scaffold(
@@ -81,6 +120,13 @@ class _EmployeeDetailScreenState extends ConsumerState<EmployeeDetailScreen> {
                     Text(name, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 4),
                     Text(role.toUpperCase(), style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold)),
+                    if (agentType != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        'Also works as ${_designationLabels[agentType] ?? agentType}',
+                        style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                      ),
+                    ],
                     const SizedBox(height: 8),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -120,6 +166,36 @@ class _EmployeeDetailScreenState extends ConsumerState<EmployeeDetailScreen> {
               ],
             ),
           ),
+          const SizedBox(height: 24),
+          const Text('Recent Activity', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          if (_activity == null)
+            const Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator()))
+          else if (_activity!.isEmpty)
+            const Text('No recent activity', style: TextStyle(color: AppColors.textSecondary))
+          else
+            Card(
+              child: Column(
+                children: [
+                  for (final a in _activity!)
+                    ListTile(
+                      leading: Icon(_activityIcons[a['kind']] ?? Icons.circle, color: AppColors.primary),
+                      title: Text(_activityLabels[a['kind']] ?? a['kind'] as String? ?? 'Activity'),
+                      subtitle: Text(
+                        '${a['customer_name'] ?? ''} · ${a['loan_number'] ?? ''}'
+                        '${a['detail'] != null ? '\n${a['detail']}' : ''}',
+                      ),
+                      isThreeLine: a['detail'] != null,
+                      trailing: a['at'] != null
+                          ? Text(
+                              DateFormat('dd MMM, HH:mm').format(DateTime.parse(a['at'] as String).toLocal()),
+                              style: const TextStyle(fontSize: 11, color: AppColors.textTertiary),
+                            )
+                          : null,
+                    ),
+                ],
+              ),
+            ),
         ],
       ),
     );

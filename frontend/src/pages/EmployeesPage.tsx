@@ -16,7 +16,14 @@ import { KeyOutlined, PlusOutlined } from "@ant-design/icons";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, errorMessage } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { CAPABILITY_LABELS, type Branch, type Employee, type Team } from "../types";
+import {
+  CAPABILITY_LABELS,
+  type AgentType,
+  type Branch,
+  type Designation,
+  type Employee,
+  type Team,
+} from "../types";
 
 interface EmployeeFormValues {
   full_name: string;
@@ -24,10 +31,12 @@ interface EmployeeFormValues {
   email?: string;
   password?: string;
   branch_id?: string | null;
-  branch_ids?: string[]; // Multi-branch for telecallers
+  branch_ids?: string[]; // Multi-branch for telecaller-type work
   team_id?: string | null;
+  team_ids?: string[]; // Multi-team for telecaller-type work
   manager_id?: string | null;
-  designation?: "operations_manager" | "team_leader" | "telecaller" | "field_agent";
+  designation?: Exclude<Designation, "agency_admin">;
+  agent_type?: AgentType | null;
   is_active?: boolean;
 }
 
@@ -56,6 +65,14 @@ export default function EmployeesPage() {
   const selectedBranch = Form.useWatch("branch_id", form);
   const selectedTeam = Form.useWatch("team_id", form);
   const selectedDesignation = Form.useWatch("designation", form);
+  const selectedAgentType = Form.useWatch("agent_type", form);
+  const isManagerDesignation = selectedDesignation === "branch_manager" || selectedDesignation === "team_leader";
+  // A branch_manager/team_leader ALSO carrying collections work behaves the
+  // same as a plain telecaller/field_agent for location-assignment purposes.
+  const isTelecallerType =
+    selectedDesignation === "telecaller" || (isManagerDesignation && selectedAgentType === "telecaller");
+  const isFieldAgentType =
+    selectedDesignation === "field_agent" || (isManagerDesignation && selectedAgentType === "field_agent");
   const teamOptions = useMemo(
     () =>
       teams
@@ -149,16 +166,19 @@ export default function EmployeesPage() {
   };
 
   const openEdit = (e: Employee) => {
-    const isTelecaller = e.capabilities.includes("telecaller");
+    const isTelecallerTypeRow = e.designation === "telecaller" || e.agent_type === "telecaller";
+    const isFieldAgentTypeRow = e.designation === "field_agent" || e.agent_type === "field_agent";
     form.setFieldsValue({
       full_name: e.full_name,
       phone: e.phone,
       email: e.email ?? undefined,
-      branch_id: !isTelecaller ? e.branch_id : undefined,
-      branch_ids: isTelecaller ? (e.branch_ids ?? (e.branch_id ? [e.branch_id] : [])) : undefined,
-      team_id: e.team_id,
+      branch_id: isFieldAgentTypeRow || !isTelecallerTypeRow ? e.branch_id : undefined,
+      branch_ids: isTelecallerTypeRow ? (e.branch_ids ?? (e.branch_id ? [e.branch_id] : [])) : undefined,
+      team_id: isFieldAgentTypeRow || !isTelecallerTypeRow ? e.team_id : undefined,
+      team_ids: isTelecallerTypeRow ? (e.team_ids ?? (e.team_id ? [e.team_id] : [])) : undefined,
       manager_id: e.manager_id,
-      designation: e.designation as any,
+      designation: e.designation as EmployeeFormValues["designation"],
+      agent_type: e.agent_type ?? undefined,
       is_active: e.is_active,
     });
     setEditing(e);
@@ -166,38 +186,51 @@ export default function EmployeesPage() {
 
   const save = async () => {
     const v = await form.validateFields();
-    const isTelecaller = v.designation === "telecaller";
+    const managerDesignation = v.designation === "branch_manager" || v.designation === "team_leader";
+    const telecallerType = v.designation === "telecaller" || (managerDesignation && v.agent_type === "telecaller");
+    const agentType = managerDesignation ? (v.agent_type ?? null) : undefined;
 
     try {
       if (editing === "new") {
-        await api.post("/employees", {
+        const created = await api.post("/employees", {
           full_name: v.full_name,
           phone: v.phone,
           email: v.email || null,
           password: v.password,
-          branch_id: isTelecaller ? null : (v.branch_id ?? null),
-          team_id: v.team_id ?? null,
+          branch_id: telecallerType ? null : (v.branch_id ?? null),
+          team_id: telecallerType ? null : (v.team_id ?? null),
           manager_id: v.manager_id ?? null,
           designation: v.designation,
+          agent_type: agentType,
         });
         message.success("Employee created");
+
+        if (telecallerType) {
+          const newId = created.data.employee.id;
+          await api.put(`/employees/${newId}/branches`, { branch_ids: v.branch_ids ?? [] });
+          await api.put(`/employees/${newId}/teams`, { team_ids: v.team_ids ?? [] });
+        }
       } else if (editing) {
         await api.patch(`/employees/${editing.id}`, {
           full_name: v.full_name,
           email: v.email || null,
-          branch_id: isTelecaller ? null : (v.branch_id ?? null),
-          team_id: v.team_id ?? null,
+          branch_id: telecallerType ? null : (v.branch_id ?? null),
+          team_id: telecallerType ? null : (v.team_id ?? null),
           manager_id: v.manager_id ?? null,
           is_active: v.is_active,
           designation: v.designation,
+          agent_type: agentType,
         });
         message.success("Employee updated");
 
-        // Handle multi-branch assignment for telecallers
-        if (isTelecaller) {
-          await api.put(`/employees/${editing.id}/branches`, {
-            branch_ids: v.branch_ids ?? [],
-          });
+        // Multi-branch/multi-team assignment for telecaller-type work
+        // (plain telecallers, or branch_manager/team_leader with agent_type
+        // = telecaller) -- their work is remote calling, not tied to one
+        // place, so it's tracked in junction tables, not the form's scalar
+        // branch_id/team_id.
+        if (telecallerType) {
+          await api.put(`/employees/${editing.id}/branches`, { branch_ids: v.branch_ids ?? [] });
+          await api.put(`/employees/${editing.id}/teams`, { team_ids: v.team_ids ?? [] });
         }
       }
       setEditing(null);
@@ -271,6 +304,7 @@ export default function EmployeesPage() {
           onChange={(v) => setFilterDesignation(v ?? undefined)}
           options={[
             { value: "operations_manager", label: "Ops Manager" },
+            { value: "branch_manager", label: "Branch Manager" },
             { value: "team_leader", label: "Team Leader" },
             { value: "telecaller", label: "Telecaller" },
             { value: "field_agent", label: "Field Agent" },
@@ -286,6 +320,7 @@ export default function EmployeesPage() {
             { value: "telecaller", label: "Telecaller" },
             { value: "field_agent", label: "Field Agent" },
             { value: "team_leader", label: "Team Leader" },
+            { value: "branch_manager", label: "Branch Manager" },
             { value: "operations_manager", label: "Ops Manager" },
           ]}
         />
@@ -415,42 +450,113 @@ export default function EmployeesPage() {
             <Select
               options={[
                 canEditOps ? { value: "operations_manager", label: "Operations Manager" } : null,
+                { value: "branch_manager", label: "Branch Manager" },
                 { value: "team_leader", label: "Team Leader" },
                 { value: "telecaller", label: "Telecaller" },
                 { value: "field_agent", label: "Field Agent" },
               ].filter((o): o is any => o !== null)}
+              onChange={() => {
+                form.setFieldValue("agent_type", undefined);
+                form.setFieldValue("branch_id", undefined);
+                form.setFieldValue("team_id", undefined);
+                form.setFieldValue("branch_ids", undefined);
+                form.setFieldValue("team_ids", undefined);
+              }}
             />
           </Form.Item>
 
-          {form.getFieldValue("designation") === "team_leader" ? (
-            <Form.Item label="Branches">
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                Derived from led teams. Set via "Manage leaders" in Teams page.
-              </Typography.Text>
-            </Form.Item>
-          ) : form.getFieldValue("designation") === "telecaller" ? (
-            <Form.Item name="branch_ids" label="Branches" rules={[{ required: true, message: "At least one branch required" }]}>
-              <Select
-                mode="multiple"
-                allowClear
-                options={branches.map((b) => ({ value: b.id, label: b.name }))}
-                placeholder="Select one or more branches"
-              />
-            </Form.Item>
-          ) : (
-            <Form.Item name="branch_id" label="Branch">
+          {isManagerDesignation && (
+            <Form.Item name="agent_type" label="Also does collections work as">
               <Select
                 allowClear
-                options={branches.map((b) => ({ value: b.id, label: b.name }))}
-                onChange={() => form.setFieldValue("team_id", undefined)}
+                placeholder="No — management only"
+                options={[
+                  { value: "telecaller", label: "Telecaller-type (remote calling)" },
+                  { value: "field_agent", label: "Field Agent-type (in-person visits)" },
+                ]}
+                onChange={() => {
+                  form.setFieldValue("branch_id", undefined);
+                  form.setFieldValue("team_id", undefined);
+                  form.setFieldValue("branch_ids", undefined);
+                  form.setFieldValue("team_ids", undefined);
+                }}
               />
             </Form.Item>
           )}
 
-          {form.getFieldValue("designation") !== "team_leader" && (
-            <Form.Item name="team_id" label="Team">
-              <Select allowClear options={teamOptions} />
+          {selectedDesignation === "team_leader" && !isTelecallerType && !isFieldAgentType && (
+            <Form.Item label="Branches / Teams">
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                Derived from led teams. Set via "Manage leaders" in Teams page.
+              </Typography.Text>
             </Form.Item>
+          )}
+
+          {selectedDesignation === "branch_manager" && !isTelecallerType && !isFieldAgentType && (
+            <Form.Item label="Branch">
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                Set via the Branches page (assign this person as a branch's manager).
+              </Typography.Text>
+            </Form.Item>
+          )}
+
+          {isTelecallerType && (
+            <>
+              <Form.Item
+                name="branch_ids"
+                label="Branches (calling coverage)"
+                rules={[{ required: true, message: "At least one branch required" }]}
+              >
+                <Select
+                  mode="multiple"
+                  allowClear
+                  options={branches.map((b) => ({ value: b.id, label: b.name }))}
+                  placeholder="Select one or more branches"
+                />
+              </Form.Item>
+              <Form.Item
+                name="team_ids"
+                label="Teams (calling coverage)"
+                rules={[{ required: true, message: "At least one team required" }]}
+              >
+                <Select
+                  mode="multiple"
+                  allowClear
+                  options={teams.map((t) => ({ value: t.id, label: `${t.name} (${t.branch_name ?? ""})` }))}
+                  placeholder="Select one or more teams"
+                />
+              </Form.Item>
+            </>
+          )}
+
+          {isFieldAgentType && (
+            <>
+              <Form.Item name="branch_id" label="Branch">
+                <Select
+                  allowClear
+                  options={branches.map((b) => ({ value: b.id, label: b.name }))}
+                  onChange={() => form.setFieldValue("team_id", undefined)}
+                />
+              </Form.Item>
+              <Form.Item name="team_id" label="Team">
+                <Select allowClear options={teamOptions} />
+              </Form.Item>
+            </>
+          )}
+
+          {selectedDesignation === "operations_manager" && (
+            <>
+              <Form.Item name="branch_id" label="Branch">
+                <Select
+                  allowClear
+                  options={branches.map((b) => ({ value: b.id, label: b.name }))}
+                  onChange={() => form.setFieldValue("team_id", undefined)}
+                />
+              </Form.Item>
+              <Form.Item name="team_id" label="Team">
+                <Select allowClear options={teamOptions} />
+              </Form.Item>
+            </>
           )}
 
           <Form.Item

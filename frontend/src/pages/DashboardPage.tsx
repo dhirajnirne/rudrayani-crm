@@ -15,6 +15,9 @@ import dayjs, { type Dayjs } from "dayjs";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, errorMessage } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import AgentDetailDrawer from "../components/AgentDetailDrawer";
+import BranchDetailDrawer from "../components/BranchDetailDrawer";
+import TeamDetailDrawer from "../components/TeamDetailDrawer";
 import DashboardCustomizer from "../components/dashboard/DashboardCustomizer";
 import { applyLayout, type DashboardRenderCtx } from "../components/dashboard/widgetRegistry";
 import { useDashboardPreferences } from "../hooks/useDashboardPreferences";
@@ -23,6 +26,7 @@ import {
   type DashboardFilters,
   type MetricKey,
 } from "../components/dashboard/types";
+import type { Branch, Team } from "../types";
 
 const ALL = "__all__";
 
@@ -49,14 +53,32 @@ export default function DashboardPage() {
   const [activeMetric, setActiveMetric] = useState<MetricKey>("resolution");
 
   const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
-  const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
-  const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
   const [agents, setAgents] = useState<{ id: string; full_name: string }[]>([]);
 
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [customizerOpen, setCustomizerOpen] = useState(false);
+  const [myWork, setMyWork] = useState(false);
+  const [myTeamDrawer, setMyTeamDrawer] = useState<{ id: string; name: string } | null>(null);
+  const [myBranchId, setMyBranchId] = useState<string | null>(null);
+  const [myAgentDrawer, setMyAgentDrawer] = useState(false);
+
+  // A branch_manager/team_leader may ALSO carry collections work (agent_type
+  // set) -- "additional responsibilities, the core work remains the same."
+  // The toggle lets them flip between their management view (team/branch
+  // aggregate) and their own personal worklist numbers, mirroring the
+  // original brief's "My Team" vs "My Work" ask.
+  const hasAgentWork = !!user?.agent_type;
+  const isTeamLeader = !!user?.capabilities.includes("team_leader");
+  const isBranchManager = !!user?.capabilities.includes("branch_manager");
+  const myLedTeams = useMemo(
+    () => teams.filter((t) => t.leaders?.some((l) => l.id === user?.id)),
+    [teams, user],
+  );
+  const myBranch = useMemo(() => branches.find((b) => b.branch_manager_id === user?.id), [branches, user]);
 
   const prefs = useDashboardPreferences();
 
@@ -66,16 +88,18 @@ export default function DashboardPage() {
     api.get("/branches").then((r) => setBranches(r.data.branches));
     api.get("/teams").then((r) => setTeams(r.data.teams));
     if (hasPermission("employees.view")) {
-      api
-        .get("/employees")
-        .then((r) =>
-          setAgents(
-            r.data.employees.filter(
-              (e: { is_active: boolean; is_telecaller: boolean; is_field_agent: boolean }) =>
-                e.is_active && (e.is_telecaller || e.is_field_agent),
-            ),
+      api.get("/employees").then((r) =>
+        setAgents(
+          // Anyone whose capabilities include telecaller/field_agent -- this
+          // already covers plain agents AND branch_manager/team_leader rows
+          // with agent_type set, since capabilitiesOf() derives both from
+          // the same booleans (see backend/src/types/user.ts).
+          r.data.employees.filter(
+            (e: { is_active: boolean; capabilities: string[] }) =>
+              e.is_active && (e.capabilities.includes("telecaller") || e.capabilities.includes("field_agent")),
           ),
-        );
+        ),
+      );
     }
   }, [isManager, hasPermission]);
 
@@ -83,14 +107,14 @@ export default function DashboardPage() {
     () => ({
       month: month.format("YYYY-MM"),
       company_id: companyId,
-      branch_id: branchId,
-      team_id: teamId,
-      agent_id: agentId,
+      branch_id: myWork ? undefined : branchId,
+      team_id: myWork ? undefined : teamId,
+      agent_id: myWork ? user?.id : agentId,
       product,
       bucket,
       status,
     }),
-    [month, companyId, branchId, teamId, agentId, product, bucket, status],
+    [month, companyId, branchId, teamId, agentId, product, bucket, status, myWork, user],
   );
 
   const load = useCallback(async () => {
@@ -174,6 +198,36 @@ export default function DashboardPage() {
             <Switch checked={amountMode} onChange={setAmountMode} />
             <Typography.Text type="secondary">Amount</Typography.Text>
           </Space>
+          {hasAgentWork && (
+            <Space size={6}>
+              <Typography.Text type="secondary">My Team/Branch</Typography.Text>
+              <Switch checked={myWork} onChange={setMyWork} />
+              <Typography.Text type="secondary">My Work</Typography.Text>
+            </Space>
+          )}
+          {isTeamLeader && myLedTeams.length === 1 && (
+            <Button onClick={() => setMyTeamDrawer({ id: myLedTeams[0].id, name: myLedTeams[0].name })}>
+              My Team
+            </Button>
+          )}
+          {isTeamLeader && myLedTeams.length > 1 && (
+            <Select
+              style={{ width: 160 }}
+              placeholder="My Team"
+              value={undefined}
+              onChange={(id) => {
+                const t = myLedTeams.find((mt) => mt.id === id);
+                if (t) setMyTeamDrawer({ id: t.id, name: t.name });
+              }}
+              options={myLedTeams.map((t) => ({ value: t.id, label: t.name }))}
+            />
+          )}
+          {isBranchManager && myBranch && (
+            <Button onClick={() => setMyBranchId(myBranch.id)}>My Branch</Button>
+          )}
+          {!isManager && (
+            <Button onClick={() => setMyAgentDrawer(true)}>My Recent Activity</Button>
+          )}
           <Button icon={<DownloadOutlined />} loading={exporting} onClick={exportExcel}>
             Export
           </Button>
@@ -287,6 +341,24 @@ export default function DashboardPage() {
         onSave={prefs.save}
         onReset={prefs.reset}
       />
+
+      <TeamDetailDrawer
+        teamId={myTeamDrawer?.id ?? null}
+        teamName={myTeamDrawer?.name}
+        month={filters.month}
+        open={myTeamDrawer !== null}
+        onClose={() => setMyTeamDrawer(null)}
+      />
+      <BranchDetailDrawer branchId={myBranchId} open={myBranchId !== null} onClose={() => setMyBranchId(null)} />
+      {user && (
+        <AgentDetailDrawer
+          agentId={user.id}
+          agentName={user.full_name}
+          month={filters.month}
+          open={myAgentDrawer}
+          onClose={() => setMyAgentDrawer(false)}
+        />
+      )}
     </div>
   );
 }

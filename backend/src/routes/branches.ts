@@ -9,15 +9,50 @@ import { depositTotals, listDeposits } from "../services/report-service";
 const router = Router();
 router.use(authenticate);
 
-const bodySchema = z.object({ name: z.string().trim().min(1).max(200) });
+const bodySchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  branch_manager_id: z.string().uuid().optional().nullable(),
+});
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+/**
+ * A branch manager is optional-at-creation, editable later, and one branch
+ * per manager (enforced app-side here with a friendly error, and DB-side by
+ * the uq_branches_branch_manager_id UNIQUE constraint as a backstop).
+ */
+async function assertBranchManager(
+  agencyId: string,
+  userId: string | null | undefined,
+  excludeBranchId?: string,
+): Promise<void> {
+  if (!userId) return;
+  const { rows } = await pool.query<{ designation: string }>(
+    "SELECT designation FROM users WHERE id = $1 AND agency_id = $2",
+    [userId, agencyId],
+  );
+  if (rows.length === 0) throw new HttpError(400, "Branch manager not found in this agency");
+  if (rows[0].designation !== "branch_manager") {
+    throw new HttpError(400, "Branch manager must have the branch_manager designation");
+  }
+  const { rows: existing } = await pool.query<{ id: string }>(
+    "SELECT id FROM branches WHERE branch_manager_id = $1",
+    [userId],
+  );
+  if (existing.length > 0 && existing[0].id !== excludeBranchId) {
+    throw new HttpError(400, "This user already manages another branch");
+  }
+}
 
 // Any authenticated user in the agency can list branches (needed for pickers).
 router.get(
   "/",
   asyncHandler(async (req, res) => {
     const { rows } = await pool.query(
-      "SELECT id, name, created_at FROM branches WHERE agency_id = $1 ORDER BY name",
+      `SELECT b.id, b.name, b.created_at, b.branch_manager_id, bm.full_name AS branch_manager_name
+         FROM branches b
+         LEFT JOIN users bm ON bm.id = b.branch_manager_id
+        WHERE b.agency_id = $1
+        ORDER BY b.name`,
       [req.user!.agency_id],
     );
     res.json({ branches: rows });
@@ -29,9 +64,11 @@ router.post(
   requirePermission("branches.manage"),
   asyncHandler(async (req, res) => {
     const body = bodySchema.parse(req.body);
+    await assertBranchManager(req.user!.agency_id, body.branch_manager_id);
     const { rows } = await pool.query(
-      "INSERT INTO branches (agency_id, name) VALUES ($1, $2) RETURNING id, name, created_at",
-      [req.user!.agency_id, body.name],
+      `INSERT INTO branches (agency_id, name, branch_manager_id) VALUES ($1, $2, $3)
+       RETURNING id, name, created_at, branch_manager_id`,
+      [req.user!.agency_id, body.name, body.branch_manager_id ?? null],
     );
     res.status(201).json({ branch: rows[0] });
   }),
@@ -41,11 +78,23 @@ router.patch(
   "/:id",
   requirePermission("branches.manage"),
   asyncHandler(async (req, res) => {
-    const body = bodySchema.parse(req.body);
+    const body = bodySchema.partial({ name: true }).parse(req.body);
+    if (body.branch_manager_id !== undefined) {
+      await assertBranchManager(req.user!.agency_id, body.branch_manager_id, req.params.id);
+    }
     const { rows } = await pool.query(
-      `UPDATE branches SET name = $3 WHERE id = $1 AND agency_id = $2
-       RETURNING id, name, created_at`,
-      [req.params.id, req.user!.agency_id, body.name],
+      `UPDATE branches SET
+          name = COALESCE($3, name),
+          branch_manager_id = CASE WHEN $4::boolean THEN $5::uuid ELSE branch_manager_id END
+        WHERE id = $1 AND agency_id = $2
+        RETURNING id, name, created_at, branch_manager_id`,
+      [
+        req.params.id,
+        req.user!.agency_id,
+        body.name ?? null,
+        body.branch_manager_id !== undefined,
+        body.branch_manager_id ?? null,
+      ],
     );
     if (!rows[0]) throw new HttpError(404, "Branch not found");
     res.json({ branch: rows[0] });
@@ -75,7 +124,10 @@ router.get(
     const monthStart = `${month}-01`;
 
     const { rows: branchRows } = await pool.query(
-      "SELECT id, name, created_at FROM branches WHERE id = $1 AND agency_id = $2",
+      `SELECT b.id, b.name, b.created_at, b.branch_manager_id, bm.full_name AS branch_manager_name
+         FROM branches b
+         LEFT JOIN users bm ON bm.id = b.branch_manager_id
+        WHERE b.id = $1 AND b.agency_id = $2`,
       [id, agencyId],
     );
     const branch = branchRows[0];

@@ -1,13 +1,16 @@
 import { Router, type Request } from "express";
 import ExcelJS from "exceljs";
 import { z } from "zod";
+import { pool } from "../config/db";
 import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requireAnyPermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
 import { capabilitiesHavePermission } from "../services/permission-service";
+import { scopeFilter } from "../services/scope";
 import { capabilitiesOf } from "../types/user";
 import {
   agentBreakdown,
+  agentRecentActivity,
   bucketMismatchReport,
   bucketMovementReport,
   collectionTrend,
@@ -56,6 +59,39 @@ router.get(
     const result = await dashboard(req.user!, filters, full);
     const options = await filterOptions(req.user!.agency_id, filters.company_id);
     res.json({ ...result, filters: options });
+  }),
+);
+
+/**
+ * One agent's recent collections activity across all their customers -- no
+ * agent-centric feed existed before (only per-customer trail and per-day
+ * aggregate counts). Access is gated the same way /tracking/team-day already
+ * gates per-agent visibility: reuse scopeFilter() (agency-wide for
+ * admin/ops, own branch for branch_manager, own led team(s) for team_leader,
+ * self otherwise) rather than re-deriving a new visibility rule here.
+ */
+router.get(
+  "/agent-activity",
+  asyncHandler(async (req, res) => {
+    const query = z
+      .object({
+        agent_id: z.string().uuid(),
+        limit: z.coerce.number().int().min(1).max(100).default(20),
+      })
+      .parse(req.query);
+
+    const scope = await scopeFilter(req.user!);
+    if (scope.param !== null) {
+      const clause = scope.clause.replaceAll("$SCOPE", "$2");
+      const { rows } = await pool.query(
+        `SELECT 1 FROM users u WHERE u.id = $1 AND u.agency_id = $3 ${clause}`,
+        [query.agent_id, scope.param, req.user!.agency_id],
+      );
+      if (rows.length === 0) throw new HttpError(403, "You cannot view this agent's activity");
+    }
+
+    const activity = await agentRecentActivity(req.user!.agency_id, query.agent_id, query.limit);
+    res.json({ agent_id: query.agent_id, activity });
   }),
 );
 

@@ -87,15 +87,17 @@ router.post(
     const body = assignBody.parse(req.body);
     const agencyId = req.user!.agency_id;
 
-    // Target must be an active workable user in this agency.
+    // Target must be an active workable user in this agency. branch_manager
+    // has no boolean flag of its own (unlike team_leader, which is_team_leader
+    // already covers), so it needs an explicit disjunct here.
     const agentRes = await pool.query(
       `SELECT id, team_id, full_name FROM users
         WHERE id = $1 AND agency_id = $2 AND is_active = true
-          AND (is_telecaller OR is_field_agent OR is_team_leader)`,
+          AND (is_telecaller OR is_field_agent OR is_team_leader OR designation = 'branch_manager')`,
       [body.agent_id, agencyId],
     );
     const agent = agentRes.rows[0];
-    if (!agent) throw new HttpError(404, "Agent not found (must be an active telecaller / field agent / team leader in this agency)");
+    if (!agent) throw new HttpError(404, "Agent not found (must be an active telecaller / field agent / team leader / branch manager in this agency)");
 
     const client = await pool.connect();
     try {

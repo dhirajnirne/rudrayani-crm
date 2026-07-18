@@ -5,7 +5,7 @@ import { message } from "antd";
 import { lakh, pctText } from "./format";
 import type { DashboardFilters } from "./types";
 
-type Dimension = "company" | "product" | "bucket" | "branch" | "team" | "agent";
+export type Dimension = "company" | "product" | "bucket" | "branch" | "team" | "agent";
 
 const DIMENSION_OPTIONS: { label: string; value: Dimension }[] = [
   { label: "Company", value: "company" },
@@ -16,7 +16,7 @@ const DIMENSION_OPTIONS: { label: string; value: Dimension }[] = [
   { label: "Agent", value: "agent" },
 ];
 
-interface BreakdownRow {
+export interface BreakdownRow {
   key: string | null;
   label: string;
   allocated_amount: number;
@@ -37,8 +37,18 @@ interface BreakdownRow {
  * (they're narrowing filters in the targets model, not their own scope
  * level) -- shown as "—" rather than a misleading 0%.
  */
-export default function BreakdownTable({ filters }: { filters: DashboardFilters }) {
-  const [dimension, setDimension] = useState<Dimension>("product");
+export default function BreakdownTable({
+  filters,
+  defaultDimension = "product",
+  onRowClick,
+}: {
+  filters: DashboardFilters;
+  defaultDimension?: Dimension;
+  /** Optional click-through (Management Dashboard's branch→team→agent drill-down). Rows for
+   *  dimensions without a stable id (product/bucket, key is null) are not clickable. */
+  onRowClick?: (dimension: Dimension, row: BreakdownRow) => void;
+}) {
+  const [dimension, setDimension] = useState<Dimension>(defaultDimension);
   const [rows, setRows] = useState<BreakdownRow[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -75,6 +85,14 @@ export default function BreakdownTable({ filters }: { filters: DashboardFilters 
         dataSource={rows}
         pagination={rows.length > 10 ? { pageSize: 10 } : false}
         scroll={{ x: 760 }}
+        onRow={
+          onRowClick && (dimension === "branch" || dimension === "team" || dimension === "agent")
+            ? (row) =>
+                row.key
+                  ? { onClick: () => onRowClick(dimension, row), style: { cursor: "pointer" } }
+                  : {}
+            : undefined
+        }
         columns={[
           { title: DIMENSION_OPTIONS.find((d) => d.value === dimension)?.label, dataIndex: "label" },
           {

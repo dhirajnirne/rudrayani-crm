@@ -1,7 +1,11 @@
-import { Card, Empty, Space, Spin, Tag, Tree, Typography, message } from "antd";
+import { Button, Card, Empty, Space, Spin, Tag, Tree, Typography, message } from "antd";
 import type { DataNode } from "antd/es/tree";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, errorMessage } from "../api/client";
+import AgentDetailDrawer from "../components/AgentDetailDrawer";
+import BranchDetailDrawer from "../components/BranchDetailDrawer";
+import TeamDetailDrawer from "../components/TeamDetailDrawer";
+import { lakh, pctText } from "../components/dashboard/format";
 import { CAPABILITY_LABELS, type OrgAgent, type OrgHierarchy } from "../types";
 
 /**
@@ -33,6 +37,11 @@ function agentTitle(agent: OrgAgent, managerInGroup: boolean) {
         </Tag>
       ))}
       {!agent.is_active && <Tag color="red">Deactivated</Tag>}
+      {agent.performance && (
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          {lakh(agent.performance.collected_amount)} collected · {pctText(agent.performance.achievement_pct)}
+        </Typography.Text>
+      )}
       {agent.manager_name && !managerInGroup && (
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           reports to {agent.manager_name}
@@ -55,16 +64,21 @@ function toTreeData(
   }));
 }
 
-function AgentForest({ agents }: { agents: OrgAgent[] }) {
+function AgentForest({ agents, onSelectAgent }: { agents: OrgAgent[]; onSelectAgent: (agent: OrgAgent) => void }) {
   if (agents.length === 0) return <Empty description="No employees" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
   const groupIds = new Set(agents.map((a) => a.id));
   const forest = buildForest(agents);
+  const byId = new Map(agents.map((a) => [a.id, a]));
   return (
     <Tree
       treeData={toTreeData(forest, groupIds)}
       defaultExpandAll
-      selectable={false}
+      selectable
       showLine
+      onSelect={(keys) => {
+        const agent = keys[0] ? byId.get(String(keys[0])) : undefined;
+        if (agent) onSelectAgent(agent);
+      }}
     />
   );
 }
@@ -72,12 +86,19 @@ function AgentForest({ agents }: { agents: OrgAgent[] }) {
 export default function OrgChartPage() {
   const [data, setData] = useState<OrgHierarchy | null>(null);
   const [loading, setLoading] = useState(true);
+  const [branchDrawerId, setBranchDrawerId] = useState<string | null>(null);
+  const [teamDrawer, setTeamDrawer] = useState<{ id: string; name: string } | null>(null);
+  const [agentDrawer, setAgentDrawer] = useState<{ id: string; name: string } | null>(null);
+
+  const month = useMemo(() => new Date().toISOString().slice(0, 7), []);
 
   useEffect(() => {
     (async () => {
       setLoading(true);
       try {
-        const res = await api.get<OrgHierarchy>("/employees/org-hierarchy");
+        const res = await api.get<OrgHierarchy>("/employees/org-hierarchy", {
+          params: { with_performance: "true", month },
+        });
         setData(res.data);
       } catch (err) {
         message.error(errorMessage(err));
@@ -85,7 +106,7 @@ export default function OrgChartPage() {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [month]);
 
   if (loading) {
     return (
@@ -103,19 +124,56 @@ export default function OrgChartPage() {
         Org Chart
       </Typography.Title>
       <Typography.Text type="secondary">
-        {data.agency?.name ?? "Agency"} — branch → team → reporting lines (via "Reports to" on each
-        employee)
+        {data.agency?.name ?? "Agency"} — click a branch, team, or agent for performance and recent
+        activity.
       </Typography.Text>
 
       <div style={{ marginTop: 16, display: "grid", gap: 16 }}>
         {data.branches.map((branch) => (
-          <Card key={branch.id} title={branch.name}>
+          <Card
+            key={branch.id}
+            title={
+              <Space wrap>
+                <Button type="link" style={{ padding: 0, fontWeight: "bold" }} onClick={() => setBranchDrawerId(branch.id)}>
+                  {branch.name}
+                </Button>
+                {branch.branch_manager ? (
+                  <Tag color="purple">Manager: {branch.branch_manager.full_name}</Tag>
+                ) : (
+                  <Tag color="default">No manager assigned</Tag>
+                )}
+                {branch.performance && (
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    {lakh(branch.performance.collected_amount)} collected ·{" "}
+                    {pctText(branch.performance.achievement_pct)}
+                  </Typography.Text>
+                )}
+              </Space>
+            }
+          >
             <div style={{ display: "grid", gap: 16 }}>
               {branch.teams.map((team) => (
                 <div key={team.id}>
-                  <Typography.Text strong>{team.name}</Typography.Text>
+                  <Space wrap>
+                    <Button
+                      type="link"
+                      style={{ padding: 0, fontWeight: "bold" }}
+                      onClick={() => setTeamDrawer({ id: team.id, name: team.name })}
+                    >
+                      {team.name}
+                    </Button>
+                    {team.performance && (
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        {lakh(team.performance.collected_amount)} collected ·{" "}
+                        {pctText(team.performance.achievement_pct)}
+                      </Typography.Text>
+                    )}
+                  </Space>
                   <div style={{ marginTop: 8 }}>
-                    <AgentForest agents={team.agents} />
+                    <AgentForest
+                      agents={team.agents}
+                      onSelectAgent={(agent) => setAgentDrawer({ id: agent.id, name: agent.full_name })}
+                    />
                   </div>
                 </div>
               ))}
@@ -123,7 +181,10 @@ export default function OrgChartPage() {
                 <div>
                   <Typography.Text strong>Unassigned (no team)</Typography.Text>
                   <div style={{ marginTop: 8 }}>
-                    <AgentForest agents={branch.unassigned_agents} />
+                    <AgentForest
+                      agents={branch.unassigned_agents}
+                      onSelectAgent={(agent) => setAgentDrawer({ id: agent.id, name: agent.full_name })}
+                    />
                   </div>
                 </div>
               )}
@@ -136,7 +197,10 @@ export default function OrgChartPage() {
 
         {data.unassigned_agents.length > 0 && (
           <Card title="Unassigned (no branch)">
-            <AgentForest agents={data.unassigned_agents} />
+            <AgentForest
+              agents={data.unassigned_agents}
+              onSelectAgent={(agent) => setAgentDrawer({ id: agent.id, name: agent.full_name })}
+            />
           </Card>
         )}
 
@@ -144,6 +208,22 @@ export default function OrgChartPage() {
           <Empty description="No employees yet" />
         )}
       </div>
+
+      <BranchDetailDrawer branchId={branchDrawerId} open={branchDrawerId !== null} onClose={() => setBranchDrawerId(null)} />
+      <TeamDetailDrawer
+        teamId={teamDrawer?.id ?? null}
+        teamName={teamDrawer?.name}
+        month={month}
+        open={teamDrawer !== null}
+        onClose={() => setTeamDrawer(null)}
+      />
+      <AgentDetailDrawer
+        agentId={agentDrawer?.id ?? null}
+        agentName={agentDrawer?.name}
+        month={month}
+        open={agentDrawer !== null}
+        onClose={() => setAgentDrawer(null)}
+      />
     </div>
   );
 }

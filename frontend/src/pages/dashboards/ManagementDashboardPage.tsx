@@ -3,7 +3,10 @@ import { Column } from "@ant-design/plots";
 import dayjs, { type Dayjs } from "dayjs";
 import { useEffect, useMemo, useState } from "react";
 import { api, errorMessage } from "../../api/client";
-import BreakdownTable from "../../components/dashboard/BreakdownTable";
+import AgentDetailDrawer from "../../components/AgentDetailDrawer";
+import BranchDetailDrawer from "../../components/BranchDetailDrawer";
+import TeamDetailDrawer from "../../components/TeamDetailDrawer";
+import BreakdownTable, { type BreakdownRow as BreakdownTableRow, type Dimension } from "../../components/dashboard/BreakdownTable";
 import SummaryStat from "../../components/dashboard/SummaryStat";
 import { compactCount, lakh, pctText } from "../../components/dashboard/format";
 import type { DashboardData, DashboardFilters } from "../../components/dashboard/types";
@@ -52,6 +55,20 @@ export default function ManagementDashboardPage() {
   const [activeAgents, setActiveAgents] = useState<number | null>(null);
   const [activeCases, setActiveCases] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [branchDrawerId, setBranchDrawerId] = useState<string | null>(null);
+  const [teamDrawer, setTeamDrawer] = useState<{ id: string; name: string } | null>(null);
+  const [agentDrawer, setAgentDrawer] = useState<{ id: string; name: string } | null>(null);
+
+  // Completes the branch -> team -> agent drill-down (already built for
+  // OrgChartPage) from the Management Dashboard's own breakdown table too,
+  // reusing the same three drawers -- one drill-down pattern, multiple entry
+  // points, per the requirement.
+  const handleBreakdownRowClick = (dimension: Dimension, row: BreakdownTableRow) => {
+    if (!row.key) return;
+    if (dimension === "branch") setBranchDrawerId(row.key);
+    else if (dimension === "team") setTeamDrawer({ id: row.key, name: row.label });
+    else if (dimension === "agent") setAgentDrawer({ id: row.key, name: row.label });
+  };
 
   useEffect(() => {
     api.get("/companies").then((r) => setCompanies(r.data.companies)).catch(() => undefined);
@@ -244,15 +261,23 @@ export default function ManagementDashboardPage() {
           </Card>
 
           {/* KPI 8: Client-wise / Branch-wise performance -- reuses the existing breakdown table wholesale */}
-          <BreakdownTable filters={filters} />
+          <BreakdownTable filters={filters} onRowClick={handleBreakdownRowClick} />
 
           {/* KPI 12: Top 10 / Bottom 10 agents */}
           <Row gutter={[12, 12]}>
             <Col xs={24} lg={12}>
-              <AgentRankCard title="Top 10 Agents" rows={topAgents} />
+              <AgentRankCard
+                title="Top 10 Agents"
+                rows={topAgents}
+                onSelectAgent={(a) => setAgentDrawer({ id: a.agent_id, name: a.full_name })}
+              />
             </Col>
             <Col xs={24} lg={12}>
-              <AgentRankCard title="Bottom 10 Agents" rows={bottomAgents} />
+              <AgentRankCard
+                title="Bottom 10 Agents"
+                rows={bottomAgents}
+                onSelectAgent={(a) => setAgentDrawer({ id: a.agent_id, name: a.full_name })}
+              />
             </Col>
           </Row>
 
@@ -284,11 +309,35 @@ export default function ManagementDashboardPage() {
           </Card>
         </Space>
       )}
+
+      <BranchDetailDrawer branchId={branchDrawerId} open={branchDrawerId !== null} onClose={() => setBranchDrawerId(null)} />
+      <TeamDetailDrawer
+        teamId={teamDrawer?.id ?? null}
+        teamName={teamDrawer?.name}
+        month={filters.month}
+        open={teamDrawer !== null}
+        onClose={() => setTeamDrawer(null)}
+      />
+      <AgentDetailDrawer
+        agentId={agentDrawer?.id ?? null}
+        agentName={agentDrawer?.name}
+        month={filters.month}
+        open={agentDrawer !== null}
+        onClose={() => setAgentDrawer(null)}
+      />
     </div>
   );
 }
 
-function AgentRankCard({ title, rows }: { title: string; rows: AgentRow[] }) {
+function AgentRankCard({
+  title,
+  rows,
+  onSelectAgent,
+}: {
+  title: string;
+  rows: AgentRow[];
+  onSelectAgent: (row: AgentRow) => void;
+}) {
   const { token } = theme.useToken();
   return (
     <Card size="small" title={title}>
@@ -299,12 +348,14 @@ function AgentRankCard({ title, rows }: { title: string; rows: AgentRow[] }) {
           {rows.map((a, i) => (
             <div
               key={a.agent_id}
+              onClick={() => onSelectAgent(a)}
               style={{
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
                 padding: "6px 8px",
                 borderRadius: 6,
+                cursor: "pointer",
                 background: i % 2 === 0 ? token.colorFillTertiary : "transparent",
               }}
             >

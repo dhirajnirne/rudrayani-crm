@@ -1,21 +1,34 @@
 export type Capability =
   | "agency_admin"
   | "operations_manager"
+  | "branch_manager"
   | "team_leader"
   | "telecaller"
   | "field_agent";
+
+export type Designation =
+  | "agency_admin"
+  | "operations_manager"
+  | "branch_manager"
+  | "team_leader"
+  | "telecaller"
+  | "field_agent";
+
+export type AgentType = "telecaller" | "field_agent";
 
 export interface User {
   id: string;
   agency_id: string;
   branch_id: string | null;
-  branch_ids?: string[]; // Multi-branch for telecallers
+  branch_ids?: string[]; // Multi-branch for telecaller-type work
   team_id: string | null;
+  team_ids?: string[]; // Multi-team for telecaller-type work
   manager_id: string | null;
   full_name: string;
   phone: string;
   email: string | null;
-  designation?: "operations_manager" | "team_leader" | "telecaller" | "field_agent" | "agency_admin";
+  designation?: Designation;
+  agent_type?: AgentType | null;
   capabilities: Capability[];
 }
 
@@ -23,22 +36,32 @@ export interface Employee extends User {
   is_active: boolean;
 }
 
+export interface NodePerformance {
+  collected_amount: number;
+  target_amount: number | null;
+  achievement_pct: number | null;
+}
+
 /** A node in the org-chart tree (GET /employees/org-hierarchy). */
 export interface OrgAgent extends Employee {
   manager_name: string | null;
+  performance?: NodePerformance | null;
 }
 
 export interface OrgTeam {
   id: string;
   name: string;
   agents: OrgAgent[];
+  performance?: NodePerformance | null;
 }
 
 export interface OrgBranch {
   id: string;
   name: string;
+  branch_manager: { id: string; full_name: string | null } | null;
   teams: OrgTeam[];
   unassigned_agents: OrgAgent[];
+  performance?: NodePerformance | null;
 }
 
 export interface OrgHierarchy {
@@ -51,6 +74,8 @@ export interface Branch {
   id: string;
   name: string;
   created_at: string;
+  branch_manager_id?: string | null;
+  branch_manager_name?: string | null;
 }
 
 export interface Team {
@@ -230,6 +255,7 @@ export interface ReallocationRequest {
 export const CAPABILITY_LABELS: Record<Capability, string> = {
   agency_admin: "Agency Admin",
   operations_manager: "Operations Manager",
+  branch_manager: "Branch Manager",
   team_leader: "Team Leader",
   telecaller: "Telecaller",
   field_agent: "Field Agent",
