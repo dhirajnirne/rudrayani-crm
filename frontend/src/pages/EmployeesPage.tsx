@@ -55,6 +55,7 @@ export default function EmployeesPage() {
 
   const selectedBranch = Form.useWatch("branch_id", form);
   const selectedTeam = Form.useWatch("team_id", form);
+  const selectedDesignation = Form.useWatch("designation", form);
   const teamOptions = useMemo(
     () =>
       teams
@@ -69,9 +70,17 @@ export default function EmployeesPage() {
   // just a sane default list, not a hard server-side restriction.
   const managerOptions = useMemo(() => {
     const selfId = editing && editing !== "new" ? editing.id : undefined;
-    return employees
-      .filter((e) => e.is_active && e.id !== selfId)
+    const activeEmployees = employees.filter((e) => e.is_active && e.id !== selfId);
+
+    if (selectedDesignation === "operations_manager") {
+      return activeEmployees
+        .filter((e) => e.capabilities.includes("agency_admin"))
+        .map((e) => ({ value: e.id, label: e.full_name }));
+    }
+
+    return activeEmployees
       .filter((e) => {
+        if (e.capabilities.includes("agency_admin")) return true;
         if (!selectedBranch && !selectedTeam) return true;
         return (
           (!!selectedBranch && e.branch_id === selectedBranch) ||
@@ -79,7 +88,22 @@ export default function EmployeesPage() {
         );
       })
       .map((e) => ({ value: e.id, label: e.full_name }));
-  }, [employees, selectedBranch, selectedTeam, editing]);
+  }, [employees, selectedBranch, selectedTeam, editing, selectedDesignation]);
+
+  useEffect(() => {
+    if (selectedDesignation === "operations_manager") {
+      const selfId = editing && editing !== "new" ? editing.id : undefined;
+      const admins = employees.filter(
+        (e) => e.is_active && e.id !== selfId && e.capabilities.includes("agency_admin")
+      );
+      if (admins.length === 1) {
+        const currentManager = form.getFieldValue("manager_id");
+        if (!currentManager || !admins.find((a) => a.id === currentManager)) {
+          form.setFieldValue("manager_id", admins[0].id);
+        }
+      }
+    }
+  }, [selectedDesignation, employees, form, editing]);
 
   // No client-side filtering - all filtering now done server-side via query params
   const filteredEmployees = employees;
@@ -433,10 +457,10 @@ export default function EmployeesPage() {
             name="manager_id"
             label="Reports to"
             rules={[
-              {
-                required: form.getFieldValue("designation") && form.getFieldValue("designation") !== "agency_admin",
+              ({ getFieldValue }) => ({
+                required: getFieldValue("designation") && getFieldValue("designation") !== "agency_admin",
                 message: "Manager required for non-admin designations",
-              },
+              }),
             ]}
           >
             <Select
