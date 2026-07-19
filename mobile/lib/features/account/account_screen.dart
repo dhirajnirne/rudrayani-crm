@@ -18,8 +18,7 @@ class AccountScreen extends ConsumerWidget {
     
     final isManager = capabilities.contains('agency_admin') ||
         capabilities.contains('operations_manager') ||
-        capabilities.contains('branch_manager') ||
-        capabilities.contains('team_leader');
+        capabilities.contains('branch_manager');
     final isAdmin = capabilities.contains('agency_admin') ||
         capabilities.contains('operations_manager');
 

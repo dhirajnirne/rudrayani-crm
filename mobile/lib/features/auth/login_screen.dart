@@ -80,8 +80,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             validator: (v) {
               final value = v?.trim() ?? '';
               if (value.isEmpty) return 'Required';
-              if (!RegExp(r'^https?://').hasMatch(value))
+              if (!RegExp(r'^https?://').hasMatch(value)) {
                 return 'Must start with http:// or https://';
+              }
               return null;
             },
           ),
@@ -192,10 +193,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   border: OutlineInputBorder(),
                                 ),
                                 validator: (v) {
-                                  if (v == null || v.trim().isEmpty)
+                                  if (v == null || v.trim().isEmpty) {
                                     return 'Required';
-                                  if (!RegExp(r'^\d{10}$').hasMatch(v.trim()))
+                                  }
+                                  if (!RegExp(r'^\d{10}$').hasMatch(v.trim())) {
                                     return 'Enter a valid 10-digit number';
+                                  }
                                   return null;
                                 },
                               ),

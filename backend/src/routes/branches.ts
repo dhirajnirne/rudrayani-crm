@@ -147,10 +147,7 @@ router.get(
     const [teamsRes, agentCountRes, targetsRes, deposits, depositPayments] = await Promise.all([
       pool.query(
         `SELECT t.id, t.name, t.created_at,
-                COUNT(DISTINCT u.id) FILTER (WHERE u.is_active)::int AS member_count,
-                (SELECT tl.full_name FROM users tl
-                  WHERE tl.team_id = t.id AND tl.is_team_leader AND tl.is_active
-                  ORDER BY tl.full_name LIMIT 1) AS team_leader_name
+                COUNT(DISTINCT u.id) FILTER (WHERE u.is_active)::int AS member_count
            FROM teams t
            LEFT JOIN users u ON u.team_id = t.id
           WHERE t.branch_id = $1

@@ -15,8 +15,7 @@ String _lakh(num? v) {
   return NumberFormat.decimalPattern('en_IN').format(v);
 }
 
-/// Branch-wide "today" snapshot -- reuses /tracking/team-day exactly like
-/// the Team Leader dashboard; scopeFilter() already resolves a
+/// Branch-wide "today" snapshot -- scopeFilter() already resolves a
 /// branch_manager to their whole branch (including multi-branch telecallers
 /// assigned there via telecaller_branches), so no branch_id param is needed.
 final bmBranchDayProvider = FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
@@ -38,18 +37,30 @@ final bmTeamBreakdownProvider = FutureProvider.autoDispose<List<Map<String, dyna
   return (res.data['rows'] as List).cast<Map<String, dynamic>>();
 });
 
+/// Pending reallocation-approval requests across the branch_manager's whole
+/// branch (Phase 2: absorbed from the old team_leader-only TeamScreen -- a
+/// branch_manager now covers every team in their branch directly, so this
+/// is the one home for the workflow on mobile, reusing the exact same
+/// endpoint/decision flow web already uses unmodified).
+final pendingRequestsProvider = FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
+  final res = await ref.read(apiClientProvider).get('/reallocation-requests');
+  return (res.data['requests'] as List).cast<Map<String, dynamic>>();
+});
+
 class BranchManagerDashboardScreen extends ConsumerWidget {
   const BranchManagerDashboardScreen({super.key});
 
   void _refresh(WidgetRef ref) {
     ref.invalidate(bmBranchDayProvider);
     ref.invalidate(bmTeamBreakdownProvider);
+    ref.invalidate(pendingRequestsProvider);
   }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final branchDay = ref.watch(bmBranchDayProvider);
     final teamBreakdown = ref.watch(bmTeamBreakdownProvider);
+    final requests = ref.watch(pendingRequestsProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -70,6 +81,17 @@ class BranchManagerDashboardScreen extends ConsumerWidget {
             return ListView(
               padding: const EdgeInsets.all(AppSpacing.lg),
               children: [
+                requests.when(
+                  loading: () => const SizedBox.shrink(),
+                  error: (e, _) => InlineErrorNote(
+                    message: 'Approvals: $e',
+                    onRetry: () => ref.invalidate(pendingRequestsProvider),
+                  ),
+                  data: (reqs) => reqs.isEmpty
+                      ? const SizedBox.shrink()
+                      : _ApprovalsSection(requests: reqs, onDecided: () => _refresh(ref)),
+                ),
+
                 const DashboardSectionHeader('Attendance / GPS (Branch-wide)'),
                 _AttendanceSummary(members: members),
 
@@ -176,6 +198,142 @@ class _TeamRow extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Reallocation-approval workflow (moved here from the old team_leader-only
+/// TeamScreen -- see the file-level doc comment on pendingRequestsProvider).
+class _ApprovalsSection extends ConsumerWidget {
+  final List<Map<String, dynamic>> requests;
+  final VoidCallback onDecided;
+  const _ApprovalsSection({required this.requests, required this.onDecided});
+
+  Future<void> _decide(
+    BuildContext context,
+    WidgetRef ref,
+    Map<String, dynamic> request,
+    bool approve,
+  ) async {
+    String? newAgentId;
+    if (approve) {
+      // Pick a new agent from the branch, or return to the unallocated pool.
+      final members = ref.read(bmBranchDayProvider).valueOrNull ?? [];
+      final candidates =
+          members.where((m) => m['user_id'] != request['requested_by_id']).toList();
+      final choice = await showModalBottomSheet<String>(
+        context: context,
+        builder: (ctx) => SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(12),
+                child: Text('Assign to…',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              ),
+              // Anti-misclick: every tappable sheet row ≥56px tall.
+              ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: AppDimens.listRow),
+                child: ListTile(
+                  leading: const Icon(Icons.inbox),
+                  title: const Text('Return to unallocated pool'),
+                  onTap: () => Navigator.pop(ctx, ''),
+                ),
+              ),
+              for (final m in candidates)
+                ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: AppDimens.listRow),
+                  child: ListTile(
+                    leading: const Icon(Icons.person),
+                    title: Text(m['full_name'] as String),
+                    onTap: () => Navigator.pop(ctx, m['user_id'] as String),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      );
+      if (choice == null) return; // cancelled
+      newAgentId = choice.isEmpty ? null : choice;
+    }
+
+    try {
+      await ref.read(apiClientProvider).post(
+        '/reallocation-requests/${request['id']}/decide',
+        data: {
+          'approve': approve,
+          'new_agent_id': ?newAgentId,
+        },
+      );
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(approve ? 'Request approved' : 'Request rejected'),
+          backgroundColor: approve ? AppColors.success : AppColors.textSecondary,
+        ));
+      }
+      onDecided();
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Failed: $e'), backgroundColor: AppColors.error));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Reallocation Approvals (${requests.length})',
+            style: const TextStyle(
+                fontWeight: FontWeight.bold, fontSize: 14, color: AppColors.primary)),
+        const SizedBox(height: 8),
+        for (final r in requests)
+          Card(
+            margin: const EdgeInsets.only(bottom: 8),
+            color: AppColors.warningContainer,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('${r['customer_name']} · ${r['loan_number']}',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  Text('Requested by ${r['requested_by_name']}',
+                      style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                  const SizedBox(height: 4),
+                  Text('"${r['reason']}"', style: const TextStyle(fontSize: 13)),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () => _decide(context, ref, r, true),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.primary,
+                            foregroundColor: AppColors.onPrimary,
+                          ),
+                          child: const Text('Approve'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => _decide(context, ref, r, false),
+                          style: OutlinedButton.styleFrom(foregroundColor: AppColors.error),
+                          child: const Text('Reject'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

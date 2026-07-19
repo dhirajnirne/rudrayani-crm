@@ -58,12 +58,14 @@ class RemindersController {
   }) async {
     final clientKey = OfflineQueueNotifier.newClientKey();
     final api = ref.read(apiClientProvider);
-    final payload = {
-      if (customerId != null) 'customer_id': customerId,
+    final payload = <String, dynamic>{
       'remind_at': remindAt.toUtc().toIso8601String(),
       if (note != null && note.isNotEmpty) 'note': note,
       'client_key': clientKey,
     };
+    if (customerId != null) {
+      payload['customer_id'] = customerId;
+    }
 
     try {
       final res = await api.post<Map<String, dynamic>>(

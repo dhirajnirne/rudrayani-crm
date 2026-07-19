@@ -5,19 +5,20 @@ import { pool } from "../src/config/db";
 import { hashPassword } from "../src/services/auth-service";
 
 /**
- * Day Plan (Group C): per-agent "what's due today" summary for admin/ops/TL
- * — attendance, due PTPs, due reminders, activity so far. Same visibility
- * scope as /tracking (tracking.view): agency-wide for admin/ops, own team
- * for a TL, forbidden for agents.
+ * Day Plan (Group C): per-agent "what's due today" summary for
+ * admin/ops/branch_manager — attendance, due PTPs, due reminders, activity
+ * so far. Same visibility scope as /tracking (tracking.view): agency-wide
+ * for admin/ops, own whole branch for a branch_manager (every team in it,
+ * no team_leader intermediary since Phase 2), forbidden for agents.
  */
 const app = createApp();
 
 const PASSWORD = "Secret@123";
 const PHONES = {
   admin: "7900000080",
-  tl: "7900000081",
-  agentA: "7900000082", // in TL's team
-  agentB: "7900000083", // other team
+  bm: "7900000081",
+  agentA: "7900000082", // in branch manager's branch, team A
+  agentB: "7900000083", // in branch manager's branch, team B -- same branch, so also visible now
   agentC: "7900000084", // plain agent, no tracking.view
 };
 
@@ -72,7 +73,16 @@ beforeAll(async () => {
     userIds[key] = rows[0].id;
   };
   await mk("admin", "is_agency_admin", null);
-  await mk("tl", "is_team_leader", teamAId);
+  const bm = await pool.query(
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, designation)
+     VALUES ($1, 'DP bm', $2, $3, 'branch_manager') RETURNING id`,
+    [agencyId, PHONES.bm, hash],
+  );
+  userIds.bm = bm.rows[0].id;
+  await pool.query("UPDATE branches SET branch_manager_id = $1 WHERE id = $2", [
+    userIds.bm,
+    branch.rows[0].id,
+  ]);
   await mk("agentA", "is_telecaller", teamAId);
   await mk("agentB", "is_telecaller", teamBId);
   await mk("agentC", "is_telecaller", teamAId);
@@ -162,14 +172,17 @@ describe("GET /api/day-plan", () => {
     expect(agentB.ptps_due.count).toBe(0);
   });
 
-  it("a TL sees only their own team", async () => {
+  it("a branch_manager sees every team in their branch", async () => {
     const res = await request(app)
       .get(`/api/day-plan?date=${today}`)
-      .set("Authorization", `Bearer ${tokens.tl}`);
+      .set("Authorization", `Bearer ${tokens.bm}`);
     expect(res.status).toBe(200);
     const ids = res.body.agents.map((a: { user_id: string }) => a.user_id);
+    // Both agentA (team A) and agentB (team B) are in the branch_manager's
+    // branch -- no team_leader intermediary since Phase 2, so both are
+    // visible even though they're on different teams.
     expect(ids).toContain(userIds.agentA);
-    expect(ids).not.toContain(userIds.agentB);
+    expect(ids).toContain(userIds.agentB);
   });
 
   // Phase 12: telecaller/field_agent now hold tracking.view too (their mobile
@@ -207,10 +220,10 @@ describe("GET /api/day-plan/agent/:id", () => {
     expect(res.body.reminders[0].note).toBe("Follow up");
   });
 
-  it("a TL cannot expand an agent outside their team", async () => {
+  it("a branch_manager can expand an agent on a different team in their own branch", async () => {
     const res = await request(app)
       .get(`/api/day-plan/agent/${userIds.agentB}?date=${today}`)
-      .set("Authorization", `Bearer ${tokens.tl}`);
-    expect(res.status).toBe(404);
+      .set("Authorization", `Bearer ${tokens.bm}`);
+    expect(res.status).toBe(200);
   });
 });

@@ -192,7 +192,7 @@ export default function ReallocationRequestsPage() {
       >
         <Typography.Paragraph type="secondary">
           Choose a new agent to reassign this customer, or leave blank to return it to the unallocated
-          pool for a Team Leader to pick up later.
+          pool for a manager to pick up later.
         </Typography.Paragraph>
         <Select
           style={{ width: "100%" }}

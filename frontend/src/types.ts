@@ -2,7 +2,6 @@ export type Capability =
   | "agency_admin"
   | "operations_manager"
   | "branch_manager"
-  | "team_leader"
   | "telecaller"
   | "field_agent";
 
@@ -10,7 +9,6 @@ export type Designation =
   | "agency_admin"
   | "operations_manager"
   | "branch_manager"
-  | "team_leader"
   | "telecaller"
   | "field_agent";
 
@@ -84,7 +82,6 @@ export interface Team {
   branch_id: string;
   branch_name?: string;
   created_at: string;
-  leaders?: Array<{ id: string; full_name: string }>;
 }
 
 export interface Company {
@@ -256,7 +253,6 @@ export const CAPABILITY_LABELS: Record<Capability, string> = {
   agency_admin: "Agency Admin",
   operations_manager: "Operations Manager",
   branch_manager: "Branch Manager",
-  team_leader: "Team Leader",
   telecaller: "Telecaller",
   field_agent: "Field Agent",
 };

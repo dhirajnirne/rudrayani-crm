@@ -66,19 +66,21 @@ export default function DashboardPage() {
   const [myBranchId, setMyBranchId] = useState<string | null>(null);
   const [myAgentDrawer, setMyAgentDrawer] = useState(false);
 
-  // A branch_manager/team_leader may ALSO carry collections work (agent_type
-  // set) -- "additional responsibilities, the core work remains the same."
-  // The toggle lets them flip between their management view (team/branch
-  // aggregate) and their own personal worklist numbers, mirroring the
-  // original brief's "My Team" vs "My Work" ask.
+  // A branch_manager may ALSO carry collections work (agent_type set) --
+  // "additional responsibilities, the core work remains the same." The
+  // toggle lets them flip between their management view (branch aggregate)
+  // and their own personal worklist numbers, mirroring the original
+  // brief's "My Team" vs "My Work" ask.
   const hasAgentWork = !!user?.agent_type;
-  const isTeamLeader = !!user?.capabilities.includes("team_leader");
   const isBranchManager = !!user?.capabilities.includes("branch_manager");
-  const myLedTeams = useMemo(
-    () => teams.filter((t) => t.leaders?.some((l) => l.id === user?.id)),
-    [teams, user],
-  );
   const myBranch = useMemo(() => branches.find((b) => b.branch_manager_id === user?.id), [branches, user]);
+  // Every team in the branch_manager's own branch, for the team drill-down
+  // below -- no team_leader intermediary since Phase 2, branch_manager owns
+  // every team in their branch directly.
+  const myBranchTeams = useMemo(
+    () => (myBranch ? teams.filter((t) => t.branch_id === myBranch.id) : []),
+    [teams, myBranch],
+  );
 
   const prefs = useDashboardPreferences();
 
@@ -91,8 +93,8 @@ export default function DashboardPage() {
       api.get("/employees").then((r) =>
         setAgents(
           // Anyone whose capabilities include telecaller/field_agent -- this
-          // already covers plain agents AND branch_manager/team_leader rows
-          // with agent_type set, since capabilitiesOf() derives both from
+          // already covers plain agents AND branch_manager rows with
+          // agent_type set, since capabilitiesOf() derives both from
           // the same booleans (see backend/src/types/user.ts).
           r.data.employees.filter(
             (e: { is_active: boolean; capabilities: string[] }) =>
@@ -205,25 +207,25 @@ export default function DashboardPage() {
               <Typography.Text type="secondary">My Work</Typography.Text>
             </Space>
           )}
-          {isTeamLeader && myLedTeams.length === 1 && (
-            <Button onClick={() => setMyTeamDrawer({ id: myLedTeams[0].id, name: myLedTeams[0].name })}>
+          {isBranchManager && myBranch && (
+            <Button onClick={() => setMyBranchId(myBranch.id)}>My Branch</Button>
+          )}
+          {isBranchManager && myBranchTeams.length === 1 && (
+            <Button onClick={() => setMyTeamDrawer({ id: myBranchTeams[0].id, name: myBranchTeams[0].name })}>
               My Team
             </Button>
           )}
-          {isTeamLeader && myLedTeams.length > 1 && (
+          {isBranchManager && myBranchTeams.length > 1 && (
             <Select
               style={{ width: 160 }}
-              title="My Team" placeholder="My Team"
+              title="My Teams" placeholder="My Teams"
               value={undefined}
               onChange={(id) => {
-                const t = myLedTeams.find((mt) => mt.id === id);
+                const t = myBranchTeams.find((mt) => mt.id === id);
                 if (t) setMyTeamDrawer({ id: t.id, name: t.name });
               }}
-              options={myLedTeams.map((t) => ({ value: t.id, label: t.name }))}
+              options={myBranchTeams.map((t) => ({ value: t.id, label: t.name }))}
             />
-          )}
-          {isBranchManager && myBranch && (
-            <Button onClick={() => setMyBranchId(myBranch.id)}>My Branch</Button>
           )}
           {!isManager && (
             <Button onClick={() => setMyAgentDrawer(true)}>My Recent Activity</Button>

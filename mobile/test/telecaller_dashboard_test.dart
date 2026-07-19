@@ -3,10 +3,10 @@
 // numbers, plus collection today/MTD and the target-vs-achievement card.
 // Every network-backed provider is overridden with fixed fake data.
 //
-// Assertions target DashboardStatCard by its `label` (see
-// team_leader_dashboard_test.dart for why: several cards can legitimately
-// show the same literal number). The test viewport is enlarged so every
-// section is mounted without needing to simulate scrolling.
+// Assertions target DashboardStatCard by its `label` rather than by value
+// alone, since several cards can legitimately show the same literal number.
+// The test viewport is enlarged so every section is mounted without needing
+// to simulate scrolling.
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';

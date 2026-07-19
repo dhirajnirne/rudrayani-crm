@@ -15,7 +15,7 @@ const app = createApp();
 
 const PASSWORD = "Secret@123";
 const ADMIN_PHONE = "7950000020";
-const TL_PHONE = "7950000021";
+const BM_PHONE = "7950000021";
 const AGENT_PHONE = "7950000022";
 const AGENT2_PHONE = "7950000023";
 
@@ -24,10 +24,11 @@ let companyId: string;
 let branchId: string;
 let teamId: string;
 let team2Id: string;
+let otherBranchId: string;
 let agentId: string;
 let agent2Id: string;
 let adminToken: string;
-let tlToken: string;
+let bmToken: string;
 let agentToken: string;
 const customerIds: Record<string, string> = {};
 
@@ -108,11 +109,20 @@ beforeAll(async () => {
      VALUES ($1, 'Reports Admin', $2, $3, true)`,
     [agencyId, ADMIN_PHONE, hash],
   );
-  await pool.query(
-    `INSERT INTO users (agency_id, branch_id, team_id, full_name, phone, password_hash, is_team_leader)
-     VALUES ($1, $2, $3, 'Reports TL', $4, $5, true)`,
-    [agencyId, branchId, teamId, TL_PHONE, hash],
+  const bm = await pool.query(
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, designation)
+     VALUES ($1, 'Reports BM', $2, $3, 'branch_manager') RETURNING id`,
+    [agencyId, BM_PHONE, hash],
   );
+  await pool.query("UPDATE branches SET branch_manager_id = $1 WHERE id = $2", [
+    bm.rows[0].id,
+    branchId,
+  ]);
+  const otherBranch = await pool.query(
+    "INSERT INTO branches (agency_id, name) VALUES ($1, 'Reports Other Branch') RETURNING id",
+    [agencyId],
+  );
+  otherBranchId = otherBranch.rows[0].id;
   const agent = await pool.query(
     `INSERT INTO users (agency_id, branch_id, team_id, full_name, phone, password_hash, is_field_agent)
      VALUES ($1, $2, $3, 'Reports Agent One', $4, $5, true) RETURNING id`,
@@ -220,7 +230,7 @@ beforeAll(async () => {
   );
 
   adminToken = await login(ADMIN_PHONE);
-  tlToken = await login(TL_PHONE);
+  bmToken = await login(BM_PHONE);
   agentToken = await login(AGENT_PHONE);
 });
 
@@ -241,7 +251,7 @@ afterAll(async () => {
   await pool.query("DELETE FROM companies WHERE id = $1", [companyId]);
   await pool.query("DELETE FROM users WHERE agency_id = $1", [agencyId]);
   await pool.query("DELETE FROM teams WHERE id IN ($1, $2)", [teamId, team2Id]);
-  await pool.query("DELETE FROM branches WHERE id = $1", [branchId]);
+  await pool.query("DELETE FROM branches WHERE id IN ($1, $2)", [branchId, otherBranchId]);
   await pool.query("DELETE FROM agencies WHERE id = $1", [agencyId]);
   await pool.end();
 });
@@ -351,18 +361,19 @@ describe("report engine", () => {
     expect(res.body.collection.target_amount).toBe(150000);
   });
 
-  it("TL is clamped to their team", async () => {
+  it("branch_manager is clamped to their branch, across every team in it", async () => {
     const res = await request(app)
       .get("/api/reports/dashboard?month=2026-05")
-      .set("Authorization", `Bearer ${tlToken}`);
+      .set("Authorization", `Bearer ${bmToken}`);
     expect(res.status).toBe(200);
-    expect(res.body.scope.clamped_to).toBe("team");
-    // Team A snapshots: RPT-01, RPT-02, RPT-05, RPT-06
-    expect(res.body.allocated.count).toBe(4);
+    expect(res.body.scope.clamped_to).toBe("branch");
+    // Both teams in the branch: RPT-01, RPT-02, RPT-05, RPT-06 (team A) +
+    // RPT-03, RPT-04 (team B) -- no team_leader intermediary since Phase 2.
+    expect(res.body.allocated.count).toBe(6);
 
     const foreign = await request(app)
-      .get(`/api/reports/dashboard?month=2026-05&team_id=${team2Id}`)
-      .set("Authorization", `Bearer ${tlToken}`);
+      .get(`/api/reports/dashboard?month=2026-05&branch_id=${otherBranchId}`)
+      .set("Authorization", `Bearer ${bmToken}`);
     expect(foreign.status).toBe(403);
   });
 
@@ -471,13 +482,15 @@ describe("report engine", () => {
     expect(teamB.allocated_count).toBe(2);
   });
 
-  it("a team leader's breakdown by agent is clamped to their own team", async () => {
+  it("a branch manager's breakdown by agent covers every team in their branch", async () => {
     const res = await request(app)
       .get("/api/reports/breakdown?month=2026-05&dimension=agent")
-      .set("Authorization", `Bearer ${tlToken}`);
+      .set("Authorization", `Bearer ${bmToken}`);
     expect(res.status).toBe(200);
-    const agentIds = res.body.rows.map((r: { key: string }) => r.key);
-    expect(agentIds).toEqual([agentId]); // agent2Id (team B) never appears
+    const agentIds = res.body.rows.map((r: { key: string }) => r.key).sort();
+    // Both team A's agentId and team B's agent2Id -- no team_leader
+    // intermediary since Phase 2, branch_manager sees the whole branch.
+    expect(agentIds).toEqual([agentId, agent2Id].sort());
   });
 
   it("monthDays handles past, current and future months in IST", () => {

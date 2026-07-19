@@ -21,7 +21,7 @@ import {
 const router = Router();
 router.use(authenticate);
 
-const designationSchema = z.enum(["operations_manager", "branch_manager", "team_leader", "telecaller", "field_agent"]);
+const designationSchema = z.enum(["operations_manager", "branch_manager", "telecaller", "field_agent"]);
 
 const agentTypeSchema = z.enum(["telecaller", "field_agent"]);
 
@@ -53,7 +53,6 @@ const DESIGNATION_LABELS: Record<Capability, string> = {
   agency_admin: "Agency Admin",
   operations_manager: "Operations Manager",
   branch_manager: "Branch Manager",
-  team_leader: "Team Leader",
   telecaller: "Telecaller",
   field_agent: "Field Agent",
 };
@@ -96,6 +95,29 @@ async function notifyCredentials(phone: string, password: string, isReset: boole
   }
 }
 
+/**
+ * Phase 2: a branch must have a branch_manager before it can carry
+ * telecaller/field_agent staff -- there's no team_leader anymore to
+ * independently supervise an unmanaged branch, so an agent placed there
+ * would end up with no valid manager at all per EXPECTED_MANAGER_DESIGNATION.
+ * Takes a list since telecaller-type work can span multiple branches (the
+ * multi-branch picker) -- every one of them must be managed, not just one.
+ */
+async function assertBranchesHaveManager(agencyId: string, branchIds: string[]): Promise<void> {
+  if (branchIds.length === 0) return;
+  const { rows } = await pool.query<{ name: string }>(
+    "SELECT name FROM branches WHERE agency_id = $1 AND id = ANY($2) AND branch_manager_id IS NULL",
+    [agencyId, branchIds],
+  );
+  if (rows.length > 0) {
+    const names = rows.map((r) => r.name).join(", ");
+    throw new HttpError(
+      400,
+      `"${names}" doesn't have a Branch Manager yet. Assign a Branch Manager to this branch before adding agents to it.`,
+    );
+  }
+}
+
 async function assertBranchAndTeam(
   agencyId: string,
   branchId: string | null | undefined,
@@ -132,23 +154,20 @@ async function assertBranchAndTeam(
  * Hard hierarchy enforcement: non-admin designations MUST have a manager
  * whose designation is exactly the next rank up in the fixed chain:
  * - operations_manager → manager is agency_admin (via assertCanEditOpsManager)
- * - team_leader → manager is operations_manager
- * - telecaller / field_agent → manager is team_leader
+ * - telecaller / field_agent → manager is branch_manager
  * - agency_admin → no manager allowed
  *
  * Forward-only enforcement: only validates when designation or manager_id
  * is part of the write payload, not on every unrelated edit.
  */
-// branch_manager is a sibling of team_leader in this chain (both report to
-// operations_manager) -- its authority over a branch's teams comes from a
-// wider scope (see scope.ts/report-service.ts), not from being anyone's
-// formal manager.
+// Phase 2: team_leader is gone -- every team in a branch reports directly
+// to that branch's branch_manager now, no intermediary rank. branch_manager
+// itself still reports to operations_manager (unchanged since Phase 1).
 const EXPECTED_MANAGER_DESIGNATION: Record<Capability, Capability> = {
   operations_manager: "agency_admin",
   branch_manager: "operations_manager",
-  team_leader: "operations_manager",
-  telecaller: "team_leader",
-  field_agent: "team_leader",
+  telecaller: "branch_manager",
+  field_agent: "branch_manager",
   agency_admin: "agency_admin", // unreachable but needed for type completeness
 };
 
@@ -209,15 +228,15 @@ async function assertManager(
 }
 
 /**
- * agent_type lets a branch_manager/team_leader ALSO carry collections work
- * (telecaller-type or field-agent-type) alongside their management rank --
- * "additional responsibilities, the core work remains the same." Returns the
- * value that should actually be written.
+ * agent_type lets a branch_manager ALSO carry collections work (telecaller-
+ * type or field-agent-type) alongside their management rank -- "additional
+ * responsibilities, the core work remains the same." Returns the value that
+ * should actually be written.
  *  - telecaller/field_agent designations: agent_type must mirror designation
  *    if provided; the server always writes the mirrored value regardless
  *    (never trusts a client-supplied mismatch).
- *  - branch_manager/team_leader: agent_type may be null, "telecaller", or
- *    "field_agent", freely client-settable.
+ *  - branch_manager: agent_type may be null, "telecaller", or "field_agent",
+ *    freely client-settable.
  *  - agency_admin/operations_manager: agent_type must be null/omitted.
  */
 function assertAgentType(
@@ -233,7 +252,7 @@ function assertAgentType(
     }
     return designation;
   }
-  if (designation === "branch_manager" || designation === "team_leader") {
+  if (designation === "branch_manager") {
     return agentType ?? null;
   }
   // agency_admin / operations_manager
@@ -354,6 +373,9 @@ router.post(
     await assertCanEditOpsManager(req.user!, body.designation);
     const agentType = assertAgentType(body.designation as Capability, body.agent_type);
     await assertBranchAndTeam(req.user!.agency_id, body.branch_id, body.team_id);
+    if (body.branch_id && (body.designation === "telecaller" || body.designation === "field_agent")) {
+      await assertBranchesHaveManager(req.user!.agency_id, [body.branch_id]);
+    }
     await assertManager(req.user!.agency_id, body.designation as Capability, body.manager_id);
 
     const passwordHash = await hashPassword(body.password);
@@ -361,8 +383,8 @@ router.post(
     const { rows } = await pool.query<UserRow>(
       `INSERT INTO users
          (agency_id, full_name, phone, email, password_hash, branch_id, team_id, manager_id, designation, agent_type,
-          is_operations_manager, is_team_leader, is_telecaller, is_field_agent)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+          is_operations_manager, is_telecaller, is_field_agent)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
        RETURNING *`,
       [
         req.user!.agency_id,
@@ -376,7 +398,6 @@ router.post(
         body.designation,
         agentType,
         booleans.is_operations_manager,
-        booleans.is_team_leader,
         booleans.is_telecaller,
         booleans.is_field_agent,
       ],
@@ -429,21 +450,7 @@ router.get(
       [agencyId],
     );
 
-    // Fetch team_leaders for multi-team TL support
-    const { rows: teamLeaders } = await pool.query<{ user_id: string; team_id: string }>(
-      `SELECT tl.user_id, tl.team_id FROM team_leaders tl
-         JOIN users u ON u.id = tl.user_id
-        WHERE u.agency_id = $1`,
-      [agencyId],
-    );
-    const leadersByTeam = new Map<string, string[]>();
-    for (const tl of teamLeaders) {
-      if (!leadersByTeam.has(tl.team_id)) leadersByTeam.set(tl.team_id, []);
-      leadersByTeam.get(tl.team_id)!.push(tl.user_id);
-    }
-
     const nameById = new Map(users.map((u) => [u.id, u.full_name]));
-    const userById = new Map(users.map((u) => [u.id, u]));
     const toAgent = (u: UserRow) => ({
       ...publicUser(u),
       is_active: u.is_active,
@@ -479,10 +486,9 @@ router.get(
       };
     };
 
-    // branch_manager (like team_leader) is a management rank, not a plain
-    // team member -- exclude from team/branch agent lists the same way
-    // team_leader already is.
-    const isPlainAgent = (u: UserRow) => u.designation !== "team_leader" && u.designation !== "branch_manager";
+    // branch_manager is a management rank, not a plain team member --
+    // exclude from team/branch agent lists.
+    const isPlainAgent = (u: UserRow) => u.designation !== "branch_manager";
 
     const branchTree = branches.map((b) => ({
       id: b.id,
@@ -495,14 +501,11 @@ router.get(
         .filter((t) => t.branch_id === b.id)
         .map((t) => {
           const agentsInTeam = users.filter((u) => u.team_id === t.id);
-          const leadersInTeam = (leadersByTeam.get(t.id) ?? [])
-            .map((lid) => userById.get(lid))
-            .filter((u): u is UserRow => u !== undefined);
           return {
             id: t.id,
             name: t.name,
             ...(query.with_performance ? { performance: perfFor(perfByTeam, t.id) ?? null } : {}),
-            agents: [...agentsInTeam, ...leadersInTeam].map((u) => ({
+            agents: agentsInTeam.map((u) => ({
               ...toAgent(u),
               ...(query.with_performance ? { performance: perfFor(perfByAgent, u.id) ?? null } : {}),
             })),
@@ -575,9 +578,8 @@ router.patch(
       // (and possibly conflicting) request here -- e.g. changing a telecaller
       // to a field_agent without resending agent_type would otherwise compare
       // the new "field_agent" designation against the old "telecaller" value
-      // and wrongly reject the edit. branch_manager/team_leader still carry
-      // the existing value over unless the client overrides it, preserving
-      // dual-capability across a promotion between the two management ranks.
+      // and wrongly reject the edit. branch_manager still carries the
+      // existing value over unless the client overrides it.
       const requestedAgentType =
         body.agent_type !== undefined ? body.agent_type : isAgentDesignation ? undefined : existing.agent_type;
       newAgentType = assertAgentType(effectiveDesignation, requestedAgentType);
@@ -596,6 +598,13 @@ router.patch(
       body.branch_id ?? existing.branch_id,
       body.team_id ?? existing.team_id,
     );
+    {
+      const effectiveDesignation = (body.designation ?? existing.designation) as Capability;
+      const effectiveBranchId = body.branch_id ?? existing.branch_id;
+      if (effectiveBranchId && (effectiveDesignation === "telecaller" || effectiveDesignation === "field_agent")) {
+        await assertBranchesHaveManager(req.user!.agency_id, [effectiveBranchId]);
+      }
+    }
     // Validate hierarchy only if designation or manager_id is being changed
     if (body.manager_id !== undefined || body.designation) {
       const designation = (body.designation ?? existing.designation) as Capability;
@@ -614,12 +623,11 @@ router.patch(
           team_id = CASE WHEN $7::boolean THEN $8::uuid ELSE team_id END,
           manager_id = CASE WHEN $10::boolean THEN $11::uuid ELSE manager_id END,
           designation = COALESCE($12, designation),
-          agent_type = CASE WHEN $17::boolean THEN $18::text ELSE agent_type END,
+          agent_type = CASE WHEN $16::boolean THEN $17::text ELSE agent_type END,
           is_active = COALESCE($9, is_active),
           is_operations_manager = CASE WHEN $12::text IS NOT NULL THEN $13::boolean ELSE is_operations_manager END,
-          is_team_leader = CASE WHEN $12::text IS NOT NULL THEN $14::boolean ELSE is_team_leader END,
-          is_telecaller = CASE WHEN $17::boolean THEN $15::boolean ELSE is_telecaller END,
-          is_field_agent = CASE WHEN $17::boolean THEN $16::boolean ELSE is_field_agent END
+          is_telecaller = CASE WHEN $16::boolean THEN $14::boolean ELSE is_telecaller END,
+          is_field_agent = CASE WHEN $16::boolean THEN $15::boolean ELSE is_field_agent END
         WHERE id = $1 AND agency_id = $2
         RETURNING *`,
       [
@@ -636,7 +644,6 @@ router.patch(
         body.manager_id ?? null,
         body.designation ?? null,
         booleans?.is_operations_manager ?? null,
-        booleans?.is_team_leader ?? null,
         booleans?.is_telecaller ?? null,
         booleans?.is_field_agent ?? null,
         agentTypeChanging,
@@ -703,7 +710,7 @@ router.put(
     if (!isTelecallerType) {
       throw new HttpError(
         400,
-        "Only telecallers (or branch managers/team leaders with telecaller-type work) can have multiple branches assigned",
+        "Only telecallers (or branch managers with telecaller-type work) can have multiple branches assigned",
       );
     }
 
@@ -715,6 +722,13 @@ router.put(
       );
       if (branches.length !== body.branch_ids.length) {
         throw new HttpError(400, "One or more branches not found in this agency");
+      }
+      // Plain telecallers need a branch_manager in every branch they cover
+      // (same precondition as a single-branch field_agent); a branch_manager
+      // doing telecaller-type work themselves is exempt -- they don't need
+      // to be managed by another branch_manager to cover extra branches.
+      if (userRows[0].designation === "telecaller") {
+        await assertBranchesHaveManager(req.user!.agency_id, body.branch_ids);
       }
     }
 
@@ -732,7 +746,7 @@ router.put(
 );
 
 // Assign teams to telecaller-type work (replace-set, mirrors PUT /:id/branches
-// above). Covers plain telecallers and branch_manager/team_leader rows with
+// above). Covers plain telecallers and branch_manager rows with
 // agent_type = 'telecaller' -- their work is remote calling, not tied to one
 // team, same reasoning as multi-branch.
 router.put(

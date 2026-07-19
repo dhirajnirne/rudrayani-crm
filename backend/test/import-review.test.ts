@@ -17,7 +17,7 @@ const PASSWORD = "Secret@123";
 const ADMIN_PHONE = "7930000090";
 const OPS_PHONE = "7930000091";
 const TELECALLER_PHONE = "7930000092";
-const TL_PHONE = "7930000093";
+const BM_PHONE = "7930000093";
 
 let agencyId: string;
 let companyId: string;
@@ -26,7 +26,7 @@ let teamId: string;
 let adminToken: string;
 let opsToken: string;
 let telecallerToken: string;
-let tlToken: string;
+let bmToken: string;
 
 // Owner feedback round, Phase 2: mobile_number/product/pos/emi_due_date are
 // now required-to-map too -- buildSheet() appends synthetic values for these
@@ -121,21 +121,21 @@ beforeAll(async () => {
     [agencyId, TELECALLER_PHONE, hash, teamId],
   );
   await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_team_leader, team_id)
-     VALUES ($1, 'Review TL', $2, $3, true, $4)`,
-    [agencyId, TL_PHONE, hash, teamId],
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, designation)
+     VALUES ($1, 'Review BM', $2, $3, 'branch_manager')`,
+    [agencyId, BM_PHONE, hash],
   );
 
-  const [adminLogin, opsLogin, telecallerLogin, tlLogin] = await Promise.all([
+  const [adminLogin, opsLogin, telecallerLogin, bmLogin] = await Promise.all([
     request(app).post("/api/auth/login").send({ phone: ADMIN_PHONE, password: PASSWORD }),
     request(app).post("/api/auth/login").send({ phone: OPS_PHONE, password: PASSWORD }),
     request(app).post("/api/auth/login").send({ phone: TELECALLER_PHONE, password: PASSWORD }),
-    request(app).post("/api/auth/login").send({ phone: TL_PHONE, password: PASSWORD }),
+    request(app).post("/api/auth/login").send({ phone: BM_PHONE, password: PASSWORD }),
   ]);
   adminToken = adminLogin.body.access_token;
   opsToken = opsLogin.body.access_token;
   telecallerToken = telecallerLogin.body.access_token;
-  tlToken = tlLogin.body.access_token;
+  bmToken = bmLogin.body.access_token;
 });
 
 afterAll(async () => {
@@ -174,7 +174,7 @@ describe("import review queue: permission gate", () => {
   it("a team leader cannot list or decide either (only agency_admin/operations_manager)", async () => {
     const list = await request(app)
       .get(`/api/import-reviews?company_id=${companyId}`)
-      .set("Authorization", `Bearer ${tlToken}`);
+      .set("Authorization", `Bearer ${bmToken}`);
     expect(list.status).toBe(403);
   });
 });

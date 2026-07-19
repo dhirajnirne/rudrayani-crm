@@ -11,7 +11,7 @@ import { hashPassword } from "../src/services/auth-service";
 const app = createApp();
 
 const PASSWORD = "Secret@123";
-const TL_PHONE = "7900000060";
+const BM_PHONE = "7900000060";
 const AGENT_PHONE = "7900000061";
 const AGENT2_PHONE = "7900000062";
 
@@ -24,7 +24,7 @@ let agencyId: string;
 let companyId: string;
 let branchId: string;
 let teamId: string;
-let tlToken: string;
+let bmToken: string;
 let agentToken: string;
 let agent2Token: string;
 let agentId: string;
@@ -59,12 +59,12 @@ beforeAll(async () => {
   teamId = team.rows[0].id;
 
   const hash = await hashPassword(PASSWORD);
-  const tl = await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_team_leader, team_id)
-     VALUES ($1, 'Field TL', $2, $3, true, $4) RETURNING id`,
-    [agencyId, TL_PHONE, hash, teamId],
+  const bm = await pool.query(
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, designation)
+     VALUES ($1, 'Field BM', $2, $3, 'branch_manager') RETURNING id`,
+    [agencyId, BM_PHONE, hash],
   );
-  void tl;
+  void bm;
   const agent = await pool.query(
     `INSERT INTO users (agency_id, full_name, phone, password_hash, is_field_agent, team_id)
      VALUES ($1, 'Field Agent One', $2, $3, true, $4) RETURNING id`,
@@ -88,7 +88,7 @@ beforeAll(async () => {
   customerId = customers.rows[0].id;
   customer2Id = customers.rows[1].id;
 
-  tlToken = await login(TL_PHONE);
+  bmToken = await login(BM_PHONE);
   agentToken = await login(AGENT_PHONE);
   agent2Token = await login(AGENT2_PHONE);
 });
@@ -146,14 +146,14 @@ describe("field visits", () => {
   it("lists visits and streams the signature", async () => {
     const list = await request(app)
       .get(`/api/field-visits?customer_id=${customerId}`)
-      .set("Authorization", `Bearer ${tlToken}`);
+      .set("Authorization", `Bearer ${bmToken}`);
     expect(list.status).toBe(200);
     expect(list.body.field_visits.length).toBe(1);
     expect(list.body.field_visits[0].agent_name).toBe("Field Agent One");
 
     const sig = await request(app)
       .get(`/api/field-visits/${list.body.field_visits[0].id}/signature`)
-      .set("Authorization", `Bearer ${tlToken}`);
+      .set("Authorization", `Bearer ${bmToken}`);
     expect(sig.status).toBe(200);
     expect(sig.headers["content-type"]).toBe("image/png");
   });
@@ -205,7 +205,7 @@ describe("reallocation requests", () => {
   it("the TL sees the pending request", async () => {
     const res = await request(app)
       .get("/api/reallocation-requests")
-      .set("Authorization", `Bearer ${tlToken}`);
+      .set("Authorization", `Bearer ${bmToken}`);
     expect(res.status).toBe(200);
     expect(res.body.requests.length).toBe(1);
     expect(res.body.requests[0].requested_by_name).toBe("Field Agent One");
@@ -214,7 +214,7 @@ describe("reallocation requests", () => {
   it("approval reassigns the customer and writes an allocation log", async () => {
     const res = await request(app)
       .post(`/api/reallocation-requests/${requestId}/decide`)
-      .set("Authorization", `Bearer ${tlToken}`)
+      .set("Authorization", `Bearer ${bmToken}`)
       .send({ approve: true, new_agent_id: agent2Id });
     expect(res.status).toBe(200);
     expect(res.body.request.status).toBe("approved");
@@ -235,7 +235,7 @@ describe("reallocation requests", () => {
   it("deciding twice is a 409", async () => {
     const res = await request(app)
       .post(`/api/reallocation-requests/${requestId}/decide`)
-      .set("Authorization", `Bearer ${tlToken}`)
+      .set("Authorization", `Bearer ${bmToken}`)
       .send({ approve: false });
     expect(res.status).toBe(409);
   });
@@ -249,7 +249,7 @@ describe("reallocation requests", () => {
 
     const decide = await request(app)
       .post(`/api/reallocation-requests/${raise.body.request.id}/decide`)
-      .set("Authorization", `Bearer ${tlToken}`)
+      .set("Authorization", `Bearer ${bmToken}`)
       .send({ approve: true });
     expect(decide.status).toBe(200);
 
@@ -270,7 +270,7 @@ describe("team day summary", () => {
 
     const res = await request(app)
       .get("/api/tracking/team-day")
-      .set("Authorization", `Bearer ${tlToken}`);
+      .set("Authorization", `Bearer ${bmToken}`);
     expect(res.status).toBe(200);
 
     const one = res.body.members.find((m: { user_id: string }) => m.user_id === agentId);

@@ -8,14 +8,14 @@ import { hashPassword } from "../src/services/auth-service";
 const app = createApp();
 
 const PASSWORD = "Secret@123";
-const TL_PHONE = "7950000001";
+const REVIEWER_PHONE = "7950000001";
 const AGENT_PHONE = "7950000002";
 const AGENT2_PHONE = "7950000003";
 
 let agencyId: string;
 let companyId: string;
 let customerId: string;
-let tlToken: string;
+let reviewerToken: string;
 let agentToken: string;
 let agent2Token: string;
 let agentId: string;
@@ -41,9 +41,9 @@ beforeAll(async () => {
 
   const hash = await hashPassword(PASSWORD);
   await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_team_leader, is_agency_admin)
-     VALUES ($1, 'CR TL', $2, $3, true, true)`,
-    [agencyId, TL_PHONE, hash],
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin)
+     VALUES ($1, 'CR Reviewer', $2, $3, true)`,
+    [agencyId, REVIEWER_PHONE, hash],
   );
   const agent = await pool.query(
     `INSERT INTO users (agency_id, full_name, phone, password_hash, is_telecaller)
@@ -87,7 +87,7 @@ beforeAll(async () => {
   );
   ptpId = ptp.rows[0].id;
 
-  tlToken = await login(TL_PHONE);
+  reviewerToken = await login(REVIEWER_PHONE);
   agentToken = await login(AGENT_PHONE);
   agent2Token = await login(AGENT2_PHONE);
 });
@@ -147,12 +147,12 @@ describe("correction requests", () => {
     // Not visible to TL under "pending" filter's confusion — should be there.
     const pendingQueue = await request(app)
       .get("/api/correction-requests?status=pending")
-      .set("Authorization", `Bearer ${tlToken}`);
+      .set("Authorization", `Bearer ${reviewerToken}`);
     expect(pendingQueue.body.requests.map((r: { id: string }) => r.id)).toContain(requestId);
 
     const decide = await request(app)
       .post(`/api/correction-requests/${requestId}/decide`)
-      .set("Authorization", `Bearer ${tlToken}`)
+      .set("Authorization", `Bearer ${reviewerToken}`)
       .send({ approve: true, note: "Confirmed with customer" });
     expect(decide.status).toBe(200);
     expect(decide.body.request.status).toBe("approved");
@@ -175,7 +175,7 @@ describe("correction requests", () => {
 
     const decide = await request(app)
       .post(`/api/correction-requests/${submit.body.request.id}/decide`)
-      .set("Authorization", `Bearer ${tlToken}`)
+      .set("Authorization", `Bearer ${reviewerToken}`)
       .send({ approve: false, note: "Doesn't match the call recording" });
     expect(decide.status).toBe(200);
     expect(decide.body.request.status).toBe("rejected");
@@ -202,7 +202,7 @@ describe("correction requests", () => {
 
     await request(app)
       .post(`/api/correction-requests/${submit.body.request.id}/decide`)
-      .set("Authorization", `Bearer ${tlToken}`)
+      .set("Authorization", `Bearer ${reviewerToken}`)
       .send({ approve: true });
 
     const ptp = await pool.query("SELECT promised_date FROM ptps WHERE id = $1", [ptpId]);
@@ -220,7 +220,7 @@ describe("correction requests", () => {
 
     const tlView = await request(app)
       .get("/api/correction-requests?status=all")
-      .set("Authorization", `Bearer ${tlToken}`);
+      .set("Authorization", `Bearer ${reviewerToken}`);
     expect(tlView.body.requests.length).toBeGreaterThanOrEqual(agentView.body.requests.length);
   });
 
@@ -254,12 +254,12 @@ describe("correction requests", () => {
     const requestId = submit.body.request.id;
     await request(app)
       .post(`/api/correction-requests/${requestId}/decide`)
-      .set("Authorization", `Bearer ${tlToken}`)
+      .set("Authorization", `Bearer ${reviewerToken}`)
       .send({ approve: true });
 
     const second = await request(app)
       .post(`/api/correction-requests/${requestId}/decide`)
-      .set("Authorization", `Bearer ${tlToken}`)
+      .set("Authorization", `Bearer ${reviewerToken}`)
       .send({ approve: false });
     expect(second.status).toBe(409);
   });

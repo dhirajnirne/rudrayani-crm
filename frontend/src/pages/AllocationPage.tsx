@@ -118,7 +118,7 @@ function useAssignableAgents(
           (e) =>
             e.is_active &&
             e.capabilities.some((c) =>
-              ["telecaller", "field_agent", "team_leader"].includes(c),
+              ["telecaller", "field_agent", "branch_manager"].includes(c),
             ),
         ),
       );

@@ -19,7 +19,7 @@ import { detectPaymentNormalization } from "../services/bucket-movement-service"
 const USERS = [
   { phone: "8888888801", name: "Priya Sharma (Telecaller)", designation: "telecaller", team: true },
   { phone: "8888888802", name: "Rahul Verma (Field Agent)", designation: "field_agent", team: true },
-  { phone: "8888888803", name: "Sneha Patil (Team Leader)", designation: "team_leader", team: true },
+  { phone: "8888888803", name: "Sneha Patil (Field Agent)", designation: "field_agent", team: true },
   { phone: "8888888804", name: "Amit Kulkarni (Ops Manager)", designation: "operations_manager", team: false },
 ] as const;
 
@@ -93,25 +93,28 @@ async function run(): Promise<void> {
   let adminId: string | null = null;
   let telecallerId: string | null = null;
 
-  // Helper: compute booleans from designation
+  // Helper: compute booleans from designation. team_leader is gone (Phase
+  // 2) -- telecaller/field_agent report straight to a branch_manager now.
   const booleansForDesignation = (designation: string) => ({
     is_operations_manager: designation === "operations_manager",
-    is_team_leader: designation === "team_leader",
     is_telecaller: designation === "telecaller",
     is_field_agent: designation === "field_agent",
   });
+  // telecaller/field_agent always mirror agent_type to their own designation.
+  const agentTypeForDesignation = (designation: string): string | null =>
+    designation === "telecaller" || designation === "field_agent" ? designation : null;
 
   for (const user of USERS) {
     const bools = booleansForDesignation(user.designation);
     const { rows } = await pool.query(
-      `INSERT INTO users (agency_id, branch_id, team_id, full_name, phone, password_hash, designation,
-                          is_operations_manager, is_team_leader, is_telecaller, is_field_agent)
+      `INSERT INTO users (agency_id, branch_id, team_id, full_name, phone, password_hash, designation, agent_type,
+                          is_operations_manager, is_telecaller, is_field_agent)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        ON CONFLICT (phone) DO UPDATE
          SET password_hash = EXCLUDED.password_hash,
              designation = EXCLUDED.designation,
+             agent_type = EXCLUDED.agent_type,
              is_operations_manager = EXCLUDED.is_operations_manager,
-             is_team_leader = EXCLUDED.is_team_leader,
              is_telecaller = EXCLUDED.is_telecaller,
              is_field_agent = EXCLUDED.is_field_agent,
              is_active = true,
@@ -128,8 +131,8 @@ async function run(): Promise<void> {
         user.phone,
         hash,
         user.designation,
+        agentTypeForDesignation(user.designation),
         bools.is_operations_manager,
-        bools.is_team_leader,
         bools.is_telecaller,
         bools.is_field_agent,
       ],

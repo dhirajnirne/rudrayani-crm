@@ -7,7 +7,8 @@ import { hashPassword } from "../src/services/auth-service";
 /**
  * Live tracking + route replay for managers, and the permission audit the
  * hierarchy depends on (brief Sections 3, 9): admin/ops see the whole
- * agency, a TL sees only their team, agents see nothing.
+ * agency, a branch_manager sees their whole branch (every team in it, no
+ * team_leader intermediary since Phase 2), agents see nothing.
  */
 const app = createApp();
 
@@ -15,17 +16,19 @@ const PASSWORD = "Secret@123";
 const PHONES = {
   admin: "7900000040",
   ops: "7900000041",
-  tl: "7900000042",
-  agentA: "7900000043", // field agent in TL's team
-  agentB: "7900000044", // field agent, other team
+  bm: "7900000042",
+  agentA: "7900000043", // field agent in branch manager's branch, team A
+  agentB: "7900000044", // field agent in branch manager's branch, team B
   outsider: "7900000045", // other agency
   tele: "7900000046", // telecaller — desk job, stationary alert must not apply
+  otherBranchAgent: "7900000047", // same agency, different branch -- outside the branch_manager's scope
 };
 
 let agencyId: string;
 let otherAgencyId: string;
 let teamAId: string;
 let teamBId: string;
+let otherBranchId: string;
 const userIds: Record<string, string> = {};
 const tokens: Record<string, string> = {};
 
@@ -80,6 +83,11 @@ beforeAll(async () => {
     [branch.rows[0].id],
   );
   teamBId = teamB.rows[0].id;
+  const otherBranch = await pool.query(
+    "INSERT INTO branches (agency_id, name) VALUES ($1, 'Other Branch') RETURNING id",
+    [agencyId],
+  );
+  otherBranchId = otherBranch.rows[0].id;
 
   const hash = await hashPassword(PASSWORD);
   const mk = async (
@@ -87,23 +95,35 @@ beforeAll(async () => {
     agency: string,
     flags: string,
     teamId: string | null,
+    branchId: string | null,
   ) => {
     const { rows } = await pool.query(
-      `INSERT INTO users (agency_id, full_name, phone, password_hash, team_id, ${flags})
-       VALUES ($1, $2, $3, $4, $5, true) RETURNING id`,
-      [agency, `Track ${key}`, PHONES[key], hash, teamId],
+      `INSERT INTO users (agency_id, full_name, phone, password_hash, team_id, branch_id, ${flags})
+       VALUES ($1, $2, $3, $4, $5, $6, true) RETURNING id`,
+      [agency, `Track ${key}`, PHONES[key], hash, teamId, branchId],
     );
     userIds[key] = rows[0].id;
     tokens[key] = await login(PHONES[key]);
   };
 
-  await mk("admin", agencyId, "is_agency_admin", null);
-  await mk("ops", agencyId, "is_operations_manager", null);
-  await mk("tl", agencyId, "is_team_leader", teamAId);
-  await mk("agentA", agencyId, "is_field_agent", teamAId);
-  await mk("agentB", agencyId, "is_field_agent", teamBId);
-  await mk("outsider", otherAgencyId, "is_field_agent", null);
-  await mk("tele", agencyId, "is_telecaller", teamBId);
+  await mk("admin", agencyId, "is_agency_admin", null, null);
+  await mk("ops", agencyId, "is_operations_manager", null, null);
+  const bm = await pool.query(
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, designation)
+     VALUES ($1, 'Track bm', $2, $3, 'branch_manager') RETURNING id`,
+    [agencyId, PHONES.bm, hash],
+  );
+  userIds.bm = bm.rows[0].id;
+  tokens.bm = await login(PHONES.bm);
+  await pool.query("UPDATE branches SET branch_manager_id = $1 WHERE id = $2", [
+    userIds.bm,
+    branch.rows[0].id,
+  ]);
+  await mk("agentA", agencyId, "is_field_agent", teamAId, branch.rows[0].id);
+  await mk("agentB", agencyId, "is_field_agent", teamBId, branch.rows[0].id);
+  await mk("outsider", otherAgencyId, "is_field_agent", null, null);
+  await mk("tele", agencyId, "is_telecaller", teamBId, branch.rows[0].id);
+  await mk("otherBranchAgent", agencyId, "is_field_agent", null, otherBranchId);
 });
 
 afterAll(async () => {
@@ -140,16 +160,16 @@ describe("permission audit (brief Section 3)", () => {
   // can read their own attendance/GPS/route via the same tracking.view-gated
   // routes -- scope.ts's self-only fallback (see "rejects agents" below)
   // keeps this from widening what they can actually see.
-  it("team_leader has tracking.view; so do telecaller/field_agent (self-scoped)", async () => {
+  it("branch_manager has tracking.view; so do telecaller/field_agent (self-scoped)", async () => {
     const { rows } = await pool.query(
       `SELECT capability FROM capability_permissions WHERE permission_key = 'tracking.view'
         ORDER BY capability`,
     );
     expect(rows.map((r) => r.capability)).toEqual([
       "agency_admin",
+      "branch_manager",
       "field_agent",
       "operations_manager",
-      "team_leader",
       "telecaller",
     ]);
   });
@@ -201,12 +221,12 @@ describe("live view scoping", () => {
     expect(ids).toEqual([userIds.agentA, userIds.agentB, userIds.tele].sort());
   });
 
-  it("team leader sees only their own team", async () => {
+  it("branch_manager sees every on-duty agent in their branch, across teams", async () => {
     const res = await request(app)
       .get("/api/tracking/live")
-      .set("Authorization", `Bearer ${tokens.tl}`);
-    const ids = res.body.agents.map((a: { user_id: string }) => a.user_id);
-    expect(ids).toEqual([userIds.agentA]);
+      .set("Authorization", `Bearer ${tokens.bm}`);
+    const ids = res.body.agents.map((a: { user_id: string }) => a.user_id).sort();
+    expect(ids).toEqual([userIds.agentA, userIds.agentB, userIds.tele].sort());
   });
 
   it("flags an agent parked in one spot for 20+ minutes as stationary", async () => {
@@ -248,16 +268,16 @@ describe("live view scoping", () => {
       "UPDATE location_pings SET recorded_at = recorded_at - interval '15 minutes' WHERE user_id = $1",
       [userIds.agentB],
     );
-    // TL punches in but has no pings yet
-    await punchIn(userIds.tl, 1);
+    // branch_manager punches in but has no pings yet
+    await punchIn(userIds.bm, 1);
 
     const res = await request(app)
       .get("/api/tracking/live")
       .set("Authorization", `Bearer ${tokens.admin}`);
     const b = res.body.agents.find((x: { user_id: string }) => x.user_id === userIds.agentB);
     expect(b.status).toBe("no_signal");
-    const tl = res.body.agents.find((x: { user_id: string }) => x.user_id === userIds.tl);
-    expect(tl.status).toBe("awaiting_first_ping");
+    const bm = res.body.agents.find((x: { user_id: string }) => x.user_id === userIds.bm);
+    expect(bm.status).toBe("awaiting_first_ping");
     expect(res.body.alerts.map((x: { user_id: string }) => x.user_id)).toContain(userIds.agentB);
   });
 
@@ -296,10 +316,17 @@ describe("route replay", () => {
     expect(res.body.shifts.length).toBeGreaterThan(0);
   });
 
-  it("TL cannot replay an agent outside their team", async () => {
+  it("branch_manager can replay an agent on a different team in their own branch", async () => {
     const res = await request(app)
       .get(`/api/tracking/route?user_id=${userIds.agentB}&date=${today}`)
-      .set("Authorization", `Bearer ${tokens.tl}`);
+      .set("Authorization", `Bearer ${tokens.bm}`);
+    expect(res.status).toBe(200);
+  });
+
+  it("branch_manager cannot replay an agent outside their branch", async () => {
+    const res = await request(app)
+      .get(`/api/tracking/route?user_id=${userIds.otherBranchAgent}&date=${today}`)
+      .set("Authorization", `Bearer ${tokens.bm}`);
     expect(res.status).toBe(404);
   });
 

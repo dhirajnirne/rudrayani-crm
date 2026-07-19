@@ -250,8 +250,12 @@ function RouteReplay() {
     user: { full_name: string };
   } | null>(null);
 
-  // A pure Team Leader can only replay their own team — mirror the server's
-  // scope in the dropdown instead of letting picks fail with a 404.
+  // Non-admin/ops users are scope-clamped server-side -- mirror that in the
+  // dropdown instead of letting picks fail with a 404.
+  // KNOWN GAP (pre-existing, not fixed here): this clamps by `team_id`
+  // equality, but branch_manager has no team_id of their own (Phase 1/2 --
+  // their scope comes from branches.branch_manager_id instead), so this
+  // picker under-shows for branch_manager today. Flagged separately.
   const teamScoped =
     user?.capabilities.every((c) => !["agency_admin", "operations_manager"].includes(c)) ?? false;
 

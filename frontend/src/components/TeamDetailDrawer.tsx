@@ -7,7 +7,8 @@ import BreakdownTable from "./dashboard/BreakdownTable";
  * this team and defaulted to the agent dimension -- no bespoke roster fetch,
  * the breakdown rows already are the roster with live performance attached.
  * Used both when a branch_manager/ops/admin clicks into a team from above
- * (OrgChartPage) and when a team_leader views their own team (DashboardPage).
+ * (OrgChartPage) and when a branch_manager views one of their own teams
+ * (DashboardPage).
  */
 export default function TeamDetailDrawer({
   teamId,

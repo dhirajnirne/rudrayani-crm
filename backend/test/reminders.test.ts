@@ -10,7 +10,7 @@ import { hashPassword } from "../src/services/auth-service";
  */
 const app = createApp();
 
-const TL_PHONE = "7900000070";
+const BM_PHONE = "7900000070";
 const AGENT_PHONE = "7900000071";
 const AGENT2_PHONE = "7900000072";
 const PASSWORD = "Secret@123";
@@ -18,7 +18,7 @@ const PASSWORD = "Secret@123";
 let agencyId: string;
 let otherAgencyId: string;
 let companyId: string;
-let tlToken: string;
+let bmToken: string;
 let agentToken: string;
 let agent2Token: string;
 let agentId: string;
@@ -54,9 +54,9 @@ beforeAll(async () => {
 
   const hash = await hashPassword(PASSWORD);
   await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_team_leader)
-     VALUES ($1, 'Rem TL', $2, $3, true)`,
-    [agencyId, TL_PHONE, hash],
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, designation)
+     VALUES ($1, 'Rem BM', $2, $3, 'branch_manager')`,
+    [agencyId, BM_PHONE, hash],
   );
   const agent = await pool.query(
     `INSERT INTO users (agency_id, full_name, phone, password_hash, is_telecaller)
@@ -86,7 +86,7 @@ beforeAll(async () => {
   );
   otherAgencyCustomerId = otherCustomer.rows[0].id;
 
-  tlToken = await login(TL_PHONE);
+  bmToken = await login(BM_PHONE);
   agentToken = await login(AGENT_PHONE);
   agent2Token = await login(AGENT2_PHONE);
 });
@@ -178,7 +178,7 @@ describe("GET /api/reminders", () => {
   it("a TL (customers.allocate) sees every agent's reminders in the agency", async () => {
     const res = await request(app)
       .get("/api/reminders?status=all")
-      .set("Authorization", `Bearer ${tlToken}`);
+      .set("Authorization", `Bearer ${bmToken}`);
     expect(res.status).toBe(200);
     expect(res.body.total).toBeGreaterThanOrEqual(3);
   });
@@ -186,7 +186,7 @@ describe("GET /api/reminders", () => {
   it("a TL can filter to one agent explicitly", async () => {
     const res = await request(app)
       .get(`/api/reminders?status=all&agent_id=${agentId}`)
-      .set("Authorization", `Bearer ${tlToken}`);
+      .set("Authorization", `Bearer ${bmToken}`);
     expect(res.status).toBe(200);
     expect(res.body.reminders.every((r: { agent_id: string }) => r.agent_id === agentId)).toBe(true);
   });
@@ -231,7 +231,7 @@ describe("PATCH /api/reminders/:id", () => {
 
     const res = await request(app)
       .patch(`/api/reminders/${id}`)
-      .set("Authorization", `Bearer ${tlToken}`)
+      .set("Authorization", `Bearer ${bmToken}`)
       .send({ status: "cancelled" });
     expect(res.status).toBe(200);
     expect(res.body.reminder.status).toBe("cancelled");

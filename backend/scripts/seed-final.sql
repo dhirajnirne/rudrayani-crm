@@ -43,29 +43,31 @@ INSERT INTO products (company_id, raw_label, canonical_label, created_at)
 SELECT id, 'Personal Loan', 'Personal Loan', NOW() FROM companies WHERE name = 'ICICI Bank';
 
 -- Create employees (users)
--- Team lead for Mumbai
+-- Note: team_leader was removed (Phase 2) -- teams report directly to their
+-- branch's branch_manager now. These two become branch managers instead.
+-- Branch manager for Mumbai
 INSERT INTO users (
-  agency_id, full_name, phone, password_hash, is_active, branch_id, team_id,
-  is_team_leader, created_at
+  agency_id, full_name, phone, password_hash, is_active, designation, created_at
 )
 SELECT a.id, 'Priya Sharma', '9876543211',
   '$2b$10$73Xdsap8jBDWBmqvB6ZKweyRvz95IOsXpS2vcbCfq0w1YfWQdmHbG',
-  true, b.id, t.id, true, NOW()
-FROM agencies a, branches b, teams t
-WHERE b.name = 'Mumbai Branch' AND t.name = 'Collections Team A'
+  true, 'branch_manager', NOW()
+FROM agencies a
 LIMIT 1;
+UPDATE branches SET branch_manager_id = (SELECT id FROM users WHERE full_name = 'Priya Sharma')
+ WHERE name = 'Mumbai Branch';
 
--- Team lead for Pune
+-- Branch manager for Pune
 INSERT INTO users (
-  agency_id, full_name, phone, password_hash, is_active, branch_id, team_id,
-  is_team_leader, created_at
+  agency_id, full_name, phone, password_hash, is_active, designation, created_at
 )
 SELECT a.id, 'Rajesh Patel', '9876543212',
   '$2b$10$73Xdsap8jBDWBmqvB6ZKweyRvz95IOsXpS2vcbCfq0w1YfWQdmHbG',
-  true, b.id, t.id, true, NOW()
-FROM agencies a, branches b, teams t
-WHERE b.name = 'Pune Branch' AND t.name = 'Collections Team B'
+  true, 'branch_manager', NOW()
+FROM agencies a
 LIMIT 1;
+UPDATE branches SET branch_manager_id = (SELECT id FROM users WHERE full_name = 'Rajesh Patel')
+ WHERE name = 'Pune Branch';
 
 -- Telecallers
 INSERT INTO users (

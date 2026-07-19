@@ -8,7 +8,6 @@ const Map<String, String> _designationLabels = {
   'agency_admin': 'Agency Admin',
   'operations_manager': 'Operations Manager',
   'branch_manager': 'Branch Manager',
-  'team_leader': 'Team Leader',
   'telecaller': 'Telecaller',
   'field_agent': 'Field Agent',
 };
@@ -54,8 +53,8 @@ class _EmployeeDetailScreenState extends ConsumerState<EmployeeDetailScreen> {
       if (mounted) setState(() => _employee = employee);
 
       // Only agent-type rows (plain telecaller/field_agent, or a
-      // branch_manager/team_leader with agent_type set) have collections
-      // activity to show -- everyone else's feed would just be empty.
+      // branch_manager with agent_type set) have collections activity to
+      // show -- everyone else's feed would just be empty.
       final capabilities = (employee['capabilities'] as List?)?.cast<String>() ?? const [];
       if (capabilities.contains('telecaller') || capabilities.contains('field_agent')) {
         final actRes = await api.get('/reports/agent-activity', query: {

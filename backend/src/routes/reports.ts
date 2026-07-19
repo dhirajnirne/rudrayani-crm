@@ -67,8 +67,8 @@ router.get(
  * agent-centric feed existed before (only per-customer trail and per-day
  * aggregate counts). Access is gated the same way /tracking/team-day already
  * gates per-agent visibility: reuse scopeFilter() (agency-wide for
- * admin/ops, own branch for branch_manager, own led team(s) for team_leader,
- * self otherwise) rather than re-deriving a new visibility rule here.
+ * admin/ops, own branch for branch_manager, self otherwise) rather than
+ * re-deriving a new visibility rule here.
  */
 router.get(
   "/agent-activity",

@@ -85,7 +85,6 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   // Role checks against the capabilities list (backend/src/types/user.ts
   // publicUser() returns capabilities: string[], not per-role booleans).
-  bool get isTeamLeader => state.capabilities.contains('team_leader');
   bool get isTelecaller => state.capabilities.contains('telecaller');
   bool get isFieldAgent => state.capabilities.contains('field_agent');
 }

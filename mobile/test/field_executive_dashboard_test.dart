@@ -4,7 +4,7 @@
 // Phase 12 brief explicitly says to surface rather than guess at.
 //
 // Assertions target DashboardStatCard by its `label` (see
-// team_leader_dashboard_test.dart for why). The test viewport is enlarged so
+// telecaller_dashboard_test.dart for why). The test viewport is enlarged so
 // every section -- including the gap cards near the bottom -- is actually
 // mounted; a plain ListView only builds children within its viewport + cache
 // extent.

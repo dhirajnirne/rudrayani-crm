@@ -10,7 +10,6 @@ interface BranchTeam {
   name: string;
   created_at: string;
   member_count: number;
-  team_leader_name: string | null;
 }
 
 interface BranchTarget {
@@ -137,7 +136,6 @@ export default function BranchDetailDrawer({
                     locale={{ emptyText: "No teams in this branch" }}
                     columns={[
                       { title: "Team", dataIndex: "name" },
-                      { title: "Team Leader", dataIndex: "team_leader_name", render: orDash },
                       { title: "Active Members", dataIndex: "member_count", align: "right" },
                       {
                         title: "Created",

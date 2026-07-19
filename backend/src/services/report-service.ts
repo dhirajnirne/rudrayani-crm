@@ -51,8 +51,10 @@ export interface ResolvedScope {
 }
 
 /**
- * Server-side scope clamp: admin/ops roam the agency; a TL is pinned to their
- * team; everyone else (self-scoped access) is pinned to themselves.
+ * Server-side scope clamp: admin/ops roam the agency; a branch_manager is
+ * pinned to their branch (every team in it, no team_leader intermediary
+ * since Phase 2); everyone else (self-scoped access) is pinned to
+ * themselves.
  */
 export async function resolveReportScope(
   user: UserRow,
@@ -90,30 +92,6 @@ export async function resolveReportScope(
         branch_id: branchId ?? "00000000-0000-0000-0000-000000000000",
         team_id: undefined,
       },
-    };
-  }
-  if (user.is_team_leader) {
-    // Multi-team TL: fetch led team IDs from team_leaders table
-    const { rows } = await pool.query<{ team_id: string }>(
-      "SELECT team_id FROM team_leaders WHERE user_id = $1 ORDER BY team_id",
-      [user.id],
-    );
-    const teamIds = rows.map((r) => r.team_id);
-
-    if (requested.team_id) {
-      // Specific team requested: validate it's in the TL's led set
-      if (!teamIds.includes(requested.team_id)) {
-        throw new HttpError(403, "You do not lead this team");
-      }
-      // Single specific team
-      return { clampedTo: "team", filters: { ...requested, team_id: requested.team_id, branch_id: undefined } };
-    }
-
-    // No specific team requested: aggregate across all led teams
-    return {
-      clampedTo: "teams",
-      filters: { ...requested, team_id: undefined, branch_id: undefined },
-      scopeTeamIds: teamIds.length > 0 ? teamIds : null,
     };
   }
   // reports.view holders that fit none of the above shouldn't exist, but fail shut.

@@ -14,7 +14,7 @@ const app = createApp();
 
 const PASSWORD = "Secret@123";
 const ADMIN_PHONE = "7940000090";
-const TL_PHONE = "7940000091";
+const BM_PHONE = "7940000091";
 const AGENT_PHONE = "7940000092";
 const OTHER_AGENT_PHONE = "7940000093";
 
@@ -26,7 +26,7 @@ let agentId: string;
 let custAssignedId: string;
 let custUnassignedId: string;
 let adminToken: string;
-let tlToken: string;
+let bmToken: string;
 let agentToken: string;
 
 beforeAll(async () => {
@@ -57,9 +57,9 @@ beforeAll(async () => {
     [agencyId, ADMIN_PHONE, hash],
   );
   await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_team_leader, team_id)
-     VALUES ($1, 'Detail TL', $2, $3, true, $4)`,
-    [agencyId, TL_PHONE, hash, teamId],
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, designation)
+     VALUES ($1, 'Detail BM', $2, $3, 'branch_manager')`,
+    [agencyId, BM_PHONE, hash],
   );
   const agent = await pool.query(
     `INSERT INTO users (agency_id, full_name, phone, password_hash, is_telecaller, team_id)
@@ -133,13 +133,13 @@ beforeAll(async () => {
     [agencyId, custAssignedId, agentId],
   );
 
-  const [adminLogin, tlLogin, agentLogin] = await Promise.all([
+  const [adminLogin, bmLogin, agentLogin] = await Promise.all([
     request(app).post("/api/auth/login").send({ phone: ADMIN_PHONE, password: PASSWORD }),
-    request(app).post("/api/auth/login").send({ phone: TL_PHONE, password: PASSWORD }),
+    request(app).post("/api/auth/login").send({ phone: BM_PHONE, password: PASSWORD }),
     request(app).post("/api/auth/login").send({ phone: AGENT_PHONE, password: PASSWORD }),
   ]);
   adminToken = adminLogin.body.access_token;
-  tlToken = tlLogin.body.access_token;
+  bmToken = bmLogin.body.access_token;
   agentToken = agentLogin.body.access_token;
 });
 
@@ -195,10 +195,10 @@ describe("customer 360 view: scope", () => {
     expect(res.status).toBe(404);
   });
 
-  it("a team leader (holds customers.allocate) can open any customer in the agency", async () => {
+  it("a branch manager (holds customers.allocate) can open any customer in the agency", async () => {
     const res = await request(app)
       .get(`/api/customers/${custUnassignedId}`)
-      .set("Authorization", `Bearer ${tlToken}`);
+      .set("Authorization", `Bearer ${bmToken}`);
     expect(res.status).toBe(200);
     expect(res.body.customer.loan_number).toBe("DET-002");
   });

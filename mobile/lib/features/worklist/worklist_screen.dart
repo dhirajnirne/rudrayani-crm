@@ -160,12 +160,12 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
                       .toList();
                 }
 
-                // Extract distinct companies for filter dropdown
-                final companies = customers
-                    .map((c) => c.companyName)
-                    .toSet()
-                    .toList()
-                    ..sort();
+                // Extract distinct companies for filter dropdown (unused for now)
+                // final companies = customers
+                //     .map((c) => c.companyName)
+                //     .toSet()
+                //     .toList()
+                //     ..sort();
 
                 if (filtered.isEmpty) {
                   return const EmptyState(

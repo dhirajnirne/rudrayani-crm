@@ -11,7 +11,7 @@ import { hashPassword } from "../src/services/auth-service";
  */
 const app = createApp();
 
-const TL_PHONE = "7900000020";
+const BM_PHONE = "7900000020";
 const AGENT_PHONE = "7900000021";
 const AGENT2_PHONE = "7900000022";
 const PASSWORD = "Secret@123";
@@ -24,7 +24,7 @@ const PNG_1PX = Buffer.from(
 
 let agencyId: string;
 let companyId: string;
-let tlToken: string;
+let bmToken: string;
 let agentToken: string;
 let agentId: string;
 let agent2Id: string;
@@ -52,12 +52,12 @@ beforeAll(async () => {
   companyId = company.rows[0].id;
 
   const hash = await hashPassword(PASSWORD);
-  const tl = await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_team_leader)
-     VALUES ($1, 'Flow TL', $2, $3, true) RETURNING id`,
-    [agencyId, TL_PHONE, hash],
+  const bm = await pool.query(
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, designation)
+     VALUES ($1, 'Flow BM', $2, $3, 'branch_manager') RETURNING id`,
+    [agencyId, BM_PHONE, hash],
   );
-  void tl;
+  void bm;
   const agent = await pool.query(
     `INSERT INTO users (agency_id, full_name, phone, password_hash, is_telecaller)
      VALUES ($1, 'Flow Agent', $2, $3, true) RETURNING id`,
@@ -101,7 +101,7 @@ beforeAll(async () => {
   );
   rnrCodeId = rnrCode.rows[0].id;
 
-  tlToken = await login(TL_PHONE);
+  bmToken = await login(BM_PHONE);
   agentToken = await login(AGENT_PHONE);
 
   const promised = new Date();
@@ -138,13 +138,13 @@ describe("Task 3.1 — allocation", () => {
   it("TL sees the unallocated queue, filterable by product", async () => {
     const res = await request(app)
       .get("/api/allocations/unallocated")
-      .set("Authorization", `Bearer ${tlToken}`);
+      .set("Authorization", `Bearer ${bmToken}`);
     expect(res.status).toBe(200);
     expect(res.body.total).toBe(3);
 
     const filtered = await request(app)
       .get("/api/allocations/unallocated?product=Home Loan")
-      .set("Authorization", `Bearer ${tlToken}`);
+      .set("Authorization", `Bearer ${bmToken}`);
     expect(filtered.body.total).toBe(2);
   });
 
@@ -158,19 +158,19 @@ describe("Task 3.1 — allocation", () => {
   it("TL multi-assigns two customers to the agent", async () => {
     const res = await request(app)
       .post("/api/allocations/assign")
-      .set("Authorization", `Bearer ${tlToken}`)
+      .set("Authorization", `Bearer ${bmToken}`)
       .send({ customer_ids: [customerIds[0], customerIds[1]], agent_id: agentId });
     expect(res.status).toBe(200);
     expect(res.body.assigned).toBe(2);
 
     const queue = await request(app)
       .get("/api/allocations/unallocated")
-      .set("Authorization", `Bearer ${tlToken}`);
+      .set("Authorization", `Bearer ${bmToken}`);
     expect(queue.body.total).toBe(1);
 
     const logs = await request(app)
       .get(`/api/allocations/logs?customer_id=${customerIds[0]}`)
-      .set("Authorization", `Bearer ${tlToken}`);
+      .set("Authorization", `Bearer ${bmToken}`);
     expect(logs.body.logs).toHaveLength(1);
     expect(logs.body.logs[0].from_agent_name).toBeNull();
     expect(logs.body.logs[0].to_agent_name).toBe("Flow Agent");
@@ -179,13 +179,13 @@ describe("Task 3.1 — allocation", () => {
   it("reallocation without a reason is rejected; with reason it is logged", async () => {
     const noReason = await request(app)
       .post("/api/allocations/assign")
-      .set("Authorization", `Bearer ${tlToken}`)
+      .set("Authorization", `Bearer ${bmToken}`)
       .send({ customer_ids: [customerIds[1]], agent_id: agent2Id });
     expect(noReason.status).toBe(400);
 
     const withReason = await request(app)
       .post("/api/allocations/assign")
-      .set("Authorization", `Bearer ${tlToken}`)
+      .set("Authorization", `Bearer ${bmToken}`)
       .send({
         customer_ids: [customerIds[1]],
         agent_id: agent2Id,
@@ -195,7 +195,7 @@ describe("Task 3.1 — allocation", () => {
 
     const logs = await request(app)
       .get(`/api/allocations/logs?customer_id=${customerIds[1]}`)
-      .set("Authorization", `Bearer ${tlToken}`);
+      .set("Authorization", `Bearer ${bmToken}`);
     expect(logs.body.logs).toHaveLength(2);
     expect(logs.body.logs[0].reason).toBe("Field visit needed");
     expect(logs.body.logs[0].from_agent_name).toBe("Flow Agent");
@@ -223,7 +223,7 @@ describe("Web access — GET /customers self-scoping", () => {
   it("a TL (customers.allocate) still sees the whole agency's customer list", async () => {
     const res = await request(app)
       .get("/api/customers")
-      .set("Authorization", `Bearer ${tlToken}`);
+      .set("Authorization", `Bearer ${bmToken}`);
     expect(res.status).toBe(200);
     expect(res.body.total).toBe(3);
   });
@@ -326,7 +326,7 @@ describe("Task 3.2 — worklist, dispositions, PTP", () => {
 
     const asTl = await request(app)
       .get(`/api/ptps?customer_id=${customerIds[0]}`)
-      .set("Authorization", `Bearer ${tlToken}`);
+      .set("Authorization", `Bearer ${bmToken}`);
     expect(asTl.status).toBe(200);
     expect(asTl.body.total).toBe(1);
   });
@@ -351,7 +351,7 @@ describe("Task 3.2 — worklist, dispositions, PTP", () => {
   it("call history is visible for the customer", async () => {
     const res = await request(app)
       .get(`/api/call-logs?customer_id=${customerIds[0]}`)
-      .set("Authorization", `Bearer ${tlToken}`);
+      .set("Authorization", `Bearer ${bmToken}`);
     expect(res.status).toBe(200);
     expect(res.body.call_logs).toHaveLength(2);
   });
@@ -381,7 +381,7 @@ describe("Task 3.3 — payments and closure", () => {
   it("payment history shows the photo flag; the photo streams back", async () => {
     const list = await request(app)
       .get(`/api/payments?customer_id=${customerIds[0]}`)
-      .set("Authorization", `Bearer ${tlToken}`);
+      .set("Authorization", `Bearer ${bmToken}`);
     expect(list.status).toBe(200);
     expect(list.body.payments).toHaveLength(1);
     expect(list.body.payments[0].has_photo).toBe(true);
@@ -389,7 +389,7 @@ describe("Task 3.3 — payments and closure", () => {
 
     const photo = await request(app)
       .get(`/api/payments/${paymentId}/photo`)
-      .set("Authorization", `Bearer ${tlToken}`);
+      .set("Authorization", `Bearer ${bmToken}`);
     expect(photo.status).toBe(200);
     expect(photo.headers["content-type"]).toBe("image/png");
   });

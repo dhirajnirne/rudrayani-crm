@@ -140,13 +140,13 @@ describe("Org structure", () => {
       .send({ capabilities: { is_operations_manager: true } });
     expect(res.status).toBe(403);
 
-    // ...but toggling Team Leader (a designation, brief §3) is allowed.
-    const tl = await request(app)
+    // ...but toggling designation to Telecaller (a designation, brief §3) is allowed.
+    const tele = await request(app)
       .patch(`/api/employees/${agentId}`)
       .set("Authorization", `Bearer ${opsToken}`)
-      .send({ capabilities: { is_team_leader: true } });
-    expect(tl.status).toBe(200);
-    expect(tl.body.employee.capabilities).toContain("team_leader");
+      .send({ designation: "telecaller" });
+    expect(tele.status).toBe(200);
+    expect(tele.body.employee.capabilities).toContain("telecaller");
   });
 
   it("an agent has no permission to create employees", async () => {
@@ -212,8 +212,8 @@ describe("Org structure", () => {
   });
 
   describe("manager_id (Reports to) and org hierarchy", () => {
-    const TL_PHONE = "7100000011";
-    let teamLeaderId: string;
+    const BM_PHONE = "7100000011";
+    let branchManagerId: string;
     let otherAgencyId: string;
 
     afterAll(async () => {
@@ -228,16 +228,15 @@ describe("Org structure", () => {
         .post("/api/employees")
         .set("Authorization", `Bearer ${adminToken}`)
         .send({
-          full_name: "Team Leader Two",
-          phone: TL_PHONE,
+          full_name: "Branch Manager Two",
+          phone: BM_PHONE,
           password: PASSWORD,
-          branch_id: branchId,
           manager_id: opsManagerId,
-          capabilities: { is_team_leader: true },
+          designation: "branch_manager",
         });
       expect(res.status).toBe(201);
       expect(res.body.employee.manager_id).toBe(opsManagerId);
-      teamLeaderId = res.body.employee.id;
+      branchManagerId = res.body.employee.id;
     });
 
     it("rejects a manager_id belonging to another agency", async () => {
@@ -265,7 +264,7 @@ describe("Org structure", () => {
       expect(createRes.status).toBe(400);
 
       const patchRes = await request(app)
-        .patch(`/api/employees/${teamLeaderId}`)
+        .patch(`/api/employees/${branchManagerId}`)
         .set("Authorization", `Bearer ${adminToken}`)
         .send({ manager_id: otherAgencyManagerId });
       expect(patchRes.status).toBe(400);
@@ -273,15 +272,15 @@ describe("Org structure", () => {
 
     it("rejects an employee being set as their own manager", async () => {
       const res = await request(app)
-        .patch(`/api/employees/${teamLeaderId}`)
+        .patch(`/api/employees/${branchManagerId}`)
         .set("Authorization", `Bearer ${adminToken}`)
-        .send({ manager_id: teamLeaderId });
+        .send({ manager_id: branchManagerId });
       expect(res.status).toBe(400);
     });
 
     it("clears a manager_id by patching it to null", async () => {
       const res = await request(app)
-        .patch(`/api/employees/${teamLeaderId}`)
+        .patch(`/api/employees/${branchManagerId}`)
         .set("Authorization", `Bearer ${adminToken}`)
         .send({ manager_id: null });
       expect(res.status).toBe(200);
@@ -289,13 +288,24 @@ describe("Org structure", () => {
 
       // Restore for the org-hierarchy assertion below.
       const restore = await request(app)
-        .patch(`/api/employees/${teamLeaderId}`)
+        .patch(`/api/employees/${branchManagerId}`)
         .set("Authorization", `Bearer ${adminToken}`)
         .send({ manager_id: opsManagerId });
       expect(restore.status).toBe(200);
     });
 
     it("GET /employees/org-hierarchy nests branches/teams/agents with manager edges", async () => {
+      // branch_manager rows carry manager_id/manager_name too (they report
+      // to operations_manager), but they're excluded from team/branch agent
+      // lists (management rank, not a plain team member -- see
+      // isPlainAgent() in employees.ts) and instead surface as the branch's
+      // own `branch_manager` field. Link this one to the branch to check it.
+      const link = await request(app)
+        .patch(`/api/branches/${branchId}`)
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ branch_manager_id: branchManagerId });
+      expect(link.status).toBe(200);
+
       const res = await request(app)
         .get("/api/employees/org-hierarchy")
         .set("Authorization", `Bearer ${adminToken}`);
@@ -304,15 +314,16 @@ describe("Org structure", () => {
 
       const branch = res.body.branches.find((b: { id: string }) => b.id === branchId);
       expect(branch).toBeTruthy();
+      expect(branch.branch_manager.id).toBe(branchManagerId);
+      expect(branch.branch_manager.full_name).toBe("Branch Manager Two");
 
-      type Agent = { id: string; phone: string; manager_id: string | null; manager_name: string | null };
-      const allAgents: Agent[] = branch.teams
-        .flatMap((t: { agents: Agent[] }) => t.agents)
-        .concat(branch.unassigned_agents);
-      const tl = allAgents.find((a) => a.phone === TL_PHONE);
-      expect(tl).toBeTruthy();
-      expect(tl!.manager_id).toBe(opsManagerId);
-      expect(tl!.manager_name).toBe("Ops Manager");
+      // manager_id/manager_name still populate correctly on this branch_manager
+      // row itself -- fetch it directly rather than via the (deliberately
+      // exclusionary) agent lists.
+      const direct = await request(app)
+        .get(`/api/employees/${branchManagerId}`)
+        .set("Authorization", `Bearer ${adminToken}`);
+      expect(direct.body.employee.manager_id).toBe(opsManagerId);
     });
   });
 });

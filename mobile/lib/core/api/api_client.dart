@@ -26,8 +26,9 @@ const _kServerUrlOverride = 'server_url_override';
 String? _cachedOverride;
 
 String get effectiveBaseUrl {
-  if (_cachedOverride != null && _cachedOverride!.isNotEmpty)
+  if (_cachedOverride != null && _cachedOverride!.isNotEmpty) {
     return _cachedOverride!;
+  }
   if (_envUrl.isNotEmpty) return _envUrl;
   return kReleaseMode ? _releaseDefaultUrl : _debugDefaultUrl;
 }
@@ -107,8 +108,9 @@ Dio buildDio() {
               final newAccess = res.data['access_token'] as String;
               final newRefresh = res.data['refresh_token'] as String?;
               await _storage.write(key: _kAccessToken, value: newAccess);
-              if (newRefresh != null)
+              if (newRefresh != null) {
                 await _storage.write(key: _kRefreshToken, value: newRefresh);
+              }
               // Retry original request
               final opts = error.requestOptions;
               opts.headers['Authorization'] = 'Bearer $newAccess';

@@ -68,9 +68,9 @@ export default function EmployeesPage() {
   const selectedTeam = Form.useWatch("team_id", form);
   const selectedDesignation = Form.useWatch("designation", form);
   const selectedAgentType = Form.useWatch("agent_type", form);
-  const isManagerDesignation = selectedDesignation === "branch_manager" || selectedDesignation === "team_leader";
-  // A branch_manager/team_leader ALSO carrying collections work behaves the
-  // same as a plain telecaller/field_agent for location-assignment purposes.
+  const isManagerDesignation = selectedDesignation === "branch_manager";
+  // A branch_manager ALSO carrying collections work behaves the same as a
+  // plain telecaller/field_agent for location-assignment purposes.
   const isTelecallerType =
     selectedDesignation === "telecaller" || (isManagerDesignation && selectedAgentType === "telecaller");
   const isFieldAgentType =
@@ -162,8 +162,8 @@ export default function EmployeesPage() {
   const branchName = (id: string | null) => branches.find((b) => b.id === id)?.name ?? "—";
   const teamName = (id: string | null) => teams.find((t) => t.id === id)?.name ?? "—";
 
-  // Telecaller-type employees (plain telecallers, or branch_manager/team_leader
-  // with agent_type=telecaller) carry their real assignment in branch_ids/team_ids
+  // Telecaller-type employees (plain telecallers, or branch_manager with
+  // agent_type=telecaller) carry their real assignment in branch_ids/team_ids
   // (multi-branch, multi-team) -- their scalar branch_id/team_id is always null,
   // so falling back to those columns would wrongly show "—" for them.
   const branchCell = (e: Employee) =>
@@ -213,7 +213,7 @@ export default function EmployeesPage() {
 
   const save = async () => {
     const v = await form.validateFields();
-    const managerDesignation = v.designation === "branch_manager" || v.designation === "team_leader";
+    const managerDesignation = v.designation === "branch_manager";
     const telecallerType = v.designation === "telecaller" || (managerDesignation && v.agent_type === "telecaller");
     const agentType = managerDesignation ? (v.agent_type ?? null) : undefined;
 
@@ -251,7 +251,7 @@ export default function EmployeesPage() {
         message.success("Employee updated");
 
         // Multi-branch/multi-team assignment for telecaller-type work
-        // (plain telecallers, or branch_manager/team_leader with agent_type
+        // (plain telecallers, or branch_manager with agent_type
         // = telecaller) -- their work is remote calling, not tied to one
         // place, so it's tracked in junction tables, not the form's scalar
         // branch_id/team_id.
@@ -332,7 +332,6 @@ export default function EmployeesPage() {
           options={[
             { value: "operations_manager", label: "Ops Manager" },
             { value: "branch_manager", label: "Branch Manager" },
-            { value: "team_leader", label: "Team Leader" },
             { value: "telecaller", label: "Telecaller" },
             { value: "field_agent", label: "Field Agent" },
           ]}
@@ -346,7 +345,6 @@ export default function EmployeesPage() {
           options={[
             { value: "telecaller", label: "Telecaller" },
             { value: "field_agent", label: "Field Agent" },
-            { value: "team_leader", label: "Team Leader" },
             { value: "branch_manager", label: "Branch Manager" },
             { value: "operations_manager", label: "Ops Manager" },
           ]}
@@ -478,7 +476,6 @@ export default function EmployeesPage() {
               options={[
                 canEditOps ? { value: "operations_manager", label: "Operations Manager" } : null,
                 { value: "branch_manager", label: "Branch Manager" },
-                { value: "team_leader", label: "Team Leader" },
                 { value: "telecaller", label: "Telecaller" },
                 { value: "field_agent", label: "Field Agent" },
               ].filter((o): o is any => o !== null)}
@@ -508,14 +505,6 @@ export default function EmployeesPage() {
                   form.setFieldValue("team_ids", undefined);
                 }}
               />
-            </Form.Item>
-          )}
-
-          {selectedDesignation === "team_leader" && !isTelecallerType && !isFieldAgentType && (
-            <Form.Item label="Branches / Teams">
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                Derived from led teams. Set via "Manage leaders" in Teams page.
-              </Typography.Text>
             </Form.Item>
           )}
 

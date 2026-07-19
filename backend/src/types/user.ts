@@ -1,7 +1,6 @@
 export const CAPABILITY_FLAGS = {
   agency_admin: "is_agency_admin",
   operations_manager: "is_operations_manager",
-  team_leader: "is_team_leader",
   telecaller: "is_telecaller",
   field_agent: "is_field_agent",
 } as const;
@@ -28,7 +27,6 @@ export interface UserRow {
   password_hash: string;
   is_agency_admin: boolean;
   is_operations_manager: boolean;
-  is_team_leader: boolean;
   is_telecaller: boolean;
   is_field_agent: boolean;
   active_device_id: string | null;
@@ -47,10 +45,10 @@ export function capabilitiesOf(user: UserRow): Capability[] {
 
 /**
  * Convert a designation (+ optional agent_type) to the corresponding boolean
- * flags. `agentType` only has an effect for branch_manager/team_leader ranks
- * (a branch_manager/team_leader can ALSO carry collections work); for plain
- * telecaller/field_agent designations the flag was already true from
- * `designation` alone, and agentType is expected to mirror it exactly.
+ * flags. `agentType` only has an effect for the branch_manager rank (a
+ * branch_manager can ALSO carry collections work); for plain telecaller/
+ * field_agent designations the flag was already true from `designation`
+ * alone, and agentType is expected to mirror it exactly.
  */
 export function booleansForDesignation(
   designation: Capability,
@@ -58,14 +56,12 @@ export function booleansForDesignation(
 ): {
   is_agency_admin: boolean;
   is_operations_manager: boolean;
-  is_team_leader: boolean;
   is_telecaller: boolean;
   is_field_agent: boolean;
 } {
   return {
     is_agency_admin: designation === "agency_admin",
     is_operations_manager: designation === "operations_manager",
-    is_team_leader: designation === "team_leader",
     is_telecaller: designation === "telecaller" || agentType === "telecaller",
     is_field_agent: designation === "field_agent" || agentType === "field_agent",
   };

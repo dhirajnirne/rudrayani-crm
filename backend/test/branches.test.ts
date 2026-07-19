@@ -17,7 +17,7 @@ const TELECALLER_PHONE = "7960000031";
 const AGENT_A_PHONE = "7960000032";
 const AGENT_A2_PHONE = "7960000033";
 const AGENT_A_INACTIVE_PHONE = "7960000034";
-const TL_A_PHONE = "7960000035";
+const BM_A_PHONE = "7960000035";
 const AGENT_B_PHONE = "7960000036";
 
 const MONTH = "2026-07";
@@ -102,12 +102,17 @@ beforeAll(async () => {
     [agencyId, TELECALLER_PHONE, hash],
   );
 
-  // Team leader for Team A1, in branch A.
-  await pool.query(
-    `INSERT INTO users (agency_id, branch_id, team_id, full_name, phone, password_hash, is_team_leader)
-     VALUES ($1, $2, $3, 'Sangli TL', $4, $5, true)`,
-    [agencyId, branchAId, teamA1Id, TL_A_PHONE, hash],
+  // Branch manager for branch A (no team_id/branch_id of their own -- their
+  // branch comes from branches.branch_manager_id, see Phase 2).
+  const bmA = await pool.query(
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, designation)
+     VALUES ($1, 'Sangli BM', $2, $3, 'branch_manager') RETURNING id`,
+    [agencyId, BM_A_PHONE, hash],
   );
+  await pool.query("UPDATE branches SET branch_manager_id = $1 WHERE id = $2", [
+    bmA.rows[0].id,
+    branchAId,
+  ]);
 
   const agentA = await pool.query(
     `INSERT INTO users (agency_id, branch_id, team_id, full_name, phone, password_hash, is_field_agent)
@@ -196,6 +201,7 @@ describe("GET /branches/:id (Phase 9 drill-down)", () => {
 
     expect(res.body.branch.id).toBe(branchAId);
     expect(res.body.branch.name).toBe("Sangli");
+    expect(res.body.branch.branch_manager_name).toBe("Sangli BM");
     expect(res.body.month).toBe(MONTH);
 
     // Team details: both branch-A teams present, branch-B team absent.
@@ -205,12 +211,13 @@ describe("GET /branches/:id (Phase 9 drill-down)", () => {
     expect(teamNames).not.toContain("Kolhapur Team");
 
     const teamA1 = res.body.teams.find((t: { id: string }) => t.id === teamA1Id);
-    expect(teamA1.team_leader_name).toBe("Sangli TL");
-    // Team A1 has the TL + Agent 1 active, and the inactive agent excluded.
-    expect(teamA1.member_count).toBe(2);
+    // Team A1 has Agent 1 active -- the branch manager has no team_id of
+    // their own (Phase 2), and the inactive agent is excluded.
+    expect(teamA1.member_count).toBe(1);
 
-    // agent_count: active users with branch_id = branchA (TL + 2 agents), inactive excluded.
-    expect(res.body.agent_count).toBe(3);
+    // agent_count: active users with branch_id = branchA (2 agents) -- the
+    // branch manager has no branch_id of their own either (Phase 2).
+    expect(res.body.agent_count).toBe(2);
 
     // Targets: branch-scoped collection target for the month.
     expect(res.body.targets).toHaveLength(1);

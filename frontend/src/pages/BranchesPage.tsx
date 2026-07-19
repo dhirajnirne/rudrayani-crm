@@ -3,7 +3,7 @@ import { PlusOutlined } from "@ant-design/icons";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, errorMessage } from "../api/client";
 import BranchDetailDrawer from "../components/BranchDetailDrawer";
-import type { Branch, Employee, Team } from "../types";
+import type { Branch, Employee } from "../types";
 
 interface BranchFormValues {
   name: string;
@@ -12,7 +12,6 @@ interface BranchFormValues {
 
 export default function BranchesPage() {
   const [branches, setBranches] = useState<Branch[]>([]);
-  const [teams, setTeams] = useState<Team[]>([]);
   const [branchManagers, setBranchManagers] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Branch | "new" | null>(null);
@@ -22,13 +21,11 @@ export default function BranchesPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [br, tm, bm] = await Promise.all([
+      const [br, bm] = await Promise.all([
         api.get("/branches"),
-        api.get("/teams"),
         api.get("/employees", { params: { designation: "branch_manager" } }),
       ]);
       setBranches(br.data.branches);
-      setTeams(tm.data.teams);
       setBranchManagers(bm.data.employees);
     } finally {
       setLoading(false);
@@ -44,7 +41,6 @@ export default function BranchesPage() {
   // Ant Design Alert pattern already used elsewhere (AllocationPage etc.)
   // rather than inventing a new UI language.
   const unmanagedBranches = useMemo(() => branches.filter((b) => !b.branch_manager_id), [branches]);
-  const leaderlessTeams = useMemo(() => teams.filter((t) => !t.leaders || t.leaders.length === 0), [teams]);
   const unassignedManagers = useMemo(
     () => branchManagers.filter((bm) => !branches.some((b) => b.branch_manager_id === bm.id)),
     [branchManagers, branches],
@@ -95,7 +91,7 @@ export default function BranchesPage() {
         </Button>
       </div>
 
-      {(unmanagedBranches.length > 0 || leaderlessTeams.length > 0 || unassignedManagers.length > 0) && (
+      {(unmanagedBranches.length > 0 || unassignedManagers.length > 0) && (
         <Space direction="vertical" style={{ width: "100%", marginBottom: 16 }}>
           {unmanagedBranches.length > 0 && (
             <Alert
@@ -104,15 +100,6 @@ export default function BranchesPage() {
               closable
               message={`${unmanagedBranches.length} branch${unmanagedBranches.length > 1 ? "es have" : " has"} no manager assigned yet`}
               description={unmanagedBranches.map((b) => b.name).join(", ")}
-            />
-          )}
-          {leaderlessTeams.length > 0 && (
-            <Alert
-              type="warning"
-              showIcon
-              closable
-              message={`${leaderlessTeams.length} team${leaderlessTeams.length > 1 ? "s have" : " has"} no leader assigned yet`}
-              description={leaderlessTeams.map((t) => t.name).join(", ")}
             />
           )}
           {unassignedManagers.length > 0 && (
