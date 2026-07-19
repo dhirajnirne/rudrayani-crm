@@ -340,7 +340,7 @@ router.get(
     const branchId = req.query.branch_id as string | undefined;
     const teamId = req.query.team_id as string | undefined;
     const designation = req.query.designation as string | undefined;
-    const customerBranchId = req.query.customer_branch_id as string | undefined;
+    const customerBranch = req.query.customer_branch as string | undefined;
     const product = req.query.product as string | undefined;
     // Phase 12 (Management Dashboard "Active Agents" KPI): lets the client
     // get a pre-filtered count instead of fetching everyone and filtering
@@ -364,9 +364,9 @@ router.get(
           AND ($5::boolean IS NULL OR u.is_active = $5)
           AND ($6::text IS NULL OR u.designation = $6)`;
 
-    if (customerBranchId) {
-      params.push(customerBranchId);
-      conditions += ` AND EXISTS (SELECT 1 FROM customers c WHERE (c.assigned_agent_id = u.id OR c.assigned_field_agent_id = u.id) AND c.branch_id = $${params.length})`;
+    if (customerBranch) {
+      params.push(`%${customerBranch}%`);
+      conditions += ` AND EXISTS (SELECT 1 FROM customers c WHERE (c.assigned_agent_id = u.id OR c.assigned_field_agent_id = u.id) AND (c.custom_fields->>'branch' ILIKE $${params.length} OR c.custom_fields->>'Branch' ILIKE $${params.length}))`;
     }
     if (product) {
       params.push(product);

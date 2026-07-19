@@ -66,7 +66,6 @@ export default function EmployeesPage() {
   const [resetForm] = Form.useForm<{ new_password: string }>();
 
   const selectedBranch = Form.useWatch("branch_id", form);
-  const selectedTeam = Form.useWatch("team_id", form);
   const selectedDesignation = Form.useWatch("designation", form);
   const selectedAgentType = Form.useWatch("agent_type", form);
   const isManagerDesignation = selectedDesignation === "branch_manager";

@@ -102,7 +102,7 @@ function useBranchTeam() {
 function useAssignableAgents(
   branchId: string | null,
   teamId: string | null,
-  customerBranchId?: string | null,
+  customerBranch?: string | null,
   product?: string | null,
 ) {
   const [agents, setAgents] = useState<Employee[]>([]);
@@ -110,7 +110,7 @@ function useAssignableAgents(
     const params: Record<string, string> = {};
     if (branchId) params.branch_id = branchId;
     if (teamId) params.team_id = teamId;
-    if (customerBranchId) params.customer_branch_id = customerBranchId;
+    if (customerBranch) params.customer_branch = customerBranch;
     if (product) params.product = product;
     api.get("/employees", { params }).then((res) => {
       setAgents(
@@ -241,8 +241,8 @@ function UnallocatedQueue({ onOpenDetail }: { onOpenDetail: (id: string) => void
   const filters = useCompanyFilters();
   const branchTeam = useBranchTeam();
   const [branches, setBranches] = useState<Branch[]>([]);
-  const [customerBranchId, setCustomerBranchId] = useState<string | null>(null);
-  const agents = useAssignableAgents(branchTeam.branchId, branchTeam.teamId, customerBranchId, filters.product);
+  const [customerBranch, setCustomerBranch] = useState<string>("");
+  const agents = useAssignableAgents(branchTeam.branchId, branchTeam.teamId, customerBranch, filters.product);
   const allAgents = useAssignableAgents(null, null, null, null);
   const telecallers = useMemo(() => allAgents.filter((a) => a.capabilities.includes("telecaller")), [allAgents]);
   const fieldAgents = useMemo(() => agents.filter((a) => a.capabilities.includes("field_agent")), [agents]);
@@ -268,7 +268,7 @@ function UnallocatedQueue({ onOpenDetail }: { onOpenDetail: (id: string) => void
         if (filters.companyId) params.company_id = filters.companyId;
         if (filters.product) params.product = filters.product;
         if (filters.bucket) params.bucket = filters.bucket;
-        if (customerBranchId) params.branch_id = customerBranchId;
+        if (customerBranch) params.customer_branch = customerBranch;
         const res = await api.get("/allocations/unallocated", { params });
         setCustomers(res.data.customers);
         setTotal(res.data.total);
@@ -278,7 +278,7 @@ function UnallocatedQueue({ onOpenDetail }: { onOpenDetail: (id: string) => void
         setLoading(false);
       }
     },
-    [filters.companyId, filters.product, filters.bucket, customerBranchId],
+    [filters.companyId, filters.product, filters.bucket, customerBranch],
   );
 
   useEffect(() => {
@@ -344,13 +344,11 @@ function UnallocatedQueue({ onOpenDetail }: { onOpenDetail: (id: string) => void
 
       <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
         <Col xs={24} sm={6}>
-          <Select
-            style={{ width: "100%" }}
-            title="All customer branches" placeholder="All customer branches"
+          <Input
+            title="Search customer branch" placeholder="Search customer branch"
             allowClear
-            value={customerBranchId}
-            onChange={(v) => setCustomerBranchId(v ?? null)}
-            options={branches.map((b) => ({ value: b.id, label: b.name }))}
+            value={customerBranch}
+            onChange={(e) => setCustomerBranch(e.target.value)}
           />
         </Col>
       </Row>

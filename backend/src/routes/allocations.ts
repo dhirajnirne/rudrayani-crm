@@ -21,7 +21,7 @@ router.get(
         company_id: z.string().uuid().optional(),
         product: z.string().optional(),
         bucket: z.string().optional(),
-        branch_id: z.string().uuid().optional(),
+        customer_branch: z.string().optional(),
         page: z.coerce.number().int().min(1).default(1),
         limit: z.coerce.number().int().min(1).max(200).default(50),
       })
@@ -46,9 +46,9 @@ router.get(
       params.push(q.bucket);
       conditions.push(`c.bucket = $${params.length}`);
     }
-    if (q.branch_id) {
-      params.push(q.branch_id);
-      conditions.push(`c.branch_id = $${params.length}`);
+    if (q.customer_branch) {
+      params.push(`%${q.customer_branch}%`);
+      conditions.push(`(c.custom_fields->>'branch' ILIKE $${params.length} OR c.custom_fields->>'Branch' ILIKE $${params.length})`);
     }
 
     const where = conditions.join(" AND ");
