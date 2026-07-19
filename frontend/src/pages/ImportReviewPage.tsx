@@ -220,7 +220,7 @@ export default function ImportReviewPage() {
         loading={loading}
         dataSource={items}
         pagination={{ pageSize: 20 }}
-        scroll={{ x: 1200 }}
+        scroll={{ x: "max-content" }}
         rowSelection={{
           selectedRowKeys: selectedIds,
           onChange: (keys) => setSelectedIds(keys as string[]),

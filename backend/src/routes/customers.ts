@@ -131,6 +131,24 @@ router.get(
   }),
 );
 
+router.get(
+  "/branches",
+  asyncHandler(async (req, res) => {
+    // Extract unique customer branches from custom_fields
+    const { rows } = await pool.query(
+      `SELECT DISTINCT UPPER(TRIM(COALESCE(c.custom_fields->>'branch', c.custom_fields->>'Branch'))) AS branch_name
+       FROM customers c
+       JOIN companies co ON co.id = c.company_id
+       WHERE co.agency_id = $1
+         AND COALESCE(c.custom_fields->>'branch', c.custom_fields->>'Branch') IS NOT NULL
+         AND TRIM(COALESCE(c.custom_fields->>'branch', c.custom_fields->>'Branch')) != ''
+       ORDER BY branch_name`,
+      [req.user!.agency_id],
+    );
+    res.json({ branches: rows.map(r => r.branch_name) });
+  }),
+);
+
 /**
  * Customer 360 view (Phase 7): identity + the source columns the agency chose
  * to keep as "detail" fields at import time, plus every trail of activity —

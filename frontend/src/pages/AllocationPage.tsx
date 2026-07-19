@@ -241,6 +241,7 @@ function UnallocatedQueue({ onOpenDetail }: { onOpenDetail: (id: string) => void
   const filters = useCompanyFilters();
   const branchTeam = useBranchTeam();
   const [customerBranch, setCustomerBranch] = useState<string>("");
+  const [customerBranches, setCustomerBranches] = useState<string[]>([]);
   const agents = useAssignableAgents(branchTeam.branchId, branchTeam.teamId, customerBranch, filters.product);
   const allAgents = useAssignableAgents(null, null, null, null);
   const telecallers = useMemo(() => allAgents.filter((a) => a.capabilities.includes("telecaller")), [allAgents]);
@@ -254,6 +255,10 @@ function UnallocatedQueue({ onOpenDetail }: { onOpenDetail: (id: string) => void
   const [fieldAgentId, setFieldAgentId] = useState<string | null>(null);
   const [assigning, setAssigning] = useState(false);
   const [assigningField, setAssigningField] = useState(false);
+
+  useEffect(() => {
+    api.get("/customers/branches").then((res) => setCustomerBranches(res.data.branches));
+  }, []);
 
   const load = useCallback(
     async (pg = 1) => {
@@ -339,11 +344,14 @@ function UnallocatedQueue({ onOpenDetail }: { onOpenDetail: (id: string) => void
 
       <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
         <Col xs={24} sm={6}>
-          <Input
+          <Select
+            style={{ width: "100%" }}
             title="Search customer branch" placeholder="Search customer branch"
             allowClear
-            value={customerBranch}
-            onChange={(e) => setCustomerBranch(e.target.value)}
+            showSearch
+            value={customerBranch || null}
+            onChange={(v) => setCustomerBranch(v ?? "")}
+            options={customerBranches.map((b) => ({ value: b, label: b }))}
           />
         </Col>
       </Row>
