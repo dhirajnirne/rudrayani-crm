@@ -20,13 +20,15 @@ const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
  * per manager (enforced app-side here with a friendly error, and DB-side by
  * the uq_branches_branch_manager_id UNIQUE constraint as a backstop).
  */
-async function assertBranchManager(
+export async function assertBranchManager(
   agencyId: string,
   userId: string | null | undefined,
   excludeBranchId?: string,
+  client?: any
 ): Promise<void> {
   if (!userId) return;
-  const { rows } = await pool.query<{ designation: string; full_name: string }>(
+  const db = client ?? pool;
+  const { rows } = await db.query(
     "SELECT designation, full_name FROM users WHERE id = $1 AND agency_id = $2",
     [userId, agencyId],
   );
@@ -42,7 +44,7 @@ async function assertBranchManager(
       `${rows[0].full_name} is not a Branch Manager. Change their designation to Branch Manager on the Employees page first, or pick someone who already has that designation.`,
     );
   }
-  const { rows: existing } = await pool.query<{ id: string; name: string }>(
+  const { rows: existing } = await db.query(
     "SELECT id, name FROM branches WHERE branch_manager_id = $1",
     [userId],
   );

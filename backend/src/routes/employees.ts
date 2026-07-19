@@ -7,6 +7,7 @@ import { HttpError } from "../middleware/error-handler";
 import { hashPassword } from "../services/auth-service";
 import { capabilitiesHavePermission } from "../services/permission-service";
 import { dimensionBreakdown, type BreakdownRow } from "../services/report-service";
+import { assertBranchManager } from "./branches";
 import { getSmsProvider } from "../services/sms/sms-provider";
 import { logger } from "../config/logger";
 import {
@@ -35,6 +36,7 @@ const createSchema = z.object({
   manager_id: z.string().uuid().optional().nullable(),
   designation: designationSchema,
   agent_type: agentTypeSchema.optional().nullable(),
+  managed_branch_id: z.string().uuid().optional().nullable(),
 });
 
 const updateSchema = z.object({
@@ -46,6 +48,7 @@ const updateSchema = z.object({
   is_active: z.boolean().optional(),
   designation: designationSchema.optional(),
   agent_type: agentTypeSchema.optional().nullable(),
+  managed_branch_id: z.string().uuid().optional().nullable(),
 });
 
 /** Human-readable names for error messages -- never surface raw enum values to users. */
@@ -308,6 +311,27 @@ async function attachMultiAssignments<T extends { id: string; designation: strin
   );
 }
 
+async function attachManagedBranch<T extends { id: string; designation: string }>(
+  users: T[],
+): Promise<(T & { managed_branch_id?: string | null })[]> {
+  const branchManagerIds = users.filter((u) => u.designation === "branch_manager").map((u) => u.id);
+  if (branchManagerIds.length === 0) return users;
+
+  const { rows } = await pool.query<{ id: string; branch_manager_id: string }>(
+    "SELECT id, branch_manager_id FROM branches WHERE branch_manager_id = ANY($1::uuid[])",
+    [branchManagerIds],
+  );
+
+  const managedBranchByUser = new Map<string, string>();
+  for (const r of rows) {
+    managedBranchByUser.set(r.branch_manager_id, r.id);
+  }
+
+  return users.map((u) =>
+    u.designation === "branch_manager" ? { ...u, managed_branch_id: managedBranchByUser.get(u.id) ?? null } : u,
+  );
+}
+
 router.get(
   "/",
   requirePermission("employees.view"),
@@ -354,12 +378,14 @@ router.get(
       params,
     );
     const withMulti = await attachMultiAssignments(rows);
+    const withManaged = await attachManagedBranch(withMulti);
     res.json({
-      employees: withMulti.map((u) => ({
+      employees: withManaged.map((u) => ({
         ...publicUser(u),
         is_active: u.is_active,
         branch_ids: u.branch_ids,
         team_ids: u.team_ids,
+        managed_branch_id: u.managed_branch_id,
       })),
     });
   }),
@@ -378,32 +404,75 @@ router.post(
     }
     await assertManager(req.user!.agency_id, body.designation as Capability, body.manager_id);
 
-    const passwordHash = await hashPassword(body.password);
-    const booleans = booleansForDesignation(body.designation, agentType);
-    const { rows } = await pool.query<UserRow>(
-      `INSERT INTO users
-         (agency_id, full_name, phone, email, password_hash, branch_id, team_id, manager_id, designation, agent_type,
-          is_operations_manager, is_telecaller, is_field_agent)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-       RETURNING *`,
-      [
-        req.user!.agency_id,
-        body.full_name,
-        body.phone,
-        body.email ?? null,
-        passwordHash,
-        body.branch_id ?? null,
-        body.team_id ?? null,
-        body.manager_id ?? null,
-        body.designation,
-        agentType,
-        booleans.is_operations_manager,
-        booleans.is_telecaller,
-        booleans.is_field_agent,
-      ],
-    );
+    const client = await pool.connect();
+    let createdUser: UserRow;
+    try {
+      await client.query("BEGIN");
+      
+      if (body.designation === "branch_manager" && body.managed_branch_id) {
+        // Run assertBranchManager with the transaction client to ensure it locks/reads fresh data
+        await assertBranchManager(req.user!.agency_id, null, undefined, client); // Wait, this just checks if the user IS a branch manager, but they don't exist yet!
+        // Actually, we need to check if the target branch ALREADY has a manager
+        const { rows: existingManager } = await client.query<{ id: string; branch_manager_id: string | null }>(
+          "SELECT id, branch_manager_id FROM branches WHERE id = $1 AND agency_id = $2 FOR UPDATE",
+          [body.managed_branch_id, req.user!.agency_id],
+        );
+        if (existingManager.length === 0) {
+          throw new HttpError(400, "The selected managed branch could not be found.");
+        }
+        if (existingManager[0].branch_manager_id) {
+          throw new HttpError(
+            400,
+            "The selected branch already has a Branch Manager. A branch can only have one manager.",
+          );
+        }
+      } else if (body.designation !== "branch_manager" && body.managed_branch_id) {
+        throw new HttpError(400, "Only Branch Managers can be assigned a managed branch.");
+      }
+
+      const passwordHash = await hashPassword(body.password);
+      const booleans = booleansForDesignation(body.designation, agentType);
+      const { rows } = await client.query<UserRow>(
+        `INSERT INTO users
+           (agency_id, full_name, phone, email, password_hash, branch_id, team_id, manager_id, designation, agent_type,
+            is_operations_manager, is_telecaller, is_field_agent)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+         RETURNING *`,
+        [
+          req.user!.agency_id,
+          body.full_name,
+          body.phone,
+          body.email ?? null,
+          passwordHash,
+          body.branch_id ?? null,
+          body.team_id ?? null,
+          body.manager_id ?? null,
+          body.designation,
+          agentType,
+          booleans.is_operations_manager,
+          booleans.is_telecaller,
+          booleans.is_field_agent,
+        ],
+      );
+      createdUser = rows[0];
+
+      if (body.designation === "branch_manager" && body.managed_branch_id) {
+        await client.query(
+          "UPDATE branches SET branch_manager_id = $1 WHERE id = $2 AND agency_id = $3",
+          [createdUser.id, body.managed_branch_id, req.user!.agency_id],
+        );
+      }
+
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+
     await notifyCredentials(body.phone, body.password, false);
-    res.status(201).json({ employee: { ...publicUser(rows[0]), is_active: rows[0].is_active } });
+    res.status(201).json({ employee: { ...publicUser(createdUser), is_active: createdUser.is_active, managed_branch_id: body.managed_branch_id ?? null } });
   }),
 );
 
@@ -534,12 +603,14 @@ router.get(
     );
     if (!rows[0]) throw new HttpError(404, "Employee not found");
     const [withMulti] = await attachMultiAssignments(rows);
+    const [withManaged] = await attachManagedBranch([withMulti]);
     res.json({
       employee: {
-        ...publicUser(withMulti),
-        is_active: withMulti.is_active,
-        branch_ids: withMulti.branch_ids,
-        team_ids: withMulti.team_ids,
+        ...publicUser(withManaged),
+        is_active: withManaged.is_active,
+        branch_ids: withManaged.branch_ids,
+        team_ids: withManaged.team_ids,
+        managed_branch_id: withManaged.managed_branch_id,
       },
     });
   }),
@@ -615,41 +686,134 @@ router.patch(
     const booleans = agentTypeChanging
       ? booleansForDesignation((body.designation ?? existing.designation) as Capability, newAgentType)
       : null;
-    const { rows } = await pool.query<UserRow>(
-      `UPDATE users SET
-          full_name = COALESCE($3, full_name),
-          email = COALESCE($4, email),
-          branch_id = CASE WHEN $5::boolean THEN $6::uuid ELSE branch_id END,
-          team_id = CASE WHEN $7::boolean THEN $8::uuid ELSE team_id END,
-          manager_id = CASE WHEN $10::boolean THEN $11::uuid ELSE manager_id END,
-          designation = COALESCE($12, designation),
-          agent_type = CASE WHEN $16::boolean THEN $17::text ELSE agent_type END,
-          is_active = COALESCE($9, is_active),
-          is_operations_manager = CASE WHEN $12::text IS NOT NULL THEN $13::boolean ELSE is_operations_manager END,
-          is_telecaller = CASE WHEN $16::boolean THEN $14::boolean ELSE is_telecaller END,
-          is_field_agent = CASE WHEN $16::boolean THEN $15::boolean ELSE is_field_agent END
-        WHERE id = $1 AND agency_id = $2
-        RETURNING *`,
-      [
-        req.params.id,
-        req.user!.agency_id,
-        body.full_name ?? null,
-        body.email ?? null,
-        body.branch_id !== undefined,
-        body.branch_id ?? null,
-        body.team_id !== undefined,
-        body.team_id ?? null,
-        body.is_active ?? null,
-        body.manager_id !== undefined,
-        body.manager_id ?? null,
-        body.designation ?? null,
-        booleans?.is_operations_manager ?? null,
-        booleans?.is_telecaller ?? null,
-        booleans?.is_field_agent ?? null,
-        agentTypeChanging,
-        newAgentType,
-      ],
-    );
+
+    const client = await pool.connect();
+    let updatedUser: UserRow;
+    let managedBranchIdToReturn: string | null = null;
+    try {
+      await client.query("BEGIN");
+
+      const effectiveDesignation = (body.designation ?? existing.designation) as Capability;
+      const isActive = body.is_active !== undefined ? body.is_active : existing.is_active;
+      const isEligibleManager = effectiveDesignation === "branch_manager" && isActive;
+      
+      if (!isEligibleManager) {
+        // If they are no longer an active branch manager, clear their branch management
+        await client.query(
+          "UPDATE branches SET branch_manager_id = NULL WHERE branch_manager_id = $1 AND agency_id = $2",
+          [req.params.id, req.user!.agency_id],
+        );
+      } else if (body.managed_branch_id !== undefined) {
+        // Only modify if managed_branch_id is explicitly sent
+        if (body.managed_branch_id === null) {
+          await client.query(
+            "UPDATE branches SET branch_manager_id = NULL WHERE branch_manager_id = $1 AND agency_id = $2",
+            [req.params.id, req.user!.agency_id],
+          );
+        } else {
+          // Check if target branch exists and is available
+          const { rows: targetBranch } = await client.query<{ id: string; branch_manager_id: string | null }>(
+            "SELECT id, branch_manager_id FROM branches WHERE id = $1 AND agency_id = $2 FOR UPDATE",
+            [body.managed_branch_id, req.user!.agency_id],
+          );
+          if (targetBranch.length === 0) {
+            throw new HttpError(400, "The selected managed branch could not be found.");
+          }
+          if (targetBranch[0].branch_manager_id && targetBranch[0].branch_manager_id !== req.params.id) {
+            throw new HttpError(
+              400,
+              "The selected branch already has a Branch Manager. A branch can only have one manager.",
+            );
+          }
+          
+          // Clear their old branch if they had one
+          await client.query(
+            "UPDATE branches SET branch_manager_id = NULL WHERE branch_manager_id = $1 AND agency_id = $2 AND id != $3",
+            [req.params.id, req.user!.agency_id, body.managed_branch_id],
+          );
+          // Set new branch
+          await client.query(
+            "UPDATE branches SET branch_manager_id = $1 WHERE id = $2 AND agency_id = $3",
+            [req.params.id, body.managed_branch_id, req.user!.agency_id],
+          );
+          managedBranchIdToReturn = body.managed_branch_id;
+        }
+      } else {
+         // managed_branch_id not sent, preserve existing
+         const { rows: existingBranch } = await client.query<{ id: string }>(
+           "SELECT id FROM branches WHERE branch_manager_id = $1 AND agency_id = $2",
+           [req.params.id, req.user!.agency_id],
+         );
+         managedBranchIdToReturn = existingBranch.length > 0 ? existingBranch[0].id : null;
+      }
+
+      const teamChanged = body.team_id !== undefined && body.team_id !== existing.team_id;
+      const branchChanged = body.branch_id !== undefined && body.branch_id !== existing.branch_id;
+      const deactivated = body.is_active === false && existing.is_active;
+
+      if (deactivated || teamChanged || branchChanged) {
+        await client.query(
+          `INSERT INTO allocation_logs (customer_id, from_agent_id, to_agent_id, allocated_by, reason, slot)
+           SELECT id, assigned_agent_id, NULL, $2, 'Agent moved or deactivated', 'primary'
+           FROM customers WHERE assigned_agent_id = $1`,
+          [req.params.id, req.user!.id]
+        );
+        
+        await client.query(
+          `INSERT INTO allocation_logs (customer_id, from_agent_id, to_agent_id, allocated_by, reason, slot)
+           SELECT id, assigned_field_agent_id, NULL, $2, 'Agent moved or deactivated', 'secondary'
+           FROM customers WHERE assigned_field_agent_id = $1`,
+          [req.params.id, req.user!.id]
+        );
+
+        await client.query("UPDATE customers SET assigned_agent_id = NULL WHERE assigned_agent_id = $1", [req.params.id]);
+        await client.query("UPDATE customers SET assigned_field_agent_id = NULL WHERE assigned_field_agent_id = $1", [req.params.id]);
+      }
+
+      const { rows } = await client.query<UserRow>(
+        `UPDATE users SET
+            full_name = COALESCE($3, full_name),
+            email = COALESCE($4, email),
+            branch_id = CASE WHEN $5::boolean THEN $6::uuid ELSE branch_id END,
+            team_id = CASE WHEN $7::boolean THEN $8::uuid ELSE team_id END,
+            manager_id = CASE WHEN $10::boolean THEN $11::uuid ELSE manager_id END,
+            designation = COALESCE($12, designation),
+            agent_type = CASE WHEN $16::boolean THEN $17::text ELSE agent_type END,
+            is_active = COALESCE($9, is_active),
+            is_operations_manager = CASE WHEN $12::text IS NOT NULL THEN $13::boolean ELSE is_operations_manager END,
+            is_telecaller = CASE WHEN $16::boolean THEN $14::boolean ELSE is_telecaller END,
+            is_field_agent = CASE WHEN $16::boolean THEN $15::boolean ELSE is_field_agent END
+          WHERE id = $1 AND agency_id = $2
+          RETURNING *`,
+        [
+          req.params.id,
+          req.user!.agency_id,
+          body.full_name ?? null,
+          body.email ?? null,
+          body.branch_id !== undefined,
+          body.branch_id ?? null,
+          body.team_id !== undefined,
+          body.team_id ?? null,
+          body.is_active ?? null,
+          body.manager_id !== undefined,
+          body.manager_id ?? null,
+          body.designation ?? null,
+          booleans?.is_operations_manager ?? null,
+          booleans?.is_telecaller ?? null,
+          booleans?.is_field_agent ?? null,
+          agentTypeChanging,
+          newAgentType,
+        ],
+      );
+      updatedUser = rows[0];
+
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
 
     // Deactivation takes effect immediately: kill sessions.
     if (body.is_active === false) {
@@ -658,7 +822,7 @@ router.patch(
         [req.params.id],
       );
     }
-    res.json({ employee: { ...publicUser(rows[0]), is_active: rows[0].is_active } });
+    res.json({ employee: { ...publicUser(updatedUser), is_active: updatedUser.is_active, managed_branch_id: managedBranchIdToReturn } });
   }),
 );
 
@@ -732,13 +896,44 @@ router.put(
       }
     }
 
-    // Replace telecaller_branches entries
-    await pool.query("DELETE FROM telecaller_branches WHERE user_id = $1", [req.params.id]);
-    if (body.branch_ids.length > 0) {
-      await pool.query(
-        "INSERT INTO telecaller_branches (user_id, branch_id) SELECT $1, unnest($2::uuid[])",
-        [req.params.id, body.branch_ids],
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      
+      const { rows: existingRows } = await client.query<{ branch_id: string }>(
+        "SELECT branch_id FROM telecaller_branches WHERE user_id = $1", [req.params.id]
       );
+      const existingBranchIds = existingRows.map(r => r.branch_id);
+      const removedBranches = existingBranchIds.filter(id => !body.branch_ids.includes(id));
+
+      if (removedBranches.length > 0) {
+        await client.query(
+          `INSERT INTO allocation_logs (customer_id, from_agent_id, to_agent_id, allocated_by, reason, slot)
+           SELECT id, assigned_agent_id, NULL, $2, 'Agent removed from branch', 'primary'
+           FROM customers WHERE assigned_agent_id = $1 AND branch_id = ANY($3)`,
+          [req.params.id, req.user!.id, removedBranches]
+        );
+        await client.query(
+          "UPDATE customers SET assigned_agent_id = NULL WHERE assigned_agent_id = $1 AND branch_id = ANY($2)",
+          [req.params.id, removedBranches]
+        );
+      }
+
+      // Replace telecaller_branches entries
+      await client.query("DELETE FROM telecaller_branches WHERE user_id = $1", [req.params.id]);
+      if (body.branch_ids.length > 0) {
+        await client.query(
+          "INSERT INTO telecaller_branches (user_id, branch_id) SELECT $1, unnest($2::uuid[])",
+          [req.params.id, body.branch_ids],
+        );
+      }
+
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
     }
 
     res.json({ success: true });
@@ -781,13 +976,44 @@ router.put(
       }
     }
 
-    // Replace telecaller_teams entries
-    await pool.query("DELETE FROM telecaller_teams WHERE user_id = $1", [req.params.id]);
-    if (body.team_ids.length > 0) {
-      await pool.query(
-        "INSERT INTO telecaller_teams (user_id, team_id) SELECT $1, unnest($2::uuid[])",
-        [req.params.id, body.team_ids],
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      const { rows: existingRows } = await client.query<{ team_id: string }>(
+        "SELECT team_id FROM telecaller_teams WHERE user_id = $1", [req.params.id]
       );
+      const existingTeamIds = existingRows.map(r => r.team_id);
+      const removedTeams = existingTeamIds.filter(id => !body.team_ids.includes(id));
+
+      if (removedTeams.length > 0) {
+        await client.query(
+          `INSERT INTO allocation_logs (customer_id, from_agent_id, to_agent_id, allocated_by, reason, slot)
+           SELECT id, assigned_agent_id, NULL, $2, 'Agent removed from team', 'primary'
+           FROM customers WHERE assigned_agent_id = $1 AND assigned_team_id = ANY($3)`,
+          [req.params.id, req.user!.id, removedTeams]
+        );
+        await client.query(
+          "UPDATE customers SET assigned_agent_id = NULL WHERE assigned_agent_id = $1 AND assigned_team_id = ANY($2)",
+          [req.params.id, removedTeams]
+        );
+      }
+
+      // Replace telecaller_teams entries
+      await client.query("DELETE FROM telecaller_teams WHERE user_id = $1", [req.params.id]);
+      if (body.team_ids.length > 0) {
+        await client.query(
+          "INSERT INTO telecaller_teams (user_id, team_id) SELECT $1, unnest($2::uuid[])",
+          [req.params.id, body.team_ids],
+        );
+      }
+
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
     }
 
     res.json({ success: true });

@@ -35,6 +35,7 @@ interface EmployeeFormValues {
   team_id?: string | null;
   team_ids?: string[]; // Multi-team for telecaller-type work
   manager_id?: string | null;
+  managed_branch_id?: string | null;
   designation?: Exclude<Designation, "agency_admin">;
   agent_type?: AgentType | null;
   is_active?: boolean;
@@ -204,6 +205,7 @@ export default function EmployeesPage() {
       team_id: isFieldAgentTypeRow || !isTelecallerTypeRow ? e.team_id : undefined,
       team_ids: isTelecallerTypeRow ? (e.team_ids ?? (e.team_id ? [e.team_id] : [])) : undefined,
       manager_id: e.manager_id,
+      managed_branch_id: e.managed_branch_id ?? undefined,
       designation: e.designation as EmployeeFormValues["designation"],
       agent_type: e.agent_type ?? undefined,
       is_active: e.is_active,
@@ -227,6 +229,7 @@ export default function EmployeesPage() {
           branch_id: telecallerType ? null : (v.branch_id ?? null),
           team_id: telecallerType ? null : (v.team_id ?? null),
           manager_id: v.manager_id ?? null,
+          managed_branch_id: managerDesignation ? (v.managed_branch_id ?? null) : undefined,
           designation: v.designation,
           agent_type: agentType,
         });
@@ -244,6 +247,7 @@ export default function EmployeesPage() {
           branch_id: telecallerType ? null : (v.branch_id ?? null),
           team_id: telecallerType ? null : (v.team_id ?? null),
           manager_id: v.manager_id ?? null,
+          managed_branch_id: managerDesignation ? (v.managed_branch_id ?? null) : undefined,
           is_active: v.is_active,
           designation: v.designation,
           agent_type: agentType,
@@ -482,6 +486,7 @@ export default function EmployeesPage() {
               onChange={() => {
                 form.setFieldValue("agent_type", undefined);
                 form.setFieldValue("branch_id", undefined);
+                form.setFieldValue("managed_branch_id", undefined);
                 form.setFieldValue("team_id", undefined);
                 form.setFieldValue("branch_ids", undefined);
                 form.setFieldValue("team_ids", undefined);
@@ -508,11 +513,17 @@ export default function EmployeesPage() {
             </Form.Item>
           )}
 
-          {selectedDesignation === "branch_manager" && !isTelecallerType && !isFieldAgentType && (
-            <Form.Item label="Branch">
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                Set via the Branches page (assign this person as a branch's manager).
-              </Typography.Text>
+          {selectedDesignation === "branch_manager" && (
+            <Form.Item
+              name="managed_branch_id"
+              label="Managed Branch"
+              rules={[{ required: true, message: "A Branch Manager must be assigned a branch to manage" }]}
+            >
+              <Select
+                allowClear
+                options={branches.map((b) => ({ value: b.id, label: b.name }))}
+                placeholder="Select managed branch"
+              />
             </Form.Item>
           )}
 
