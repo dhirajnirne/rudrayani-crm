@@ -446,7 +446,14 @@ router.post(
             values,
           );
         } else if (kind === "addition") {
-          // Delete the customer (with safety: already verified no work done since)
+          // Delete the customer (with safety: already verified no work done since).
+          // Dependents with no ON DELETE CASCADE must go first (FK order) --
+          // import_row_backups references this very customer (including the
+          // backup row we're processing right now), and allocation_logs holds
+          // the auto-assignment made at approval time, which predates this
+          // backup's timestamp and so isn't caught by the "worked since" check.
+          await client.query(`DELETE FROM import_row_backups WHERE customer_id = $1`, [customer_id]);
+          await client.query(`DELETE FROM allocation_logs WHERE customer_id = $1`, [customer_id]);
           await client.query(`DELETE FROM customers WHERE id = $1`, [customer_id]);
         } else if (kind === "reactivation") {
           // Re-deactivate by setting status = 'recalled', recalled_at = now()

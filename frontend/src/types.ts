@@ -178,8 +178,11 @@ export interface WorklistCustomer {
   emi: string | null;
   custom_fields: Record<string, unknown>;
   company_name: string;
+  branch_name?: string | null;
   is_primary_for_me: boolean;
   is_field_agent_for_me: boolean;
+  assigned_agent_name?: string | null;
+  assigned_field_agent_name?: string | null;
   last_remark: string | null;
   last_call_at: string | null;
   last_result_code: string | null;

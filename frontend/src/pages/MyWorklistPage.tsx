@@ -1,14 +1,16 @@
-import { Alert, Badge, Button, Collapse, Input, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
-import { CalendarOutlined, PhoneOutlined } from "@ant-design/icons";
+import { Alert, Badge, Button, Collapse, Input, Modal, Segmented, Select, Space, Table, Tag, Typography, message } from "antd";
+import { CalendarOutlined, DollarOutlined, EditOutlined, EnvironmentOutlined, FileTextOutlined, PhoneOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, errorMessage } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
 import CustomerDetailDrawer from "../components/CustomerDetailDrawer";
 import LogCallModal from "../components/LogCallModal";
 import RecordPaymentModal from "../components/RecordPaymentModal";
+import ReportCorrectionModal, { type CorrectableRecordType } from "../components/ReportCorrectionModal";
 import { palette } from "../theme/tokens";
-import type { Branch, DispositionCode, WorklistCustomer } from "../types";
+import type { DispositionCode, WorklistCustomer } from "../types";
 
 dayjs.extend(relativeTime);
 
@@ -33,6 +35,42 @@ interface PtpDue {
   promised_date: string;
 }
 
+interface AgentActivityRow {
+  kind: "call" | "payment" | "ptp" | "field_visit";
+  id: string;
+  at: string;
+  agent_id: string;
+  agent_name?: string | null;
+  customer_id: string;
+  customer_name: string;
+  loan_number: string;
+  remark: string | null;
+  amount: string | null;
+  detail: string | null;
+}
+
+const ACTIVITY_ICON: Record<AgentActivityRow["kind"], React.ReactNode> = {
+  call: <PhoneOutlined style={{ color: "#1677ff" }} />,
+  payment: <DollarOutlined style={{ color: "#52c41a" }} />,
+  ptp: <FileTextOutlined style={{ color: "#faad14" }} />,
+  field_visit: <EnvironmentOutlined style={{ color: "#722ed1" }} />,
+};
+
+const ACTIVITY_LABEL: Record<AgentActivityRow["kind"], string> = {
+  call: "Call",
+  payment: "Payment",
+  ptp: "PTP",
+  field_visit: "Field Visit",
+};
+
+// field_visit has no correction-request equivalent -- only calls/payments/PTPs
+// are correctable (see ReportCorrectionModal's CorrectableRecordType).
+const CORRECTABLE_KIND: Partial<Record<AgentActivityRow["kind"], CorrectableRecordType>> = {
+  call: "call_log",
+  payment: "payment",
+  ptp: "ptp",
+};
+
 /**
  * A telecaller/field agent's own worklist on web -- the properly-scoped
  * equivalent of the (now hidden-for-this-persona) generic Customers page.
@@ -40,17 +78,36 @@ interface PtpDue {
  * (GET /worklist), but a denser table suited to a desk/keyboard.
  */
 export default function MyWorklistPage() {
+  const { user } = useAuth();
+  const isBranchManager = !!user?.capabilities.includes("branch_manager");
+
   const [customers, setCustomers] = useState<WorklistCustomer[]>([]);
   const [reminders, setReminders] = useState<ReminderDue[]>([]);
   const [ptpsDue, setPtpsDue] = useState<PtpDue[]>([]);
-  const [branches, setBranches] = useState<Branch[]>([]);
+  const [customerBranches, setCustomerBranches] = useState<{ value: string; label: string }[]>([]);
   const [products, setProducts] = useState<{ raw_label: string; canonical_label: string }[]>([]);
   const [buckets, setBuckets] = useState<{ id: string; name: string }[]>([]);
 
   const [search, setSearch] = useState("");
-  const [filterBranch, setFilterBranch] = useState<string | undefined>();
+  const [filterCompany, setFilterCompany] = useState<string | undefined>();
+  const [filterCustomerBranch, setFilterCustomerBranch] = useState<string | undefined>();
   const [filterProduct, setFilterProduct] = useState<string | undefined>();
   const [filterBucket, setFilterBucket] = useState<string | undefined>();
+  const [scope, setScope] = useState<"personal" | "team">("personal");
+
+  // Companies actually present in the worklist -- cheap client-side derivation
+  // (mirrors the mobile app's same approach), no new endpoint. Company itself
+  // is filtered client-side too (below), so this list never shrinks out from
+  // under the dropdown the way a server-filtered derivation would.
+  const companyOptions = useMemo(() => {
+    const names = Array.from(new Set(customers.map((c) => c.company_name))).sort();
+    return names.map((name) => ({ value: name, label: name }));
+  }, [customers]);
+
+  const displayedCustomers = useMemo(
+    () => (filterCompany ? customers.filter((c) => c.company_name === filterCompany) : customers),
+    [customers, filterCompany],
+  );
 
   const [loading, setLoading] = useState(true);
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -61,15 +118,42 @@ export default function MyWorklistPage() {
   const [reallocReason, setReallocReason] = useState("");
   const [reallocSubmitting, setReallocSubmitting] = useState(false);
 
+  // Today's Work
+  const [todayActivity, setTodayActivity] = useState<AgentActivityRow[]>([]);
+  const [todayLoading, setTodayLoading] = useState(false);
+  const [todayScope, setTodayScope] = useState<"personal" | "branch">("personal");
+  const [todayDisposition, setTodayDisposition] = useState<string | undefined>();
+  const [correctionTarget, setCorrectionTarget] = useState<AgentActivityRow | null>(null);
+
+  const loadTodayActivity = useCallback(async () => {
+    setTodayLoading(true);
+    try {
+      const params: Record<string, string | number | boolean> = { today: true, limit: 200 };
+      if (isBranchManager && todayScope === "branch") params.scope = "team";
+      if (todayDisposition) params.disposition_code_id = todayDisposition;
+      const res = await api.get("/reports/agent-activity", { params });
+      setTodayActivity(res.data.activity);
+    } catch (err) {
+      message.error(errorMessage(err));
+    } finally {
+      setTodayLoading(false);
+    }
+  }, [isBranchManager, todayScope, todayDisposition]);
+
+  useEffect(() => {
+    void loadTodayActivity();
+  }, [loadTodayActivity]);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const today = dayjs().format("YYYY-MM-DD");
       const params: Record<string, string> = {};
       if (search) params.q = search;
-      if (filterBranch) params.branch_id = filterBranch;
+      if (filterCustomerBranch) params.customer_branch = filterCustomerBranch;
       if (filterProduct) params.product = filterProduct;
       if (filterBucket) params.bucket = filterBucket;
+      if (isBranchManager && scope === "team") params.scope = "team";
 
       const [worklistRes, remindersRes, ptpsRes] = await Promise.all([
         api.get("/worklist", { params }),
@@ -84,11 +168,11 @@ export default function MyWorklistPage() {
     } finally {
       setLoading(false);
     }
-  }, [search, filterBranch, filterProduct, filterBucket]);
+  }, [search, filterCustomerBranch, filterProduct, filterBucket, isBranchManager, scope]);
 
   useEffect(() => {
     api.get("/dispositions").then((res) => setDispositionCodes(res.data.disposition_codes));
-    api.get("/branches").then((res) => setBranches(res.data.branches));
+    api.get("/customers/branches").then((res) => setCustomerBranches(res.data.branches));
     api.get("/products").then((res) => setProducts(res.data.products));
     api.get("/buckets").then((res) => setBuckets(res.data.buckets));
   }, []);
@@ -126,7 +210,22 @@ export default function MyWorklistPage() {
       <Typography.Title level={4} style={{ marginBottom: 4 }}>
         My Worklist
       </Typography.Title>
-      <Typography.Text type="secondary">{customers.length} customers assigned to you</Typography.Text>
+      <Typography.Text type="secondary">
+        {displayedCustomers.length} customers {scope === "team" ? "assigned to your team" : "assigned to you"}
+      </Typography.Text>
+
+      {isBranchManager && (
+        <div style={{ marginTop: 12 }}>
+          <Segmented
+            value={scope}
+            onChange={(v) => setScope(v as "personal" | "team")}
+            options={[
+              { label: "Personal", value: "personal" },
+              { label: "Team", value: "team" },
+            ]}
+          />
+        </div>
+      )}
 
       <div style={{ marginTop: 16, display: "flex", gap: 12, flexWrap: "wrap" }}>
         <Input.Search
@@ -136,12 +235,21 @@ export default function MyWorklistPage() {
           style={{ width: 240 }}
         />
         <Select
-          title="All branches" placeholder="All branches"
+          title="All companies" placeholder="All companies"
           allowClear
           style={{ width: 180 }}
-          value={filterBranch}
-          onChange={(v) => setFilterBranch(v ?? undefined)}
-          options={branches.map((b) => ({ value: b.id, label: b.name }))}
+          value={filterCompany}
+          onChange={(v) => setFilterCompany(v ?? undefined)}
+          options={companyOptions}
+        />
+        <Select
+          title="All branches" placeholder="All branches"
+          allowClear
+          showSearch
+          style={{ width: 180 }}
+          value={filterCustomerBranch}
+          onChange={(v) => setFilterCustomerBranch(v ?? undefined)}
+          options={customerBranches}
         />
         <Select
           title="All products" placeholder="All products"
@@ -225,17 +333,113 @@ export default function MyWorklistPage() {
         />
       </div>
 
+      <div style={{ marginTop: 16, marginBottom: 16 }}>
+        <Collapse
+          items={[
+            {
+              key: "today",
+              label: (
+                <Space>
+                  <span>Today's Work</span>
+                  <Badge count={todayActivity.length} showZero style={{ backgroundColor: palette.navy }} />
+                </Space>
+              ),
+              children: (
+                <Space direction="vertical" style={{ width: "100%" }} size="middle">
+                  <Space wrap onClick={(e) => e.stopPropagation()}>
+                    {isBranchManager && (
+                      <Segmented
+                        value={todayScope}
+                        onChange={(v) => setTodayScope(v as "personal" | "branch")}
+                        options={[
+                          { label: "Personal", value: "personal" },
+                          { label: "Branch", value: "branch" },
+                        ]}
+                      />
+                    )}
+                    <Select
+                      title="All dispositions" placeholder="Filter by disposition code"
+                      allowClear
+                      showSearch
+                      style={{ width: 220 }}
+                      value={todayDisposition}
+                      onChange={(v) => setTodayDisposition(v ?? undefined)}
+                      optionFilterProp="label"
+                      options={dispositionCodes.map((d) => ({ value: d.id, label: d.action_code }))}
+                    />
+                  </Space>
+                  {todayActivity.length === 0 ? (
+                    <Typography.Text type="secondary">
+                      {todayLoading ? "Loading…" : "Nothing logged yet today."}
+                    </Typography.Text>
+                  ) : (
+                    <Space direction="vertical" style={{ width: "100%" }} size="small">
+                      {todayActivity.map((a) => (
+                        <div
+                          key={`${a.kind}-${a.id}`}
+                          style={{
+                            display: "flex",
+                            alignItems: "flex-start",
+                            justifyContent: "space-between",
+                            gap: 12,
+                            padding: "8px 12px",
+                            border: `1px solid ${palette.border}`,
+                            borderRadius: 6,
+                          }}
+                        >
+                          <Space direction="vertical" size={0} style={{ flex: 1 }}>
+                            <Space size={6} wrap>
+                              {ACTIVITY_ICON[a.kind]}
+                              <Typography.Text strong>{ACTIVITY_LABEL[a.kind]}</Typography.Text>
+                              <Tag>{a.customer_name}</Tag>
+                              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                {a.loan_number}
+                              </Typography.Text>
+                              {a.agent_name && <Tag color="blue">{a.agent_name}</Tag>}
+                              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                {dayjs(a.at).format("HH:mm")}
+                              </Typography.Text>
+                            </Space>
+                            {a.remark && <Typography.Text>{a.remark}</Typography.Text>}
+                            {a.amount != null && (
+                              <Typography.Text className="money">₹ {fmtAmount(a.amount)}</Typography.Text>
+                            )}
+                            {a.detail && !a.remark && (
+                              <Typography.Text type="secondary">{a.detail}</Typography.Text>
+                            )}
+                          </Space>
+                          <Space>
+                            <Button size="small" onClick={() => setDetailId(a.customer_id)}>
+                              View Customer
+                            </Button>
+                            {CORRECTABLE_KIND[a.kind] && (
+                              <Button size="small" icon={<EditOutlined />} onClick={() => setCorrectionTarget(a)}>
+                                Edit
+                              </Button>
+                            )}
+                          </Space>
+                        </div>
+                      ))}
+                    </Space>
+                  )}
+                </Space>
+              ),
+            },
+          ]}
+        />
+      </div>
+
       <Table<WorklistCustomer>
         rowKey="id"
         loading={loading}
-        dataSource={customers}
+        dataSource={displayedCustomers}
         pagination={{ pageSize: 50 }}
         locale={{ emptyText: "No customers assigned to you right now" }}
         onRow={(record) => ({
           onClick: () => setDetailId(record.id),
           style: { cursor: "pointer" },
         })}
-        scroll={{ x: 900 }}
+        scroll={{ x: scope === "team" ? 1180 : 1020 }}
         columns={[
           {
             title: "Loan No",
@@ -244,6 +448,19 @@ export default function MyWorklistPage() {
             render: (v: string) => <Typography.Text code>{v}</Typography.Text>,
           },
           { title: "Customer", dataIndex: "customer_name", ellipsis: true },
+          { title: "Company", dataIndex: "company_name", width: 130, ellipsis: true },
+          { title: "Branch", dataIndex: "branch_name", width: 110, render: (v) => v ?? "-" },
+          ...(scope === "team"
+            ? [
+                {
+                  title: "Agent",
+                  key: "agent",
+                  width: 140,
+                  render: (_: unknown, r: WorklistCustomer) =>
+                    r.assigned_field_agent_name || r.assigned_agent_name || "-",
+                },
+              ]
+            : []),
           {
             title: "Mobile",
             dataIndex: "mobile_number",
@@ -335,6 +552,7 @@ export default function MyWorklistPage() {
         onClose={() => {
           setDetailId(null);
           void load();
+          void loadTodayActivity();
         }}
       />
 
@@ -378,6 +596,26 @@ export default function MyWorklistPage() {
           onChange={(e) => setReallocReason(e.target.value)}
         />
       </Modal>
+
+      {correctionTarget && CORRECTABLE_KIND[correctionTarget.kind] && (
+        <ReportCorrectionModal
+          recordType={CORRECTABLE_KIND[correctionTarget.kind]!}
+          recordId={correctionTarget.id}
+          currentValues={
+            correctionTarget.kind === "call"
+              ? { remark: correctionTarget.remark ?? "" }
+              : correctionTarget.kind === "payment"
+                ? { amount: Number(correctionTarget.amount), mode: correctionTarget.detail, paid_at: correctionTarget.at }
+                : { amount: Number(correctionTarget.amount), promised_date: correctionTarget.detail }
+          }
+          open={correctionTarget !== null}
+          onClose={() => setCorrectionTarget(null)}
+          onSubmitted={() => {
+            setCorrectionTarget(null);
+            void loadTodayActivity();
+          }}
+        />
+      )}
     </div>
   );
 }

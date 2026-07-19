@@ -26,13 +26,27 @@ async function assertCompanyInAgency(companyId: string, agencyId: string): Promi
 router.get(
   "/",
   asyncHandler(async (req, res) => {
-    const companyId = z.string().uuid().parse(req.query.company_id);
-    await assertCompanyInAgency(companyId, req.user!.agency_id);
+    const companyId = req.query.company_id ? z.string().uuid().parse(req.query.company_id) : undefined;
+    if (companyId) {
+      await assertCompanyInAgency(companyId, req.user!.agency_id);
+      const { rows } = await pool.query(
+        `SELECT id, label, sort_order, category, is_current, canonical_bucket
+           FROM buckets WHERE company_id = $1
+          ORDER BY sort_order, label`,
+        [companyId],
+      );
+      res.json({ buckets: rows });
+      return;
+    }
+    // No company selected -- agency-wide distinct bucket labels (e.g. for a
+    // worklist filter spanning multiple companies), one row per label.
     const { rows } = await pool.query(
-      `SELECT id, label, sort_order, category, is_current, canonical_bucket
-         FROM buckets WHERE company_id = $1
-        ORDER BY sort_order, label`,
-      [companyId],
+      `SELECT DISTINCT ON (b.label) b.id, b.label, b.sort_order, b.category, b.is_current, b.canonical_bucket
+         FROM buckets b
+         JOIN companies co ON co.id = b.company_id
+        WHERE co.agency_id = $1
+        ORDER BY b.label, b.sort_order`,
+      [req.user!.agency_id],
     );
     res.json({ buckets: rows });
   }),

@@ -55,6 +55,7 @@ export default function ManagementDashboardPage() {
   const [activeAgents, setActiveAgents] = useState<number | null>(null);
   const [activeCases, setActiveCases] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshTick, setRefreshTick] = useState(0);
   const [branchDrawerId, setBranchDrawerId] = useState<string | null>(null);
   const [teamDrawer, setTeamDrawer] = useState<{ id: string; name: string } | null>(null);
   const [agentDrawer, setAgentDrawer] = useState<{ id: string; name: string } | null>(null);
@@ -72,6 +73,13 @@ export default function ManagementDashboardPage() {
 
   useEffect(() => {
     api.get("/companies").then((r) => setCompanies(r.data.companies)).catch(() => undefined);
+  }, []);
+
+  // A collection an agent just recorded won't otherwise appear on a
+  // dashboard tab left open until a filter changes -- poll so it does.
+  useEffect(() => {
+    const interval = setInterval(() => setRefreshTick((t) => t + 1), 60_000);
+    return () => clearInterval(interval);
   }, []);
 
   const filters: DashboardFilters = useMemo(
@@ -131,7 +139,7 @@ export default function ManagementDashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [filters, month, companyId]);
+  }, [filters, month, companyId, refreshTick]);
 
   const outstandingBalance = data ? Math.max(data.collection.pos_total - data.collection.mtd_amount, 0) : null;
 
