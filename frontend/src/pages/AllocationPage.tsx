@@ -52,6 +52,7 @@ const getBaseColumns = (onOpenDetail: (customerId: string) => void) => [
   },
   { title: "Customer", dataIndex: "customer_name", ellipsis: true },
   { title: "Company", dataIndex: "company_name", width: 150, ellipsis: true },
+  { title: "Branch", dataIndex: "branch_name", width: 120, render: (v: string | null) => v ?? "—" },
   {
     title: "Product",
     dataIndex: "product",
@@ -98,20 +99,24 @@ function useBranchTeam() {
   return { branches, teams: teamOptions, branchId, setBranchId, teamId, setTeamId };
 }
 
+function useCustomerBranches() {
+  const [customerBranches, setCustomerBranches] = useState<{value: string; label: string}[]>([]);
+  useEffect(() => {
+    api.get("/customers/branches").then((res) => setCustomerBranches(res.data.branches));
+  }, []);
+  return customerBranches;
+}
+
 /** Agents a TL can allocate to: active users who work customers. */
 function useAssignableAgents(
   branchId: string | null,
   teamId: string | null,
-  customerBranch?: string | null,
-  product?: string | null,
 ) {
   const [agents, setAgents] = useState<Employee[]>([]);
   useEffect(() => {
     const params: Record<string, string> = {};
     if (branchId) params.branch_id = branchId;
     if (teamId) params.team_id = teamId;
-    if (customerBranch) params.customer_branch = customerBranch;
-    if (product) params.product = product;
     api.get("/employees", { params }).then((res) => {
       setAgents(
         (res.data.employees as Employee[]).filter(
@@ -123,7 +128,7 @@ function useAssignableAgents(
         ),
       );
     });
-  }, [branchId, teamId, customerBranch, product]);
+  }, [branchId, teamId]);
   return agents;
 }
 
@@ -240,10 +245,10 @@ function FilterRow({
 function UnallocatedQueue({ onOpenDetail }: { onOpenDetail: (id: string) => void }) {
   const filters = useCompanyFilters();
   const branchTeam = useBranchTeam();
+  const customerBranches = useCustomerBranches();
   const [customerBranch, setCustomerBranch] = useState<string>("");
-  const [customerBranches, setCustomerBranches] = useState<string[]>([]);
-  const agents = useAssignableAgents(branchTeam.branchId, branchTeam.teamId, customerBranch, filters.product);
-  const allAgents = useAssignableAgents(null, null, null, null);
+  const agents = useAssignableAgents(branchTeam.branchId, branchTeam.teamId);
+  const allAgents = useAssignableAgents(null, null);
   const telecallers = useMemo(() => allAgents.filter((a) => a.capabilities.includes("telecaller")), [allAgents]);
   const fieldAgents = useMemo(() => agents.filter((a) => a.capabilities.includes("field_agent")), [agents]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -255,10 +260,6 @@ function UnallocatedQueue({ onOpenDetail }: { onOpenDetail: (id: string) => void
   const [fieldAgentId, setFieldAgentId] = useState<string | null>(null);
   const [assigning, setAssigning] = useState(false);
   const [assigningField, setAssigningField] = useState(false);
-
-  useEffect(() => {
-    api.get("/customers/branches").then((res) => setCustomerBranches(res.data.branches));
-  }, []);
 
   const load = useCallback(
     async (pg = 1) => {
@@ -351,7 +352,7 @@ function UnallocatedQueue({ onOpenDetail }: { onOpenDetail: (id: string) => void
             showSearch
             value={customerBranch || null}
             onChange={(v) => setCustomerBranch(v ?? "")}
-            options={customerBranches.map((b) => ({ value: b, label: b }))}
+            options={customerBranches}
           />
         </Col>
       </Row>
@@ -445,6 +446,8 @@ function UnallocatedQueue({ onOpenDetail }: { onOpenDetail: (id: string) => void
 function AllocatedList({ onOpenDetail }: { onOpenDetail: (id: string) => void }) {
   const filters = useCompanyFilters();
   const branchTeam = useBranchTeam();
+  const customerBranches = useCustomerBranches();
+  const [customerBranch, setCustomerBranch] = useState<string>("");
   const agents = useAssignableAgents(null, null);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [total, setTotal] = useState(0);
@@ -475,7 +478,7 @@ function AllocatedList({ onOpenDetail }: { onOpenDetail: (id: string) => void })
         if (filters.companyId) params.company_id = filters.companyId;
         if (filters.product) params.product = filters.product;
         if (filters.bucket) params.bucket = filters.bucket;
-        if (branchTeam.branchId) params.branch_id = branchTeam.branchId;
+        if (customerBranch) params.customer_branch = customerBranch;
         if (branchTeam.teamId) params.team_id = branchTeam.teamId;
         const res = await api.get("/customers", { params });
         setCustomers(res.data.customers);
@@ -486,7 +489,7 @@ function AllocatedList({ onOpenDetail }: { onOpenDetail: (id: string) => void })
         setLoading(false);
       }
     },
-    [filters.companyId, filters.product, filters.bucket, branchTeam.branchId, branchTeam.teamId],
+    [filters.companyId, filters.product, filters.bucket, customerBranch, branchTeam.teamId],
   );
 
   useEffect(() => {
@@ -570,6 +573,20 @@ function AllocatedList({ onOpenDetail }: { onOpenDetail: (id: string) => void })
   return (
     <div>
       <FilterRow filters={filters} branchTeam={branchTeam} />
+
+      <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
+        <Col xs={24} sm={6}>
+          <Select
+            style={{ width: "100%" }}
+            title="Search customer branch" placeholder="Search customer branch"
+            allowClear
+            showSearch
+            value={customerBranch || null}
+            onChange={(v) => setCustomerBranch(v ?? "")}
+            options={customerBranches}
+          />
+        </Col>
+      </Row>
 
       {selected.length > 0 && (
         <Alert

@@ -140,7 +140,7 @@ export default function EmployeesPage() {
       if (filterStatus === "active") params.is_active = "true";
       if (filterStatus === "inactive") params.is_active = "false";
       if (filterDesignation) params.designation = filterDesignation;
-      if (filterCustomerBranch) params.customer_branch_id = filterCustomerBranch;
+      if (filterCustomerBranch) params.customer_branch = filterCustomerBranch;
       if (filterProduct) params.product = filterProduct;
 
       const [emp, br, tm, prod] = await Promise.all([
@@ -176,6 +176,8 @@ export default function EmployeesPage() {
           <Tag key={id}>{branchName(id)}</Tag>
         ))}
       </Space>
+    ) : e.designation === "branch_manager" ? (
+      branchName(e.managed_branch_id ?? null)
     ) : (
       branchName(e.branch_id)
     );
