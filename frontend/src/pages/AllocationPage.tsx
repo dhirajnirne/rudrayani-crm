@@ -123,7 +123,7 @@ function useAssignableAgents(
         ),
       );
     });
-  }, [branchId, teamId, customerBranchId, product]);
+  }, [branchId, teamId, customerBranch, product]);
   return agents;
 }
 
@@ -240,7 +240,6 @@ function FilterRow({
 function UnallocatedQueue({ onOpenDetail }: { onOpenDetail: (id: string) => void }) {
   const filters = useCompanyFilters();
   const branchTeam = useBranchTeam();
-  const [branches, setBranches] = useState<Branch[]>([]);
   const [customerBranch, setCustomerBranch] = useState<string>("");
   const agents = useAssignableAgents(branchTeam.branchId, branchTeam.teamId, customerBranch, filters.product);
   const allAgents = useAssignableAgents(null, null, null, null);
@@ -255,10 +254,6 @@ function UnallocatedQueue({ onOpenDetail }: { onOpenDetail: (id: string) => void
   const [fieldAgentId, setFieldAgentId] = useState<string | null>(null);
   const [assigning, setAssigning] = useState(false);
   const [assigningField, setAssigningField] = useState(false);
-
-  useEffect(() => {
-    api.get("/branches").then((res) => setBranches(res.data.branches));
-  }, []);
 
   const load = useCallback(
     async (pg = 1) => {
