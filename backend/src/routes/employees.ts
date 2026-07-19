@@ -373,8 +373,8 @@ router.get(
       conditions += ` AND EXISTS (SELECT 1 FROM customers c WHERE (c.assigned_agent_id = u.id OR c.assigned_field_agent_id = u.id) AND c.product = $${params.length})`;
     }
 
-    const { rows } = await pool.query<UserRow>(
-      `SELECT u.* FROM users u ${conditions} ORDER BY u.full_name`,
+    const { rows } = await pool.query<UserRow & { manager_name: string | null }>(
+      `SELECT u.*, m.full_name as manager_name FROM users u LEFT JOIN users m ON u.manager_id = m.id ${conditions} ORDER BY u.full_name`,
       params,
     );
     const withMulti = await attachMultiAssignments(rows);
@@ -386,6 +386,7 @@ router.get(
         branch_ids: u.branch_ids,
         team_ids: u.team_ids,
         managed_branch_id: u.managed_branch_id,
+        manager_name: u.manager_name,
       })),
     });
   }),

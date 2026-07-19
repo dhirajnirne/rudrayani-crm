@@ -22,6 +22,7 @@ export interface User {
   team_id: string | null;
   team_ids?: string[]; // Multi-team for telecaller-type work
   manager_id: string | null;
+  manager_name?: string | null;
   managed_branch_id?: string | null;
   full_name: string;
   phone: string;

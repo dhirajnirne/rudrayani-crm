@@ -98,17 +98,20 @@ export default function EmployeesPage() {
         .map((e) => ({ value: e.id, label: e.full_name }));
     }
 
-    return activeEmployees
-      .filter((e) => {
-        if (e.capabilities.includes("agency_admin")) return true;
-        if (!selectedBranch && !selectedTeam) return true;
-        return (
-          (!!selectedBranch && e.branch_id === selectedBranch) ||
-          (!!selectedTeam && e.team_id === selectedTeam)
-        );
-      })
-      .map((e) => ({ value: e.id, label: e.full_name }));
-  }, [employees, selectedBranch, selectedTeam, editing, selectedDesignation]);
+    if (selectedDesignation === "branch_manager") {
+      return activeEmployees
+        .filter((e) => e.capabilities.includes("operations_manager"))
+        .map((e) => ({ value: e.id, label: e.full_name }));
+    }
+
+    if (selectedDesignation === "telecaller" || selectedDesignation === "field_agent") {
+      return activeEmployees
+        .filter((e) => e.capabilities.includes("branch_manager"))
+        .map((e) => ({ value: e.id, label: e.full_name }));
+    }
+
+    return [];
+  }, [employees, editing, selectedDesignation]);
 
   useEffect(() => {
     if (selectedDesignation === "operations_manager") {
@@ -394,6 +397,11 @@ export default function EmployeesPage() {
           { title: "Phone", dataIndex: "phone" },
           { title: "Branch", render: (_, e) => branchCell(e) },
           { title: "Team", render: (_, e) => teamCell(e) },
+          {
+            title: "Reports To",
+            dataIndex: "manager_name",
+            render: (name: string | null) => name ?? <Typography.Text type="secondary">—</Typography.Text>,
+          },
           {
             title: "Capabilities",
             dataIndex: "capabilities",
