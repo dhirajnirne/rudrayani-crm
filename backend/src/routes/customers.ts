@@ -159,7 +159,7 @@ router.get(
          AND COALESCE(c.custom_fields->>'branch', c.custom_fields->>'Branch') IS NOT NULL
          AND TRIM(COALESCE(c.custom_fields->>'branch', c.custom_fields->>'Branch')) != ''
        ORDER BY label`,
-      [req.user!.agency_id, req.user!.agency_id],
+      [req.user!.agency_id],
     );
     res.json({ branches: rows });
   }),
