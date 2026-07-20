@@ -23,6 +23,7 @@ router.get(
         agent_id: z.string().uuid().optional(),
         field_agent_id: z.string().uuid().optional(),
         branch_id: z.string().uuid().optional(),
+        customer_branch: z.string().optional(),
         team_id: z.string().uuid().optional(),
         q: z.string().optional(),
         page: z.coerce.number().int().min(1).default(1),
@@ -80,8 +81,13 @@ router.get(
     }
     if (q.branch_id) {
       params.push(q.branch_id);
+      conditions.push(`c.branch_id = $${params.length}`);
+    }
+    if (q.customer_branch) {
+      params.push(q.customer_branch);
+      const n = params.length;
       conditions.push(
-        `(c.branch_id = $${params.length} OR EXISTS (SELECT 1 FROM teams tm WHERE tm.id = c.assigned_team_id AND tm.branch_id = $${params.length}))`
+        `(c.branch_id::text = $${n} OR (c.branch_id IS NULL AND (c.custom_fields->>'branch' ILIKE '%' || $${n} || '%' OR c.custom_fields->>'Branch' ILIKE '%' || $${n} || '%')))`
       );
     }
     if (q.q) {
@@ -111,11 +117,13 @@ router.get(
               c.custom_fields, c.created_at, c.assigned_agent_id, c.assigned_field_agent_id, c.branch_id,
               a.full_name AS assigned_agent_name,
               f.full_name AS assigned_field_agent_name,
-              co.name AS company_name, co.id AS company_id
+              co.name AS company_name, co.id AS company_id,
+              COALESCE(b.name, NULLIF(TRIM(COALESCE(c.custom_fields->>'branch', c.custom_fields->>'Branch')), '')) AS branch_name
          FROM customers c
          JOIN companies co ON co.id = c.company_id
          LEFT JOIN users a ON a.id = c.assigned_agent_id
          LEFT JOIN users f ON f.id = c.assigned_field_agent_id
+         LEFT JOIN branches b ON b.id = c.branch_id
         WHERE ${where}
         ORDER BY c.created_at DESC
         LIMIT $${params.length - 1} OFFSET $${params.length}`,
@@ -134,18 +142,26 @@ router.get(
 router.get(
   "/branches",
   asyncHandler(async (req, res) => {
-    // Extract unique customer branches from custom_fields
+    // Union structured branch IDs with freetext branch values
     const { rows } = await pool.query(
-      `SELECT DISTINCT UPPER(TRIM(COALESCE(c.custom_fields->>'branch', c.custom_fields->>'Branch'))) AS branch_name
+      `SELECT DISTINCT b.id::text AS value, b.name AS label
+       FROM customers c
+       JOIN companies co ON co.id = c.company_id
+       JOIN branches b ON b.id = c.branch_id
+       WHERE co.agency_id = $1
+       UNION
+       SELECT DISTINCT UPPER(TRIM(COALESCE(c.custom_fields->>'branch', c.custom_fields->>'Branch'))) AS value,
+                       UPPER(TRIM(COALESCE(c.custom_fields->>'branch', c.custom_fields->>'Branch'))) AS label
        FROM customers c
        JOIN companies co ON co.id = c.company_id
        WHERE co.agency_id = $1
+         AND c.branch_id IS NULL
          AND COALESCE(c.custom_fields->>'branch', c.custom_fields->>'Branch') IS NOT NULL
          AND TRIM(COALESCE(c.custom_fields->>'branch', c.custom_fields->>'Branch')) != ''
-       ORDER BY branch_name`,
-      [req.user!.agency_id],
+       ORDER BY label`,
+      [req.user!.agency_id, req.user!.agency_id],
     );
-    res.json({ branches: rows.map(r => r.branch_name) });
+    res.json({ branches: rows });
   }),
 );
 

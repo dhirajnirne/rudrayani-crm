@@ -47,8 +47,11 @@ router.get(
       conditions.push(`c.bucket = $${params.length}`);
     }
     if (q.customer_branch) {
-      params.push(`%${q.customer_branch}%`);
-      conditions.push(`(c.custom_fields->>'branch' ILIKE $${params.length} OR c.custom_fields->>'Branch' ILIKE $${params.length})`);
+      params.push(q.customer_branch);
+      const n = params.length;
+      conditions.push(
+        `(c.branch_id::text = $${n} OR (c.branch_id IS NULL AND (c.custom_fields->>'branch' ILIKE '%' || $${n} || '%' OR c.custom_fields->>'Branch' ILIKE '%' || $${n} || '%')))`
+      );
     }
 
     const where = conditions.join(" AND ");
@@ -63,8 +66,10 @@ router.get(
     const { rows } = await pool.query(
       `SELECT c.id, c.loan_number, c.customer_name, c.mobile_number,
               c.product, c.bucket, c.due_amount, c.pos, c.emi, c.branch_id,
-              co.name AS company_name
+              co.name AS company_name,
+              COALESCE(b.name, NULLIF(TRIM(COALESCE(c.custom_fields->>'branch', c.custom_fields->>'Branch')), '')) AS branch_name
          FROM customers c JOIN companies co ON co.id = c.company_id
+         LEFT JOIN branches b ON b.id = c.branch_id
         WHERE ${where}
         ORDER BY c.created_at DESC
         LIMIT $${params.length - 1} OFFSET $${params.length}`,

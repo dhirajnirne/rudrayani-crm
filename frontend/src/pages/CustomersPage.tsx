@@ -28,9 +28,9 @@ interface Product {
 
 export default function CustomersPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
-  const [branches, setBranches] = useState<Branch[]>([]);
+  const [customerBranches, setCustomerBranches] = useState<{value: string; label: string}[]>([]);
   const [companyId, setCompanyId] = useState<string | null>(null);
-  const [branchId, setBranchId] = useState<string | null>(null);
+  const [customerBranch, setCustomerBranch] = useState<string | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [buckets, setBuckets] = useState<string[]>([]);
   const [product, setProduct] = useState<string | null>(null);
@@ -47,10 +47,10 @@ export default function CustomersPage() {
   useEffect(() => {
     Promise.all([
       api.get("/companies"),
-      api.get("/branches"),
+      api.get("/customers/branches"),
     ]).then(([cRes, bRes]) => {
       setCompanies(cRes.data.companies);
-      setBranches(bRes.data.branches);
+      setCustomerBranches(bRes.data.branches);
     });
   }, []);
 
@@ -76,7 +76,7 @@ export default function CustomersPage() {
     try {
       const params: Record<string, string | number> = { page: pg, limit: 50 };
       if (companyId) params.company_id = companyId;
-      if (branchId) params.branch_id = branchId;
+      if (customerBranch) params.customer_branch = customerBranch;
       if (product) params.product = product;
       if (bucket) params.bucket = bucket;
       if (status) params.status = status;
@@ -88,7 +88,7 @@ export default function CustomersPage() {
     } finally {
       setLoading(false);
     }
-  }, [companyId, branchId, product, bucket, status, query]);
+  }, [companyId, customerBranch, product, bucket, status, query]);
 
   useEffect(() => {
     load(1);
@@ -121,11 +121,12 @@ export default function CustomersPage() {
         <Col xs={12} sm={4}>
           <Select
             style={{ width: "100%" }}
-            title="All branches" placeholder="All branches"
+            title="Branch" placeholder="Branch"
             allowClear
-            value={branchId}
-            onChange={(v) => setBranchId(v ?? null)}
-            options={branches.map((b) => ({ value: b.id, label: b.name }))}
+            showSearch
+            value={customerBranch}
+            onChange={(v) => setCustomerBranch(v ?? null)}
+            options={customerBranches}
           />
         </Col>
         <Col xs={12} sm={3}>
@@ -215,6 +216,7 @@ export default function CustomersPage() {
           { title: "Customer", dataIndex: "customer_name", ellipsis: true },
           { title: "Mobile", dataIndex: "mobile_number", width: 130, render: (v) => v ?? "—" },
           { title: "Company", dataIndex: "company_name", width: 150, ellipsis: true },
+          { title: "Branch", dataIndex: "branch_name", width: 120, render: (v) => v ?? "—" },
           {
             title: "Product",
             dataIndex: "product",

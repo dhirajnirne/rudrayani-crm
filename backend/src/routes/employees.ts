@@ -358,15 +358,17 @@ router.get(
     ];
 
     let conditions = `WHERE u.agency_id = $1
-          AND ($2::uuid IS NULL OR u.branch_id = $2)
+          AND ($2::uuid IS NULL OR u.branch_id = $2 OR EXISTS (
+            SELECT 1 FROM branches mb WHERE mb.branch_manager_id = u.id AND mb.id = $2))
           AND ($3::uuid IS NULL OR u.team_id = $3)
           AND ($4::text IS NULL OR u.full_name ILIKE '%' || $4 || '%' OR u.phone LIKE $4 || '%')
           AND ($5::boolean IS NULL OR u.is_active = $5)
           AND ($6::text IS NULL OR u.designation = $6)`;
 
     if (customerBranch) {
-      params.push(`%${customerBranch}%`);
-      conditions += ` AND EXISTS (SELECT 1 FROM customers c WHERE (c.assigned_agent_id = u.id OR c.assigned_field_agent_id = u.id) AND (c.custom_fields->>'branch' ILIKE $${params.length} OR c.custom_fields->>'Branch' ILIKE $${params.length}))`;
+      params.push(customerBranch);
+      const n = params.length;
+      conditions += ` AND EXISTS (SELECT 1 FROM customers c WHERE (c.assigned_agent_id = u.id OR c.assigned_field_agent_id = u.id) AND (c.branch_id::text = $${n} OR (c.branch_id IS NULL AND (c.custom_fields->>'branch' ILIKE '%' || $${n} || '%' OR c.custom_fields->>'Branch' ILIKE '%' || $${n} || '%'))))`;
     }
     if (product) {
       params.push(product);
