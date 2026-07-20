@@ -4,6 +4,7 @@ import { pool } from "../config/db";
 import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
+import { agentBranchClamp, customerBranchClamp, resolveBranchClamp } from "../services/scope";
 
 /**
  * Manual allocation (build brief Section 5): TL filters the unallocated queue,
@@ -33,6 +34,13 @@ router.get(
       "c.status = 'active'",
     ];
     const params: unknown[] = [req.user!.agency_id];
+
+    // A branch_manager only ever sees their own branch's unallocated queue --
+    // forced, not optional like the customer_branch filter below (which just
+    // narrows further within whatever they're already clamped to).
+    const clamp = await resolveBranchClamp(req.user!);
+    const clampSql = customerBranchClamp(clamp, params);
+    if (clampSql) conditions.push(clampSql.replace(/^ AND /, ""));
 
     if (q.company_id) {
       params.push(q.company_id);
@@ -91,14 +99,18 @@ router.post(
   asyncHandler(async (req, res) => {
     const body = assignBody.parse(req.body);
     const agencyId = req.user!.agency_id;
+    const clamp = await resolveBranchClamp(req.user!);
 
-    // Target must be an active workable user in this agency. branch_manager
-    // has no boolean flag of its own, so it needs an explicit disjunct here.
+    // Target must be an active workable user in this agency (and, for a
+    // branch_manager, in their own branch too). branch_manager has no
+    // boolean flag of its own, so it needs an explicit disjunct here.
+    const agentParams: unknown[] = [body.agent_id, agencyId];
+    const agentBranchSql = agentBranchClamp(clamp, agentParams, "users");
     const agentRes = await pool.query(
       `SELECT id, team_id, full_name FROM users
         WHERE id = $1 AND agency_id = $2 AND is_active = true
-          AND (is_telecaller OR is_field_agent OR designation = 'branch_manager')`,
-      [body.agent_id, agencyId],
+          AND (is_telecaller OR is_field_agent OR designation = 'branch_manager')${agentBranchSql}`,
+      agentParams,
     );
     const agent = agentRes.rows[0];
     if (!agent) throw new HttpError(404, "Agent not found (must be an active telecaller / field agent / branch manager in this agency)");
@@ -107,13 +119,16 @@ router.post(
     try {
       await client.query("BEGIN");
 
-      // Lock the target customers; verify agency scope and active status.
+      // Lock the target customers; verify agency scope, branch clamp, and
+      // active status.
+      const custParams: unknown[] = [body.customer_ids, agencyId];
+      const custBranchSql = customerBranchClamp(clamp, custParams);
       const custRes = await client.query(
         `SELECT c.id, c.assigned_agent_id FROM customers c
            JOIN companies co ON co.id = c.company_id
-          WHERE c.id = ANY($1) AND co.agency_id = $2 AND c.status = 'active'
+          WHERE c.id = ANY($1) AND co.agency_id = $2 AND c.status = 'active'${custBranchSql}
           FOR UPDATE OF c`,
-        [body.customer_ids, agencyId],
+        custParams,
       );
       if (custRes.rows.length !== body.customer_ids.length) {
         throw new HttpError(404, "One or more customers not found (or already closed) in this agency");
@@ -163,11 +178,14 @@ router.post(
   asyncHandler(async (req, res) => {
     const body = assignBody.parse(req.body);
     const agencyId = req.user!.agency_id;
+    const clamp = await resolveBranchClamp(req.user!);
 
+    const agentParams: unknown[] = [body.agent_id, agencyId];
+    const agentBranchSql = agentBranchClamp(clamp, agentParams, "users");
     const agentRes = await pool.query(
       `SELECT id, team_id, full_name FROM users
-        WHERE id = $1 AND agency_id = $2 AND is_active = true AND is_field_agent = true`,
-      [body.agent_id, agencyId],
+        WHERE id = $1 AND agency_id = $2 AND is_active = true AND is_field_agent = true${agentBranchSql}`,
+      agentParams,
     );
     const agent = agentRes.rows[0];
     if (!agent) throw new HttpError(404, "Agent not found (must be an active field agent in this agency)");
@@ -176,12 +194,14 @@ router.post(
     try {
       await client.query("BEGIN");
 
+      const custParams: unknown[] = [body.customer_ids, agencyId];
+      const custBranchSql = customerBranchClamp(clamp, custParams);
       const custRes = await client.query(
         `SELECT c.id, c.assigned_field_agent_id FROM customers c
            JOIN companies co ON co.id = c.company_id
-          WHERE c.id = ANY($1) AND co.agency_id = $2 AND c.status = 'active'
+          WHERE c.id = ANY($1) AND co.agency_id = $2 AND c.status = 'active'${custBranchSql}
           FOR UPDATE OF c`,
-        [body.customer_ids, agencyId],
+        custParams,
       );
       if (custRes.rows.length !== body.customer_ids.length) {
         throw new HttpError(404, "One or more customers not found (or already closed) in this agency");
@@ -229,6 +249,9 @@ router.get(
   "/logs",
   asyncHandler(async (req, res) => {
     const customerId = z.string().uuid().parse(req.query.customer_id);
+    const clamp = await resolveBranchClamp(req.user!);
+    const params: unknown[] = [customerId, req.user!.agency_id];
+    const branchSql = customerBranchClamp(clamp, params);
     const { rows } = await pool.query(
       `SELECT al.id, al.reason, al.created_at, al.slot,
               f.full_name AS from_agent_name,
@@ -240,9 +263,9 @@ router.get(
          LEFT JOIN users f ON f.id = al.from_agent_id
          JOIN users t ON t.id = al.to_agent_id
          JOIN users b ON b.id = al.allocated_by
-        WHERE al.customer_id = $1 AND co.agency_id = $2
+        WHERE al.customer_id = $1 AND co.agency_id = $2${branchSql}
         ORDER BY al.created_at DESC`,
-      [customerId, req.user!.agency_id],
+      params,
     );
     res.json({ logs: rows });
   }),

@@ -48,3 +48,75 @@ export async function scopeFilter(user: {
   }
   return { clause: "AND u.id = $SCOPE", param: user.id };
 }
+
+const NO_BRANCH_SENTINEL = "00000000-0000-0000-0000-000000000000";
+
+/**
+ * Same branch-manager clamp as scopeFilter(), but returns the raw branch id
+ * (+ name) instead of a `users`-shaped SQL clause -- for routes that join
+ * through customers/teams (customers.branch_id, teams.branch_id via
+ * assigned_team_id, or the assigned agent's own branch/team) rather than
+ * `users u` directly. Only call this from inside a branch already gated by
+ * a broad permission (customers.allocate, employees.view, etc.) -- it's not
+ * a substitute for the permission check, just the missing middle tier
+ * between "sees their own record only" and "sees the whole agency."
+ *
+ * The name is included because `customers.branch_id` is opt-in per company
+ * (see 1787400000000_field-config-customer-branch.sql, disabled by
+ * default) -- most companies never populate it, so clamping on the id alone
+ * would make a branch_manager see ZERO unallocated customers for any
+ * company that hasn't opted in. Callers should match EITHER the structured
+ * id OR the freetext custom_fields.branch/.Branch text against the name,
+ * the same "resolved actual branch" pattern already used for the branch
+ * filter/column elsewhere (customers.ts, allocations.ts, worklist.ts).
+ *
+ * null = no restriction (agency_admin/operations_manager). Anything else
+ * (branch_manager, or any unexpected caller) gets a real branch to clamp
+ * to, or the zero-UUID/empty-name sentinel scopeFilter() uses when they
+ * don't manage any branch yet -- fails closed, never opens up to "see
+ * everything."
+ */
+export async function resolveBranchClamp(user: {
+  id: string;
+  is_agency_admin: boolean;
+  is_operations_manager: boolean;
+}): Promise<{ branchId: string; branchName: string } | null> {
+  if (user.is_agency_admin || user.is_operations_manager) return null;
+  const { rows } = await pool.query<{ id: string; name: string }>(
+    "SELECT id, name FROM branches WHERE branch_manager_id = $1",
+    [user.id],
+  );
+  return rows[0]
+    ? { branchId: rows[0].id, branchName: rows[0].name }
+    : { branchId: NO_BRANCH_SENTINEL, branchName: NO_BRANCH_SENTINEL };
+}
+
+export type BranchClamp = { branchId: string; branchName: string } | null;
+
+/**
+ * AND-able clause confining a customer row (alias defaults to `c`) to a
+ * resolveBranchClamp() result -- structured branch_id when set, else a
+ * freetext custom_fields.branch/.Branch match against the branch's name
+ * (customers.branch_id is opt-in per company, most never populate it).
+ * Returns "" for a null clamp (no restriction). Pushes 2 params when active.
+ */
+export function customerBranchClamp(clamp: BranchClamp, params: unknown[], alias = "c"): string {
+  if (!clamp) return "";
+  params.push(clamp.branchId, clamp.branchName);
+  const idN = params.length - 1;
+  const nameN = params.length;
+  return ` AND (${alias}.branch_id::text = $${idN} OR (${alias}.branch_id IS NULL AND (${alias}.custom_fields->>'branch' ILIKE $${nameN} OR ${alias}.custom_fields->>'Branch' ILIKE $${nameN})))`;
+}
+
+/**
+ * AND-able clause confining a `users` row (an agent, alias required -- the
+ * caller's query decides it) to a resolveBranchClamp() result, matching a
+ * multi-branch telecaller via telecaller_branches the same way scopeFilter()
+ * does. Returns "" for a null clamp. Pushes 1 param when active.
+ */
+export function agentBranchClamp(clamp: BranchClamp, params: unknown[], alias: string): string {
+  if (!clamp) return "";
+  params.push(clamp.branchId);
+  const n = params.length;
+  return ` AND (${alias}.branch_id = $${n} OR EXISTS (SELECT 1 FROM telecaller_branches tb WHERE tb.user_id = ${alias}.id AND tb.branch_id = $${n}))`;
+}

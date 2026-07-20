@@ -5,6 +5,7 @@ import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
 import { capabilitiesHavePermission } from "../services/permission-service";
+import { customerBranchClamp, resolveBranchClamp } from "../services/scope";
 import { capabilitiesOf } from "../types/user";
 
 const router = Router();
@@ -47,6 +48,12 @@ router.get(
       conditions.push(
         `(c.assigned_agent_id = $${params.length} OR c.assigned_field_agent_id = $${params.length})`,
       );
+    } else {
+      // Between "own record only" and "whole agency" -- a branch_manager
+      // (who does hold customers.allocate) only ever sees their own branch.
+      const clamp = await resolveBranchClamp(req.user!);
+      const clampSql = customerBranchClamp(clamp, params);
+      if (clampSql) conditions.push(clampSql.replace(/^ AND /, ""));
     }
 
     if (q.company_id) {
@@ -178,6 +185,18 @@ router.get(
   asyncHandler(async (req, res) => {
     const id = z.string().uuid().parse(req.params.id);
 
+    // A branch_manager (holds customers.allocate) can only open customers in
+    // their own branch -- fold that into the lookup itself so an
+    // out-of-branch id 404s the same way an out-of-scope one already does
+    // for a plain agent, rather than fetching first and checking after.
+    const canSeeAnyCustomer = await capabilitiesHavePermission(
+      capabilitiesOf(req.user!),
+      "customers.allocate",
+    );
+    const clamp = canSeeAnyCustomer ? await resolveBranchClamp(req.user!) : null;
+    const params: unknown[] = [id, req.user!.agency_id];
+    const clampSql = customerBranchClamp(clamp, params);
+
     const { rows: customerRows } = await pool.query(
       `SELECT c.*, co.name AS company_name, co.id AS company_id_check,
               ua.full_name AS assigned_agent_name,
@@ -186,16 +205,12 @@ router.get(
          JOIN companies co ON co.id = c.company_id
          LEFT JOIN users ua ON ua.id = c.assigned_agent_id
          LEFT JOIN users uf ON uf.id = c.assigned_field_agent_id
-        WHERE c.id = $1 AND co.agency_id = $2`,
-      [id, req.user!.agency_id],
+        WHERE c.id = $1 AND co.agency_id = $2${clampSql}`,
+      params,
     );
     const customer = customerRows[0];
     if (!customer) throw new HttpError(404, "Customer not found");
 
-    const canSeeAnyCustomer = await capabilitiesHavePermission(
-      capabilitiesOf(req.user!),
-      "customers.allocate",
-    );
     if (
       !canSeeAnyCustomer &&
       customer.assigned_agent_id !== req.user!.id &&
@@ -311,12 +326,22 @@ router.patch(
     const id = z.string().uuid().parse(req.params.id);
     const body = z.object({ branch_id: z.string().uuid().optional().nullable() }).parse(req.body);
 
-    // Verify customer exists
+    // A branch_manager can only re-branch a customer that's already theirs,
+    // and only into their own branch -- otherwise this is a way to both peek
+    // at and move customers across the whole agency.
+    const clamp = await resolveBranchClamp(req.user!);
+    if (clamp && body.branch_id && body.branch_id !== clamp.branchId) {
+      throw new HttpError(403, "A Branch Manager can only assign customers to their own branch.");
+    }
+
+    // Verify customer exists (and, if clamped, belongs to this branch already)
+    const customerParams: unknown[] = [id, req.user!.agency_id];
+    const customerClampSql = customerBranchClamp(clamp, customerParams);
     const { rows: customerRows } = await pool.query(
       `SELECT c.id FROM customers c
         JOIN companies co ON co.id = c.company_id
-       WHERE c.id = $1 AND co.agency_id = $2`,
-      [id, req.user!.agency_id],
+       WHERE c.id = $1 AND co.agency_id = $2${customerClampSql}`,
+      customerParams,
     );
     if (!customerRows[0]) throw new HttpError(404, "Customer not found");
 

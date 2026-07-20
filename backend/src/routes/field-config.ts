@@ -82,9 +82,15 @@ router.post(
   }),
 );
 
-/** Remove a custom field entirely (never allowed for is_core=true -- brief:
- *  "do not hard-delete is_core=true definitions, disable only"). Also drops
- *  any per-company settings referencing it so it can't leave orphaned rows. */
+/** Remove a field entirely. loan_number/customer_name (STRUCTURALLY_REQUIRED_FIELDS)
+ *  stay permanently protected -- they're the dedup key and the import
+ *  pipeline depends on them directly. Every other field, core or custom, is
+ *  deletable: the admin decides what's required per their own data, and
+ *  deleting a definition only removes it from the mapping catalog going
+ *  forward -- it doesn't touch the underlying customers column or existing
+ *  data (core fields map to real columns via storage_column, which stays).
+ *  Also drops any per-company settings referencing it so it can't leave
+ *  orphaned rows. */
 router.delete(
   "/definitions/:id",
   asyncHandler(async (req, res) => {
@@ -94,8 +100,11 @@ router.delete(
       [id, req.user!.agency_id],
     );
     if (!rows[0]) throw new HttpError(404, "Field definition not found");
-    if (rows[0].is_core) {
-      throw new HttpError(400, "Core fields can't be deleted — disable them per company instead");
+    if (STRUCTURALLY_REQUIRED_FIELDS.includes(rows[0].field_key)) {
+      throw new HttpError(
+        400,
+        `"${rows[0].field_key}" can't be deleted — the import pipeline depends on it directly`,
+      );
     }
     const client = await pool.connect();
     try {
