@@ -412,7 +412,11 @@ export default function MyWorklistPage() {
                             <Button size="small" onClick={() => setDetailId(a.customer_id)}>
                               View Customer
                             </Button>
-                            {CORRECTABLE_KIND[a.kind] && (
+                            {/* Correction requests are strictly self-service (POST
+                                /correction-requests requires the record's own
+                                agent_id to match the caller) -- showing Edit on a
+                                teammate's row in Branch scope would just 404. */}
+                            {CORRECTABLE_KIND[a.kind] && a.agent_id === user?.id && (
                               <Button size="small" icon={<EditOutlined />} onClick={() => setCorrectionTarget(a)}>
                                 Edit
                               </Button>
@@ -531,15 +535,23 @@ export default function MyWorklistPage() {
                 <Button size="small" onClick={() => setPaymentTarget(r)}>
                   Payment
                 </Button>
-                <Button
-                  size="small"
-                  onClick={() => {
-                    setReallocReason("");
-                    setReallocTarget(r);
-                  }}
-                >
-                  Reallocate
-                </Button>
+                {/* POST /reallocation-requests requires assigned_agent_id ===
+                    caller -- in Team scope most rows belong to a teammate, so
+                    Reallocate would just 403 there. is_primary_for_me is
+                    always computed relative to the actual caller, regardless
+                    of scope, so this also correctly covers a plain agent
+                    viewing a customer they're only the field agent for. */}
+                {r.is_primary_for_me && (
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      setReallocReason("");
+                      setReallocTarget(r);
+                    }}
+                  >
+                    Reallocate
+                  </Button>
+                )}
               </Space>
             ),
           },
