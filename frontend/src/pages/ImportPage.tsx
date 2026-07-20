@@ -63,6 +63,9 @@ interface DiffSample {
   pos?: number | null;
   agent_name?: string | null;
   previous_status?: string;
+  product?: string | null;
+  emi?: number | null;
+  branch?: string | null;
 }
 
 interface PreviewResult {
@@ -514,6 +517,16 @@ function ImportWizard() {
     },
   ];
 
+  const newLoanExtraColumns = [
+    { title: "Branch", dataIndex: "branch", render: (v: string | null) => v ?? "-" },
+    { title: "Product", dataIndex: "product", render: (v: string | null) => v ?? "-" },
+    {
+      title: "EMI Due Amount",
+      dataIndex: "emi",
+      render: (v: number | null) => (v == null ? "-" : v.toLocaleString("en-IN")),
+    },
+  ];
+
   const renderStep2 = () => {
     if (!preview) return null;
     const isAllocation = preview.mode === "allocation";
@@ -696,7 +709,7 @@ function ImportWizard() {
               style={{ marginTop: 8 }}
               pagination={false}
               dataSource={additions.sample}
-              columns={diffSampleColumns}
+              columns={[...diffSampleColumns, ...newLoanExtraColumns]}
             />
           </div>
         )}

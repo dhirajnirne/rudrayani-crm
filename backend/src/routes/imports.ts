@@ -191,6 +191,9 @@ router.post(
           bucket: a.row.bucket,
           due_amount: a.row.due_amount,
           pos: a.row.pos,
+          product: a.row.product,
+          emi: a.row.emi,
+          branch: a.row.customer_branch,
         })),
       },
       removals: {

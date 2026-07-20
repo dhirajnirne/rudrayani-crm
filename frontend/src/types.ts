@@ -154,6 +154,7 @@ export interface Customer {
   assigned_field_agent_id: string | null;
   assigned_field_agent_name: string | null;
   branch_id: string | null;
+  branch_name?: string | null;
   custom_fields: Record<string, unknown>;
   created_at: string;
   company_name: string;
