@@ -12,7 +12,7 @@ import { SearchOutlined } from "@ant-design/icons";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api/client";
 import CustomerDetailDrawer from "../components/CustomerDetailDrawer";
-import type { Branch, Company, Customer } from "../types";
+import type { Company, Customer } from "../types";
 
 const STATUS_TAG: Record<string, { color: string; label: string }> = {
   active: { color: "green", label: "Active" },
