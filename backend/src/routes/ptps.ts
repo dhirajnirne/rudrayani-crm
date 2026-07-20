@@ -5,6 +5,7 @@ import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { capabilitiesOf } from "../types/user";
 import { capabilitiesHavePermission } from "../services/permission-service";
+import { agentBranchClamp, resolveBranchClamp } from "../services/scope";
 
 const router = Router();
 router.use(authenticate, requirePermission("calls.log"));
@@ -43,6 +44,12 @@ router.get(
     if (!seesAll) {
       params.push(req.user!.id);
       filters.push(`(p.agent_id = $${params.length} OR c.assigned_agent_id = $${params.length})`);
+    } else {
+      // Between "own PTPs only" and "whole agency" -- a branch_manager only
+      // ever sees their own branch's agents' PTPs.
+      const clamp = await resolveBranchClamp(req.user!);
+      const clampSql = agentBranchClamp(clamp, params, "u");
+      if (clampSql) filters.push(clampSql.replace(/^ AND /, ""));
     }
 
     const { rows } = await pool.query(
@@ -86,6 +93,9 @@ router.get(
     if (!seesAll) {
       params.push(req.user!.id);
       agentFilter = `AND p.agent_id = $${params.length}`;
+    } else {
+      const clamp = await resolveBranchClamp(req.user!);
+      agentFilter = agentBranchClamp(clamp, params, "u");
     }
 
     const { rows } = await pool.query(

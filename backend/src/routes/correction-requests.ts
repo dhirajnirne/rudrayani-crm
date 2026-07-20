@@ -5,6 +5,7 @@ import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
 import { capabilitiesHavePermission } from "../services/permission-service";
+import { type BranchClamp, resolveBranchClamp } from "../services/scope";
 import { capabilitiesOf } from "../types/user";
 
 /**
@@ -43,6 +44,22 @@ function assertAllowedFields(recordType: RecordType, changes: Record<string, unk
   if (bad.length > 0) {
     throw new HttpError(400, `These fields are not correctable for ${recordType}: ${bad.join(", ")}`);
   }
+}
+
+/**
+ * Same branch clamp as scope.ts's customerBranchClamp(), but correction_requests
+ * has no customer_id of its own -- the customer only exists behind whichever
+ * of the three COALESCE'd source-table joins actually matches record_type.
+ * Doesn't fit the single-alias helper, so this is its own small variant.
+ */
+function coalescedCustomerBranchClamp(clamp: BranchClamp, params: unknown[]): string {
+  if (!clamp) return "";
+  params.push(clamp.branchId, clamp.branchName);
+  const idN = params.length - 1;
+  const nameN = params.length;
+  const branchIdExpr = "COALESCE(cust_p.branch_id, cust_c.branch_id, cust_t.branch_id)";
+  const customFieldsExpr = "COALESCE(cust_p.custom_fields, cust_c.custom_fields, cust_t.custom_fields)";
+  return ` AND (${branchIdExpr}::text = $${idN} OR (${branchIdExpr} IS NULL AND (${customFieldsExpr}->>'branch' ILIKE $${nameN} OR ${customFieldsExpr}->>'Branch' ILIKE $${nameN})))`;
 }
 
 /** Ownership + agency-scope check for the record being flagged. Returns the row, or throws 404. */
@@ -121,6 +138,12 @@ router.get(
     if (!seesAll) {
       params.push(req.user!.id);
       filters.push(`cr.requested_by = $${params.length}`);
+    } else {
+      // Between "own requests only" and "whole agency" -- a branch_manager
+      // only ever sees their own branch's approval queue.
+      const clamp = await resolveBranchClamp(req.user!);
+      const clampSql = coalescedCustomerBranchClamp(clamp, params);
+      if (clampSql) filters.push(clampSql.replace(/^ AND /, ""));
     }
     params.push(req.user!.agency_id);
     const agencyParamIndex = params.length;
@@ -168,11 +191,23 @@ router.post(
       })
       .parse(req.body);
 
+    // A branch_manager can only decide requests whose underlying customer
+    // is in their own branch -- same three-way COALESCE join as GET / above,
+    // since correction_requests doesn't carry a customer_id of its own.
+    const clamp = await resolveBranchClamp(req.user!);
+    const reqParams: unknown[] = [id, req.user!.agency_id];
+    const reqClampSql = coalescedCustomerBranchClamp(clamp, reqParams);
     const reqRes = await pool.query(
       `SELECT cr.* FROM correction_requests cr
          JOIN users u ON u.id = cr.requested_by
-        WHERE cr.id = $1 AND u.agency_id = $2`,
-      [id, req.user!.agency_id],
+         LEFT JOIN payments py ON cr.record_type = 'payment' AND py.id = cr.record_id
+         LEFT JOIN customers cust_p ON cust_p.id = py.customer_id
+         LEFT JOIN call_logs cl ON cr.record_type = 'call_log' AND cl.id = cr.record_id
+         LEFT JOIN customers cust_c ON cust_c.id = cl.customer_id
+         LEFT JOIN ptps pt ON cr.record_type = 'ptp' AND pt.id = cr.record_id
+         LEFT JOIN customers cust_t ON cust_t.id = pt.customer_id
+        WHERE cr.id = $1 AND u.agency_id = $2${reqClampSql}`,
+      reqParams,
     );
     const request = reqRes.rows[0];
     if (!request) throw new HttpError(404, "Request not found");

@@ -146,7 +146,19 @@ router.post(
         unmapped_columns: result.unmappedColumns,
         errors: result.errors.slice(0, 50),
         duplicate_loan_numbers: result.duplicatesInDb.slice(0, 50),
-        sample_rows: result.validRows.slice(0, 5),
+        // Remapped to the same shape as the allocation-mode diff's sample
+        // rows below (customer_branch -> branch) so the frontend can render
+        // both with the same column set.
+        sample_rows: result.validRows.slice(0, 5).map((r) => ({
+          loan_number: r.loan_number,
+          customer_name: r.customer_name,
+          bucket: r.bucket,
+          due_amount: r.due_amount,
+          pos: r.pos,
+          product: r.product,
+          emi: r.emi,
+          branch: r.customer_branch,
+        })),
       });
       return;
     }

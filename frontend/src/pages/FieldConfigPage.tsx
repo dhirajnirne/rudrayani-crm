@@ -22,11 +22,11 @@ import type { Company } from "../types";
  * Owner feedback round, Phase 10: admin surface for the system field master
  * catalog (system_field_definitions, agency-wide) and per-company
  * configuration (company_field_settings) that replaced the old compile-time
- * SYSTEM_FIELDS const import-service.ts used to read. Core fields
- * (loan_number..address, the former hardcoded list) can never be deleted --
- * only disabled per company -- while an admin can add new custom fields here
- * that immediately become mappable in the Import wizard once enabled for a
- * company.
+ * SYSTEM_FIELDS const import-service.ts used to read. Only loan_number and
+ * customer_name (STRUCTURALLY_REQUIRED_FIELDS -- the dedup key, and directly
+ * depended on by the import pipeline) can never be disabled or deleted;
+ * every other core field is deletable like a custom one, an admin's own
+ * decision about what their data actually needs.
  */
 
 interface FieldDefinition {
@@ -152,7 +152,10 @@ export default function FieldConfigPage() {
         Due Amount, POS, EMI, EMI Due Date, Agent Phone) plus Address make up the master catalog every
         agency starts with. Add custom fields here, then enable/require/order them per company below --
         disabled fields disappear from the Import wizard's mapping step but any values already imported
-        for them stay visible on the customer's detail view.
+        for them stay visible on the customer's detail view. Loan Number and Customer Name can never be
+        disabled or deleted (the import pipeline depends on them directly) -- every other field, core or
+        custom, can be removed from the catalog if you decide you don't need it; deleting only affects
+        future imports, not data already on file.
       </Typography.Paragraph>
 
       <Card title="Master catalog (agency-wide)" style={{ marginBottom: 24 }}>
@@ -176,8 +179,8 @@ export default function FieldConfigPage() {
               key: "actions",
               width: 90,
               render: (_, def) =>
-                def.is_core ? (
-                  <Tooltip title="Core fields can't be deleted — disable them per company instead">
+                STRUCTURALLY_REQUIRED_FIELDS.includes(def.field_key) ? (
+                  <Tooltip title="The import pipeline depends on this field directly — it can't be deleted">
                     <Button size="small" danger icon={<DeleteOutlined />} disabled />
                   </Tooltip>
                 ) : (

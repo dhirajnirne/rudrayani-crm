@@ -78,6 +78,7 @@ interface PreviewResult {
   valid_rows?: number;
   duplicates_in_db?: number;
   duplicate_loan_numbers?: string[];
+  sample_rows?: DiffSample[];
   // mode = "allocation" (Phase 7 diff engine)
   is_repeat_import?: boolean;
   will_update?: number;
@@ -399,6 +400,19 @@ function ImportWizard() {
           description={`Not mapped: ${missingRequired.map((f) => fieldLabel(f)).join(", ")}. Map a column to each before you can preview or commit.`}
         />
       )}
+      {!systemFields.some((f) => f.field_key === "customer_branch") && (
+        <Alert
+          type="info"
+          showIcon
+          message="Customer Branch isn't mappable for this company yet"
+          description="It's off by default per company. If this file has a branch column, enable Customer Branch in Field Config first, then re-upload to map it."
+          action={
+            <Button size="small" onClick={() => navigate("/field-config")}>
+              Open Field Config
+            </Button>
+          }
+        />
+      )}
       {templatesMissingRequired.length > 0 && (
         <Alert
           type="warning"
@@ -576,6 +590,20 @@ function ImportWizard() {
               showIcon
               message={`${preview.unmapped_columns.length} unmapped column(s) will be saved as custom fields: ${preview.unmapped_columns.join(", ")}`}
             />
+          )}
+
+          {preview.sample_rows && preview.sample_rows.length > 0 && (
+            <div>
+              <Typography.Text strong>Sample rows (first {preview.sample_rows.length}):</Typography.Text>
+              <Table
+                rowKey="loan_number"
+                size="small"
+                style={{ marginTop: 8 }}
+                pagination={false}
+                dataSource={preview.sample_rows}
+                columns={[...diffSampleColumns, ...newLoanExtraColumns]}
+              />
+            </div>
           )}
 
           {preview.errors.length > 0 && (

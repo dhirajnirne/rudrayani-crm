@@ -6,6 +6,7 @@ import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
 import { capabilitiesOf } from "../types/user";
 import { capabilitiesHavePermission } from "../services/permission-service";
+import { agentBranchClamp, resolveBranchClamp } from "../services/scope";
 
 const router = Router();
 router.use(authenticate, requirePermission("reminders.manage"));
@@ -115,12 +116,20 @@ router.get(
       filters.push(`r.remind_at <= $${params.length}`);
     }
 
-    if (seesAll && q.agent_id) {
-      params.push(q.agent_id);
-      filters.push(`r.agent_id = $${params.length}`);
-    } else if (!seesAll) {
+    if (!seesAll) {
       params.push(req.user!.id);
       filters.push(`r.agent_id = $${params.length}`);
+    } else {
+      // Between "own reminders only" and "whole agency" -- a branch_manager
+      // only ever sees their own branch's agents' reminders; agent_id (if
+      // sent) further narrows within that.
+      const clamp = await resolveBranchClamp(req.user!);
+      const clampSql = agentBranchClamp(clamp, params, "u");
+      if (clampSql) filters.push(clampSql.replace(/^ AND /, ""));
+      if (q.agent_id) {
+        params.push(q.agent_id);
+        filters.push(`r.agent_id = $${params.length}`);
+      }
     }
 
     const { rows } = await pool.query(
@@ -155,6 +164,15 @@ router.patch(
     if (!seesAll) {
       params.push(req.user!.id);
       ownerClause = `AND agent_id = $${params.length}`;
+    } else {
+      // No `users` join in this query to hang agentBranchClamp() off of --
+      // same branch check as a self-contained EXISTS instead.
+      const clamp = await resolveBranchClamp(req.user!);
+      if (clamp) {
+        params.push(clamp.branchId);
+        const n = params.length;
+        ownerClause = `AND EXISTS (SELECT 1 FROM users ru WHERE ru.id = agent_id AND (ru.branch_id = $${n} OR EXISTS (SELECT 1 FROM telecaller_branches tb WHERE tb.user_id = ru.id AND tb.branch_id = $${n})))`;
+      }
     }
 
     const { rows } = await pool.query(

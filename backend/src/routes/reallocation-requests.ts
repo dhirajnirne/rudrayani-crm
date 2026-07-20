@@ -5,6 +5,7 @@ import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
 import { capabilitiesHavePermission } from "../services/permission-service";
+import { agentBranchClamp, customerBranchClamp, resolveBranchClamp } from "../services/scope";
 import { capabilitiesOf } from "../types/user";
 
 /**
@@ -81,6 +82,12 @@ router.get(
     if (!seesAll) {
       params.push(req.user!.id);
       filters.push(`r.requested_by = $${params.length}`);
+    } else {
+      // Between "own requests only" and "whole agency" -- a branch_manager
+      // only ever sees their own branch's approval queue.
+      const clamp = await resolveBranchClamp(req.user!);
+      const clampSql = customerBranchClamp(clamp, params, "c");
+      if (clampSql) filters.push(clampSql.replace(/^ AND /, ""));
     }
 
     const { rows } = await pool.query(
@@ -121,21 +128,28 @@ router.post(
       })
       .parse(req.body);
 
+    // A branch_manager can only decide requests for their own branch's
+    // customers, and can only reassign to an agent in their own branch.
+    const clamp = await resolveBranchClamp(req.user!);
+    const reqParams: unknown[] = [id, req.user!.agency_id];
+    const reqClampSql = customerBranchClamp(clamp, reqParams, "c");
     const reqRes = await pool.query(
       `SELECT r.*, c.assigned_agent_id FROM reallocation_requests r
          JOIN customers c ON c.id = r.customer_id
          JOIN companies co ON co.id = c.company_id
-        WHERE r.id = $1 AND co.agency_id = $2`,
-      [id, req.user!.agency_id],
+        WHERE r.id = $1 AND co.agency_id = $2${reqClampSql}`,
+      reqParams,
     );
     const request = reqRes.rows[0];
     if (!request) throw new HttpError(404, "Request not found");
     if (request.status !== "pending") throw new HttpError(409, "Request already decided");
 
     if (body.approve && body.new_agent_id) {
+      const agentParams: unknown[] = [body.new_agent_id, req.user!.agency_id];
+      const agentClampSql = agentBranchClamp(clamp, agentParams, "users");
       const agent = await pool.query(
-        "SELECT id FROM users WHERE id = $1 AND agency_id = $2 AND is_active = true",
-        [body.new_agent_id, req.user!.agency_id],
+        `SELECT id FROM users WHERE id = $1 AND agency_id = $2 AND is_active = true${agentClampSql}`,
+        agentParams,
       );
       if (!agent.rows[0]) throw new HttpError(404, "New agent not found in this agency");
     }

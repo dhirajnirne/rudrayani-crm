@@ -5,6 +5,7 @@ import {
   Input,
   Modal,
   Row,
+  Segmented,
   Select,
   Space,
   Table,
@@ -17,6 +18,7 @@ import {
 import { HistoryOutlined, UserSwitchOutlined, PlusOutlined } from "@ant-design/icons";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, errorMessage } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
 import type { AllocationLog, Company, Customer, Employee } from "../types";
 import CustomerDetailDrawer from "../components/CustomerDetailDrawer";
 
@@ -81,22 +83,47 @@ const getBaseColumns = (onOpenDetail: (customerId: string) => void) => [
   },
 ];
 
-interface Branch { id: string; name: string }
+interface Branch { id: string; name: string; branch_manager_id?: string | null }
 interface Team { id: string; name: string; branch_id: string }
 
+/**
+ * The backend now hard-clamps a branch_manager to their own branch on every
+ * allocation action (see resolveBranchClamp() on the API side) -- this just
+ * keeps the dropdowns from offering branches/teams that would silently
+ * no-op or 404 on submit. Purely a UX narrowing; the actual restriction
+ * lives server-side regardless of what this returns.
+ */
 function useBranchTeam() {
-  const [branches, setBranches] = useState<Branch[]>([]);
-  const [teams, setTeams] = useState<Team[]>([]);
+  const { user } = useAuth();
+  const isBranchManager = !!user?.capabilities.includes("branch_manager");
+
+  const [allBranches, setAllBranches] = useState<Branch[]>([]);
+  const [allTeams, setAllTeams] = useState<Team[]>([]);
   const [branchId, setBranchId] = useState<string | null>(null);
   const [teamId, setTeamId] = useState<string | null>(null);
   useEffect(() => {
     Promise.all([api.get("/branches"), api.get("/teams")]).then(([br, tm]) => {
-      setBranches(br.data.branches);
-      setTeams(tm.data.teams);
+      setAllBranches(br.data.branches);
+      setAllTeams(tm.data.teams);
     });
   }, []);
-  const teamOptions = teams.filter((t) => !branchId || t.branch_id === branchId);
-  return { branches, teams: teamOptions, branchId, setBranchId, teamId, setTeamId };
+
+  const branches = useMemo(
+    () => (isBranchManager ? allBranches.filter((b) => b.branch_manager_id === user?.id) : allBranches),
+    [allBranches, isBranchManager, user?.id],
+  );
+
+  // Auto-lock a branch_manager onto their own (only) branch -- there's
+  // nothing else to pick, and this makes the team dropdown below narrow
+  // correctly without an extra click.
+  useEffect(() => {
+    if (isBranchManager && branches.length === 1 && !branchId) {
+      setBranchId(branches[0].id);
+    }
+  }, [isBranchManager, branches, branchId]);
+
+  const teamOptions = allTeams.filter((t) => !branchId || t.branch_id === branchId);
+  return { branches, teams: teamOptions, branchId, setBranchId, teamId, setTeamId, isBranchManager };
 }
 
 function useCustomerBranches() {
@@ -449,15 +476,22 @@ function AllocatedList({ onOpenDetail }: { onOpenDetail: (id: string) => void })
   const customerBranches = useCustomerBranches();
   const [customerBranch, setCustomerBranch] = useState<string>("");
   const agents = useAssignableAgents(null, null);
+  const telecallers = useMemo(() => agents.filter((a) => a.capabilities.includes("telecaller")), [agents]);
+  const fieldAgents = useMemo(() => agents.filter((a) => a.capabilities.includes("field_agent")), [agents]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
 
-  // Reallocate modal state
-  const [reallocOpen, setReallocOpen] = useState(false);
+  // Reallocate modal state -- driven by the actual customer objects being
+  // reallocated (not just ids carried over from checkbox selection), so a
+  // single-row "Reallocate" click can never silently reuse a stale/empty
+  // selection and POST an empty customer_ids array.
+  const [reallocTargets, setReallocTargets] = useState<Customer[]>([]);
+  const [reallocMode, setReallocMode] = useState<"telecaller" | "field_agent">("telecaller");
   const [agentId, setAgentId] = useState<string | null>(null);
+  const [fieldAgentId, setFieldAgentId] = useState<string | null>(null);
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -496,20 +530,33 @@ function AllocatedList({ onOpenDetail }: { onOpenDetail: (id: string) => void })
     load(1);
   }, [load]);
 
+  const openRealloc = (targets: Customer[]) => {
+    setReallocTargets(targets);
+    setReallocMode("telecaller");
+    setAgentId(targets.length === 1 ? targets[0].assigned_agent_id : null);
+    setFieldAgentId(targets.length === 1 ? targets[0].assigned_field_agent_id : null);
+    setReason("");
+  };
+
   const reallocate = async () => {
-    if (!agentId) return message.error("Pick the new agent");
+    const targetAgentId = reallocMode === "telecaller" ? agentId : fieldAgentId;
+    if (!targetAgentId) {
+      return message.error(`Pick the new ${reallocMode === "telecaller" ? "telecaller" : "field agent"}`);
+    }
     if (!reason.trim()) return message.error("Reallocation needs a reason");
     setSaving(true);
     try {
-      const res = await api.post("/allocations/assign", {
-        customer_ids: selected,
-        agent_id: agentId,
+      const endpoint = reallocMode === "telecaller" ? "/allocations/assign" : "/allocations/assign-field-agent";
+      const res = await api.post(endpoint, {
+        customer_ids: reallocTargets.map((c) => c.id),
+        agent_id: targetAgentId,
         reason: reason.trim(),
       });
       message.success(`${res.data.assigned} customer(s) moved to ${res.data.agent_name}`);
-      setReallocOpen(false);
+      setReallocTargets([]);
       setReason("");
       setAgentId(null);
+      setFieldAgentId(null);
       load(page);
     } catch (err) {
       message.error(errorMessage(err));
@@ -548,10 +595,7 @@ function AllocatedList({ onOpenDetail }: { onOpenDetail: (id: string) => void })
             <Button
               type="link"
               size="small"
-              onClick={() => {
-                setAgentId(record.assigned_agent_id);
-                setReallocOpen(true);
-              }}
+              onClick={() => openRealloc([record])}
             >
               Reallocate
             </Button>
@@ -567,7 +611,7 @@ function AllocatedList({ onOpenDetail }: { onOpenDetail: (id: string) => void })
         ),
       },
     ],
-    [onOpenDetail],
+    [onOpenDetail, openHistory, openRealloc],
   );
 
   return (
@@ -600,7 +644,7 @@ function AllocatedList({ onOpenDetail }: { onOpenDetail: (id: string) => void })
               <Button
                 type="primary"
                 icon={<UserSwitchOutlined />}
-                onClick={() => setReallocOpen(true)}
+                onClick={() => openRealloc(customers.filter((c) => selected.includes(c.id)))}
               >
                 Reallocate…
               </Button>
@@ -630,24 +674,55 @@ function AllocatedList({ onOpenDetail }: { onOpenDetail: (id: string) => void })
       />
 
       <Modal
-        open={reallocOpen}
-        title={`Reallocate ${selected.length} customer(s)`}
+        open={reallocTargets.length > 0}
+        title={
+          reallocTargets.length === 1
+            ? `Reallocate — ${reallocTargets[0].customer_name} (${reallocTargets[0].loan_number})`
+            : `Reallocate ${reallocTargets.length} customer(s)`
+        }
         onOk={reallocate}
         confirmLoading={saving}
-        onCancel={() => setReallocOpen(false)}
+        onCancel={() => setReallocTargets([])}
         okText="Reallocate"
       >
         <Space direction="vertical" style={{ width: "100%" }} size="middle">
+          {reallocTargets.length > 1 && (
+            <div>
+              <Typography.Text type="secondary">Customers</Typography.Text>
+              <div style={{ maxHeight: 120, overflowY: "auto", marginTop: 4 }}>
+                <Space size={[4, 4]} wrap>
+                  {reallocTargets.map((c) => (
+                    <Tag key={c.id}>
+                      {c.customer_name} ({c.loan_number})
+                    </Tag>
+                  ))}
+                </Space>
+              </div>
+            </div>
+          )}
+          <Segmented
+            value={reallocMode}
+            onChange={(v) => setReallocMode(v as "telecaller" | "field_agent")}
+            options={[
+              { label: "Telecaller", value: "telecaller" },
+              { label: "Field Agent", value: "field_agent" },
+            ]}
+          />
           <div>
-            <Typography.Text type="secondary">New agent</Typography.Text>
+            <Typography.Text type="secondary">
+              New {reallocMode === "telecaller" ? "telecaller" : "field agent"}
+            </Typography.Text>
             <Select
               style={{ width: "100%", marginTop: 4 }}
               title="Choose agent" placeholder="Choose agent"
               showSearch
               optionFilterProp="label"
-              value={agentId}
-              onChange={setAgentId}
-              options={agents.map((a) => ({ value: a.id, label: a.full_name }))}
+              value={reallocMode === "telecaller" ? agentId : fieldAgentId}
+              onChange={reallocMode === "telecaller" ? setAgentId : setFieldAgentId}
+              options={(reallocMode === "telecaller" ? telecallers : fieldAgents).map((a) => ({
+                value: a.id,
+                label: a.full_name,
+              }))}
             />
           </div>
           <div>

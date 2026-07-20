@@ -10,6 +10,7 @@ import { dimensionBreakdown, type BreakdownRow } from "../services/report-servic
 import { assertBranchManager } from "./branches";
 import { getSmsProvider } from "../services/sms/sms-provider";
 import { logger } from "../config/logger";
+import { resolveBranchClamp } from "../services/scope";
 import {
   capabilitiesOf,
   publicUser,
@@ -348,9 +349,15 @@ router.get(
     const isActiveRaw = req.query.is_active as string | undefined;
     const isActive = isActiveRaw === undefined ? null : isActiveRaw === "true";
 
+    // A branch_manager's branch filter is forced to their own branch,
+    // overriding whatever (if anything) the client asked for -- the client
+    // param stays purely optional for agency_admin/operations_manager.
+    const clamp = await resolveBranchClamp(req.user!);
+    const effectiveBranchId = clamp ? clamp.branchId : (branchId ?? null);
+
     const params: unknown[] = [
       req.user!.agency_id,
-      branchId ?? null,
+      effectiveBranchId,
       teamId ?? null,
       q || null,
       isActive,
@@ -400,6 +407,24 @@ router.post(
   asyncHandler(async (req, res) => {
     const body = createSchema.parse(req.body);
     await assertCanEditOpsManager(req.user!, body.designation);
+
+    // A branch_manager holds employees.create for their own team, not for
+    // the org structure itself -- they can only add individual contributors
+    // to their own branch, not another management rank or someone else's
+    // branch (customers.allocate's sibling gap, same audit pass).
+    const clamp = await resolveBranchClamp(req.user!);
+    if (clamp) {
+      if (body.designation === "operations_manager" || body.designation === "branch_manager") {
+        throw new HttpError(
+          403,
+          "A Branch Manager can only add Telecallers or Field Agents. Creating another Branch Manager or Operations Manager requires Operations Manager or Agency Admin access.",
+        );
+      }
+      if (body.branch_id && body.branch_id !== clamp.branchId) {
+        throw new HttpError(403, "A Branch Manager can only add employees to their own branch.");
+      }
+    }
+
     const agentType = assertAgentType(body.designation as Capability, body.agent_type);
     await assertBranchAndTeam(req.user!.agency_id, body.branch_id, body.team_id);
     if (body.branch_id && (body.designation === "telecaller" || body.designation === "field_agent")) {
@@ -502,24 +527,51 @@ router.get(
       })
       .parse(req.query);
 
+    // A branch_manager only ever sees their own branch's org tree -- the
+    // whole point of "org chart," so this can't be left agency-wide like the
+    // other queries below it used to be.
+    const clamp = await resolveBranchClamp(req.user!);
+
     const { rows: agencyRows } = await pool.query<{ id: string; name: string }>(
       "SELECT id, name FROM agencies WHERE id = $1",
       [agencyId],
     );
+
+    const branchParams: unknown[] = [agencyId];
+    let branchClampSql = "";
+    if (clamp) {
+      branchParams.push(clamp.branchId);
+      branchClampSql = ` AND id = $${branchParams.length}`;
+    }
     const { rows: branches } = await pool.query<{ id: string; name: string; branch_manager_id: string | null }>(
-      "SELECT id, name, branch_manager_id FROM branches WHERE agency_id = $1 ORDER BY name",
-      [agencyId],
+      `SELECT id, name, branch_manager_id FROM branches WHERE agency_id = $1${branchClampSql} ORDER BY name`,
+      branchParams,
     );
+
+    const teamParams: unknown[] = [agencyId];
+    let teamClampSql = "";
+    if (clamp) {
+      teamParams.push(clamp.branchId);
+      teamClampSql = ` AND b.id = $${teamParams.length}`;
+    }
     const { rows: teams } = await pool.query<{ id: string; name: string; branch_id: string }>(
       `SELECT t.id, t.name, t.branch_id FROM teams t
          JOIN branches b ON b.id = t.branch_id
-        WHERE b.agency_id = $1
+        WHERE b.agency_id = $1${teamClampSql}
         ORDER BY t.name`,
-      [agencyId],
+      teamParams,
     );
+
+    const userParams: unknown[] = [agencyId];
+    let userClampSql = "";
+    if (clamp) {
+      userParams.push(clamp.branchId);
+      const n = userParams.length;
+      userClampSql = ` AND (u.branch_id = $${n} OR EXISTS (SELECT 1 FROM telecaller_branches tb WHERE tb.user_id = u.id AND tb.branch_id = $${n}) OR EXISTS (SELECT 1 FROM branches mb WHERE mb.branch_manager_id = u.id AND mb.id = $${n}))`;
+    }
     const { rows: users } = await pool.query<UserRow>(
-      "SELECT * FROM users WHERE agency_id = $1 ORDER BY full_name",
-      [agencyId],
+      `SELECT u.* FROM users u WHERE u.agency_id = $1${userClampSql} ORDER BY u.full_name`,
+      userParams,
     );
 
     const nameById = new Map(users.map((u) => [u.id, u.full_name]));
@@ -600,9 +652,17 @@ router.get(
   "/:id",
   requirePermission("employees.view"),
   asyncHandler(async (req, res) => {
+    const clamp = await resolveBranchClamp(req.user!);
+    const params: unknown[] = [req.params.id, req.user!.agency_id];
+    let branchClampSql = "";
+    if (clamp) {
+      params.push(clamp.branchId);
+      const n = params.length;
+      branchClampSql = ` AND (u.branch_id = $${n} OR EXISTS (SELECT 1 FROM telecaller_branches tb WHERE tb.user_id = u.id AND tb.branch_id = $${n}) OR EXISTS (SELECT 1 FROM branches mb WHERE mb.branch_manager_id = u.id AND mb.id = $${n}))`;
+    }
     const { rows } = await pool.query<UserRow>(
-      "SELECT * FROM users WHERE id = $1 AND agency_id = $2",
-      [req.params.id, req.user!.agency_id],
+      `SELECT u.* FROM users u WHERE u.id = $1 AND u.agency_id = $2${branchClampSql}`,
+      params,
     );
     if (!rows[0]) throw new HttpError(404, "Employee not found");
     const [withMulti] = await attachMultiAssignments(rows);
