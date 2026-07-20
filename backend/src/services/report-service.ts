@@ -808,8 +808,11 @@ export async function depositTotals(
 
 /**
  * Phase 12 (Management Dashboard "Collected Today" KPI): money collected
- * since midnight, assumed UTC for this phase (see task-12 brief -- IST
- * "today" is a follow-up if the owner wants it later). Shares
+ * since IST midnight. Previously used bare `now()`, which resolves in the
+ * DB session's timezone (UTC) -- wrong for the first ~5.5h of every IST day
+ * and liable to bucket a payment into the wrong day entirely. Fixed to use
+ * the same `AT TIME ZONE 'Asia/Kolkata'` idiom as depositTotals() above,
+ * just anchored to today's IST date instead of a passed-in month. Shares
  * paymentConditions() with the MTD figure so both use identical scope
  * narrowing, just a different time window.
  */
@@ -827,8 +830,8 @@ export async function collectedToday(
        JOIN customers c ON c.id = p.customer_id
        JOIN companies co ON co.id = c.company_id AND co.agency_id = $1
        JOIN users cu ON cu.id = p.collected_by_user_id
-      WHERE p.paid_at >= date_trunc('day', now())
-        AND p.paid_at < date_trunc('day', now()) + interval '1 day'
+      WHERE p.paid_at >= (((now() AT TIME ZONE 'Asia/Kolkata')::date)::timestamp AT TIME ZONE 'Asia/Kolkata')
+        AND p.paid_at < (((now() AT TIME ZONE 'Asia/Kolkata')::date + interval '1 day')::timestamp AT TIME ZONE 'Asia/Kolkata')
         ${where}`,
     params,
   );
@@ -1807,52 +1810,93 @@ export interface AgentActivityRow {
   kind: "call" | "payment" | "ptp" | "field_visit";
   id: string;
   at: string;
+  agent_id: string;
+  customer_id: string;
   customer_name: string;
   loan_number: string;
+  remark: string | null;
+  amount: string | null;
   detail: string | null;
 }
 
 /**
- * One agent's recent collections activity across ALL their customers --
- * the gap the customer-360 trail (GET /customers/:id) and the per-agent-
- * per-day aggregate counts (/tracking/team-day) don't cover between them.
- * Access control is the caller's job (see GET /reports/agent-activity,
- * which reuses scopeFilter() the same way /tracking/team-day does).
+ * One or more agents' recent collections activity across ALL their
+ * customers -- the gap the customer-360 trail (GET /customers/:id) and the
+ * per-agent-per-day aggregate counts (/tracking/team-day) don't cover
+ * between them. Access control is the caller's job (see
+ * GET /reports/agent-activity, which reuses scopeFilter() the same way
+ * /tracking/team-day does).
+ *
+ * `options.today` scopes to the current IST day (for the "Today's Work"
+ * view) using the same AT TIME ZONE 'Asia/Kolkata' idiom as
+ * collectedToday() -- bare `now()` would have the same UTC-boundary bug.
+ * `options.dispositionCodeId` narrows to calls carrying that disposition;
+ * payments/PTPs/field visits have no disposition of their own, so that
+ * filter excludes those branches entirely rather than silently matching
+ * nothing against them.
  */
 export async function agentRecentActivity(
   agencyId: string,
-  agentId: string,
+  agentIds: string[],
   limit: number,
+  options: { today?: boolean; dispositionCodeId?: string } = {},
 ): Promise<AgentActivityRow[]> {
-  const { rows } = await pool.query<AgentActivityRow>(
-    `(SELECT 'call' AS kind, cl.id::text AS id, cl.created_at AS at,
-             c.customer_name, c.loan_number, dc.action_code AS detail
+  if (agentIds.length === 0) return [];
+  const params: unknown[] = [agentIds, agencyId];
+
+  const todayFor = (col: string) =>
+    options.today
+      ? `AND ${col} >= (((now() AT TIME ZONE 'Asia/Kolkata')::date)::timestamp AT TIME ZONE 'Asia/Kolkata')
+         AND ${col} < (((now() AT TIME ZONE 'Asia/Kolkata')::date + interval '1 day')::timestamp AT TIME ZONE 'Asia/Kolkata')`
+      : "";
+
+  let dispositionClause = "";
+  if (options.dispositionCodeId) {
+    params.push(options.dispositionCodeId);
+    dispositionClause = `AND cl.disposition_code_id = $${params.length}`;
+  }
+
+  const branches = [
+    `(SELECT 'call' AS kind, cl.id::text AS id, cl.created_at AS at, cl.agent_id,
+             c.id::text AS customer_id, c.customer_name, c.loan_number,
+             cl.remark, NULL::text AS amount, dc.action_code AS detail
         FROM call_logs cl
         JOIN customers c ON c.id = cl.customer_id
         JOIN companies co ON co.id = c.company_id
         LEFT JOIN disposition_codes dc ON dc.id = cl.disposition_code_id
-       WHERE cl.agent_id = $1 AND co.agency_id = $2)
-     UNION ALL
-     (SELECT 'payment', p.id::text, p.paid_at, c.customer_name, c.loan_number, p.amount::text
-        FROM payments p
-        JOIN customers c ON c.id = p.customer_id
-        JOIN companies co ON co.id = c.company_id
-       WHERE p.collected_by_user_id = $1 AND co.agency_id = $2)
-     UNION ALL
-     (SELECT 'ptp', pt.id::text, pt.created_at, c.customer_name, c.loan_number, pt.status
-        FROM ptps pt
-        JOIN customers c ON c.id = pt.customer_id
-        JOIN companies co ON co.id = c.company_id
-       WHERE pt.agent_id = $1 AND co.agency_id = $2)
-     UNION ALL
-     (SELECT 'field_visit', fv.id::text, fv.created_at, c.customer_name, c.loan_number, fv.remark
-        FROM field_visits fv
-        JOIN customers c ON c.id = fv.customer_id
-        JOIN companies co ON co.id = c.company_id
-       WHERE fv.agent_id = $1 AND co.agency_id = $2)
-     ORDER BY at DESC
-     LIMIT $3`,
-    [agentId, agencyId, limit],
+       WHERE cl.agent_id = ANY($1) AND co.agency_id = $2 ${todayFor("cl.created_at")} ${dispositionClause})`,
+  ];
+
+  if (!options.dispositionCodeId) {
+    branches.push(
+      `(SELECT 'payment', p.id::text, p.paid_at, p.collected_by_user_id,
+               c.id::text, c.customer_name, c.loan_number,
+               NULL::text, p.amount::text, p.mode
+          FROM payments p
+          JOIN customers c ON c.id = p.customer_id
+          JOIN companies co ON co.id = c.company_id
+         WHERE p.collected_by_user_id = ANY($1) AND co.agency_id = $2 ${todayFor("p.paid_at")})`,
+      `(SELECT 'ptp', pt.id::text, pt.created_at, pt.agent_id,
+               c.id::text, c.customer_name, c.loan_number,
+               NULL::text, pt.amount::text, pt.promised_date::text
+          FROM ptps pt
+          JOIN customers c ON c.id = pt.customer_id
+          JOIN companies co ON co.id = c.company_id
+         WHERE pt.agent_id = ANY($1) AND co.agency_id = $2 ${todayFor("pt.created_at")})`,
+      `(SELECT 'field_visit', fv.id::text, fv.created_at, fv.agent_id,
+               c.id::text, c.customer_name, c.loan_number,
+               fv.remark, NULL::text, NULL::text
+          FROM field_visits fv
+          JOIN customers c ON c.id = fv.customer_id
+          JOIN companies co ON co.id = c.company_id
+         WHERE fv.agent_id = ANY($1) AND co.agency_id = $2 ${todayFor("fv.created_at")})`,
+    );
+  }
+
+  params.push(limit);
+  const { rows } = await pool.query<AgentActivityRow>(
+    `${branches.join(" UNION ALL ")} ORDER BY at DESC LIMIT $${params.length}`,
+    params,
   );
   return rows;
 }

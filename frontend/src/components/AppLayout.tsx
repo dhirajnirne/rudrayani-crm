@@ -52,7 +52,12 @@ export default function AppLayout() {
       icon: <BarChartOutlined />,
       label: <Link to="/management-dashboard">Management Dashboard</Link>,
     },
-    isIndividualContributor && {
+    // Shown to anyone who personally logs calls -- not just individual
+    // contributors. Branch managers/ops managers hold customers.allocate
+    // too, but still need their own properly-scoped book (GET /worklist is
+    // always self-scoped, or self+team for a branch_manager's "Team" toggle)
+    // rather than being stuck on the org-wide Customers list.
+    hasPermission("calls.log") && {
       key: "/my-worklist",
       icon: <UnorderedListOutlined />,
       label: <Link to="/my-worklist">My Worklist</Link>,

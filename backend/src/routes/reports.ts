@@ -75,23 +75,56 @@ router.get(
   asyncHandler(async (req, res) => {
     const query = z
       .object({
-        agent_id: z.string().uuid(),
-        limit: z.coerce.number().int().min(1).max(100).default(20),
+        agent_id: z.string().uuid().optional(),
+        // "Today's Work" branch-manager drill-down: every agent under the
+        // branch this caller manages, in one grouped query rather than N+1.
+        scope: z.enum(["team"]).optional(),
+        today: z.coerce.boolean().optional(),
+        disposition_code_id: z.string().uuid().optional(),
+        limit: z.coerce.number().int().min(1).max(200).default(20),
       })
       .parse(req.query);
 
-    const scope = await scopeFilter(req.user!);
-    if (scope.param !== null) {
-      const clause = scope.clause.replaceAll("$SCOPE", "$2");
-      const { rows } = await pool.query(
-        `SELECT 1 FROM users u WHERE u.id = $1 AND u.agency_id = $3 ${clause}`,
-        [query.agent_id, scope.param, req.user!.agency_id],
+    let agentIds: string[];
+    let agentNames: Map<string, string> | null = null;
+
+    if (query.scope === "team") {
+      if (req.user!.designation !== "branch_manager") {
+        throw new HttpError(403, "Only a branch manager can view team activity");
+      }
+      const scope = await scopeFilter(req.user!);
+      const clause = scope.param !== null ? scope.clause.replaceAll("$SCOPE", "$2") : "";
+      const params: unknown[] = scope.param !== null ? [req.user!.agency_id, scope.param] : [req.user!.agency_id];
+      const { rows } = await pool.query<{ id: string; full_name: string }>(
+        `SELECT u.id, u.full_name FROM users u WHERE u.agency_id = $1 AND u.is_active = true ${clause}`,
+        params,
       );
-      if (rows.length === 0) throw new HttpError(403, "You cannot view this agent's activity");
+      agentIds = rows.map((r) => r.id);
+      agentNames = new Map(rows.map((r) => [r.id, r.full_name]));
+    } else {
+      const targetAgentId = query.agent_id ?? req.user!.id;
+      if (targetAgentId !== req.user!.id) {
+        const scope = await scopeFilter(req.user!);
+        if (scope.param !== null) {
+          const clause = scope.clause.replaceAll("$SCOPE", "$2");
+          const { rows } = await pool.query(
+            `SELECT 1 FROM users u WHERE u.id = $1 AND u.agency_id = $3 ${clause}`,
+            [targetAgentId, scope.param, req.user!.agency_id],
+          );
+          if (rows.length === 0) throw new HttpError(403, "You cannot view this agent's activity");
+        }
+      }
+      agentIds = [targetAgentId];
     }
 
-    const activity = await agentRecentActivity(req.user!.agency_id, query.agent_id, query.limit);
-    res.json({ agent_id: query.agent_id, activity });
+    const activity = await agentRecentActivity(req.user!.agency_id, agentIds, query.limit, {
+      today: query.today,
+      dispositionCodeId: query.disposition_code_id,
+    });
+    const withNames = agentNames
+      ? activity.map((a) => ({ ...a, agent_name: agentNames!.get(a.agent_id) ?? null }))
+      : activity;
+    res.json({ agent_id: query.agent_id ?? null, activity: withNames });
   }),
 );
 

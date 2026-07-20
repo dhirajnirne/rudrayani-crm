@@ -137,6 +137,10 @@ export default function DashboardPage() {
 
   useEffect(() => {
     void load();
+    // A collection an agent just recorded won't otherwise appear on a
+    // dashboard tab left open until a filter changes -- poll so it does.
+    const interval = setInterval(() => void load(), 60_000);
+    return () => clearInterval(interval);
   }, [load]);
 
   const exportExcel = async () => {

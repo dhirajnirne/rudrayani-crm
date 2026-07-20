@@ -37,6 +37,12 @@ export function errorHandler(
     res.status(409).json({ error: "A record with that value already exists" });
     return;
   }
+  // Postgres foreign-key violation -> conflict, not a 500 -- almost always
+  // means a dependent record still references the row being changed/deleted.
+  if (typeof err === "object" && err !== null && (err as { code?: string }).code === "23503") {
+    res.status(409).json({ error: "This record is still referenced by other data and can't be changed" });
+    return;
+  }
   logger.error({ err, method: req.method, path: req.path }, "Unhandled error");
   res.status(500).json({ error: "Internal server error" });
 }
