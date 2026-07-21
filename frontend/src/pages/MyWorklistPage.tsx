@@ -443,7 +443,7 @@ export default function MyWorklistPage() {
           onClick: () => setDetailId(record.id),
           style: { cursor: "pointer" },
         })}
-        scroll={{ x: scope === "team" ? 1840 : 1700 }}
+        scroll={{ x: scope === "team" ? 1180 : 1020 }}
         columns={[
           {
             title: "Loan No",
@@ -451,7 +451,7 @@ export default function MyWorklistPage() {
             width: 120,
             render: (v: string) => <Typography.Text code>{v}</Typography.Text>,
           },
-          { title: "Customer", dataIndex: "customer_name", width: 160, ellipsis: true },
+          { title: "Customer", dataIndex: "customer_name", ellipsis: true },
           { title: "Company", dataIndex: "company_name", width: 130, ellipsis: true },
           { title: "Branch", dataIndex: "branch_name", width: 110, render: (v) => v ?? "-" },
           ...(scope === "team"

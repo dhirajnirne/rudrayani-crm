@@ -2,20 +2,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api/api_client.dart';
 import '../../core/models/customer.dart';
 
-/// Personal (own allocations) vs Team (every allocation in the branch a
-/// branch_manager manages) -- the web equivalent is MyWorklistPage.tsx's
-/// Segmented control. Only a branch_manager gets a toggle for this in the
-/// UI (see WorklistScreen); everyone else always resolves to personal scope
-/// server-side regardless of what this holds.
-final worklistScopeProvider = StateProvider<String>((ref) => 'personal');
-
 final worklistProvider = FutureProvider<List<Customer>>((ref) async {
   final api = ref.watch(apiClientProvider);
-  final scope = ref.watch(worklistScopeProvider);
-  final res = await api.get<Map<String, dynamic>>(
-    '/worklist',
-    query: scope == 'team' ? {'scope': 'team'} : null,
-  );
+  final res = await api.get<Map<String, dynamic>>('/worklist');
   final data = res.data!;
   final list = (data['customers'] as List).cast<Map<String, dynamic>>();
   return list.map(Customer.fromJson).toList();

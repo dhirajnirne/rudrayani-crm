@@ -52,7 +52,7 @@ const getBaseColumns = (onOpenDetail: (customerId: string) => void) => [
     width: 130,
     render: (v: string) => <Typography.Text code>{v}</Typography.Text>,
   },
-  { title: "Customer", dataIndex: "customer_name", width: 160, ellipsis: true },
+  { title: "Customer", dataIndex: "customer_name", ellipsis: true },
   { title: "Company", dataIndex: "company_name", width: 150, ellipsis: true },
   { title: "Branch", dataIndex: "branch_name", width: 120, render: (v: string | null) => v ?? "—" },
   {
@@ -459,7 +459,7 @@ function UnallocatedQueue({ onOpenDetail }: { onOpenDetail: (id: string) => void
           showTotal: (t) => `${t.toLocaleString()} unallocated`,
           onChange: (pg) => load(pg),
         }}
-        scroll={{ x: 1100 }}
+        scroll={{ x: 800 }}
         columns={getBaseColumns(onOpenDetail)}
       />
     </div>
@@ -669,7 +669,7 @@ function AllocatedList({ onOpenDetail }: { onOpenDetail: (id: string) => void })
           showTotal: (t) => `${t.toLocaleString()} allocated`,
           onChange: (pg) => load(pg),
         }}
-        scroll={{ x: 1500 }}
+        scroll={{ x: 950 }}
         columns={columns}
       />
 

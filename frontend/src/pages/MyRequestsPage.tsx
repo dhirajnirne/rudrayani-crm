@@ -79,16 +79,14 @@ export default function MyRequestsPage() {
         loading={loading}
         dataSource={requests}
         pagination={{ pageSize: 20 }}
-        scroll={{ x: 1350 }}
         columns={[
           {
             title: "Loan Number",
             dataIndex: "loan_number",
-            width: 140,
             render: (v: string) => <Typography.Text code>{v}</Typography.Text>,
           },
-          { title: "Customer", dataIndex: "customer_name", width: 160, ellipsis: true },
-          { title: "Company", dataIndex: "company_name", width: 150, ellipsis: true },
+          { title: "Customer", dataIndex: "customer_name" },
+          { title: "Company", dataIndex: "company_name" },
           {
             title: "Due Amount",
             dataIndex: "due_amount",
@@ -96,7 +94,7 @@ export default function MyRequestsPage() {
             align: "right" as const,
             render: (v: string | null) => <span className="money">{fmtAmount(v)}</span>,
           },
-          { title: "Reason", dataIndex: "reason", width: 200, ellipsis: true },
+          { title: "Reason", dataIndex: "reason", ellipsis: true },
           {
             title: "Status",
             width: 110,

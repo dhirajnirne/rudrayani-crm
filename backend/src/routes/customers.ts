@@ -4,7 +4,6 @@ import { pool } from "../config/db";
 import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
-import { resolveFieldCatalog } from "../services/field-config-service";
 import { capabilitiesHavePermission } from "../services/permission-service";
 import { customerBranchClamp, resolveBranchClamp } from "../services/scope";
 import { capabilitiesOf } from "../types/user";
@@ -222,7 +221,6 @@ router.get(
 
     const [
       detailFields,
-      fieldCatalog,
       trail,
       ptps,
       payments,
@@ -241,9 +239,6 @@ router.get(
             ORDER BY updated_at DESC LIMIT 1`,
           [customer.company_id],
         ),
-        // Admin's Field Config "required" toggle (company_field_settings.is_required)
-        // otherwise never reached a customer-facing view -- see field_catalog below.
-        resolveFieldCatalog(customer.company_id),
         pool.query(
           `SELECT cl.id, cl.remark, cl.call_duration_seconds, cl.details, cl.created_at,
                   dc.action_code, dc.result_code, u.full_name AS agent_name
@@ -311,10 +306,6 @@ router.get(
       customer,
       company_name: customer.company_name,
       detail_fields: detailFields.rows[0]?.detail_fields ?? [],
-      // field_key -> is_required, for every enabled field of this customer's
-      // company -- lets the customer-detail UI mark required fields instead
-      // of that config being visible only on the admin Field Config page.
-      field_catalog: fieldCatalog.filter((f) => f.is_enabled),
       trail: trail.rows,
       ptps: ptps.rows,
       payments: payments.rows,
