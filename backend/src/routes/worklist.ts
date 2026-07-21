@@ -4,6 +4,7 @@ import { pool } from "../config/db";
 import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
+import { agentBranchClamp, resolveBranchClamp } from "../services/scope";
 
 /**
  * The agent's worklist — "Today's Allocation" (build brief Section 8): every
@@ -12,20 +13,6 @@ import { HttpError } from "../middleware/error-handler";
  */
 const router = Router();
 router.use(authenticate, requirePermission("calls.log"));
-
-/**
- * Resolve the branch a branch_manager manages, for `scope=team`. Returns
- * null if the caller isn't a branch_manager or doesn't manage a branch --
- * callers must fall back to self-scope in that case, never to "everyone".
- */
-async function resolveManagedBranchId(userId: string, designation: string): Promise<string | null> {
-  if (designation !== "branch_manager") return null;
-  const { rows } = await pool.query<{ id: string }>(
-    "SELECT id FROM branches WHERE branch_manager_id = $1",
-    [userId],
-  );
-  return rows[0]?.id ?? null;
-}
 
 router.get(
   "/",
@@ -40,15 +27,25 @@ router.get(
     const params: unknown[] = [req.user!.id];
     let conditions: string;
 
-    const managedBranchId = scope === "team" ? await resolveManagedBranchId(req.user!.id, req.user!.designation) : null;
+    // `scope=team` only ever applies to a branch_manager -- callers must
+    // fall back to self-scope otherwise, never to "everyone". Uses the same
+    // resolveBranchClamp()/agentBranchClamp() helpers as customers.ts/
+    // allocations.ts/employees.ts (added in the RBAC branch-scoping batch)
+    // instead of a separate, ad hoc branch_id/team_id match -- the old
+    // local version missed the telecaller_branches junction table, so a
+    // branch_manager who ALSO carries collections work (agent_type set)
+    // never saw customers allocated directly to themself in the Team tab,
+    // since their own users.branch_id/team_id are both null (their branch
+    // link lives only in telecaller_branches).
+    const wantsTeamScope = scope === "team" && req.user!.designation === "branch_manager";
+    const clamp = wantsTeamScope ? await resolveBranchClamp(req.user!) : null;
 
-    if (managedBranchId) {
-      params.push(managedBranchId);
+    if (clamp) {
+      const agentMatch = agentBranchClamp(clamp, params, "u").replace(/^ AND /, "");
+      const fieldAgentMatch = agentBranchClamp(clamp, params, "u").replace(/^ AND /, "");
       conditions = `(
-          EXISTS (SELECT 1 FROM users u WHERE u.id = c.assigned_agent_id
-                    AND (u.branch_id = $2 OR u.team_id IN (SELECT id FROM teams WHERE branch_id = $2)))
-          OR EXISTS (SELECT 1 FROM users u WHERE u.id = c.assigned_field_agent_id
-                    AND (u.branch_id = $2 OR u.team_id IN (SELECT id FROM teams WHERE branch_id = $2)))
+          EXISTS (SELECT 1 FROM users u WHERE u.id = c.assigned_agent_id AND ${agentMatch})
+          OR EXISTS (SELECT 1 FROM users u WHERE u.id = c.assigned_field_agent_id AND ${fieldAgentMatch})
         ) AND c.status = 'active'`;
     } else {
       conditions = `(c.assigned_agent_id = $1 OR c.assigned_field_agent_id = $1) AND c.status = 'active'`;
