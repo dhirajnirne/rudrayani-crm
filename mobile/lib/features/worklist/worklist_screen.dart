@@ -39,6 +39,8 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
     final wl = ref.watch(worklistProvider);
     final user = auth.user;
     final userName = user?['full_name'] ?? 'Agent';
+    final isBranchManager = auth.capabilities.contains('branch_manager');
+    final scope = ref.watch(worklistScopeProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -75,6 +77,21 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
       body: Column(
         children: [
           const _SyncBanner(),
+          if (isBranchManager)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+              child: SegmentedButton<String>(
+                segments: const [
+                  ButtonSegment(value: 'personal', label: Text('Personal')),
+                  ButtonSegment(value: 'team', label: Text('Team')),
+                ],
+                selected: {scope},
+                onSelectionChanged: (s) {
+                  ref.read(worklistScopeProvider.notifier).state = s.first;
+                  ref.invalidate(worklistProvider);
+                },
+              ),
+            ),
           const TodaySection(),
           Padding(
             padding: const EdgeInsets.all(12),

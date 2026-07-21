@@ -199,7 +199,7 @@ export default function CustomersPage() {
           showTotal: (t) => `${t.toLocaleString()} customers`,
           onChange: (pg) => load(pg),
         }}
-        scroll={{ x: 950 }}
+        scroll={{ x: 1430 }}
         columns={[
           {
             title: "Status",
@@ -213,7 +213,7 @@ export default function CustomersPage() {
             width: 130,
             render: (v: string) => <Typography.Text code>{v}</Typography.Text>,
           },
-          { title: "Customer", dataIndex: "customer_name", ellipsis: true },
+          { title: "Customer", dataIndex: "customer_name", width: 160, ellipsis: true },
           { title: "Mobile", dataIndex: "mobile_number", width: 130, render: (v) => v ?? "—" },
           { title: "Company", dataIndex: "company_name", width: 150, ellipsis: true },
           { title: "Branch", dataIndex: "branch_name", width: 120, render: (v) => v ?? "—" },

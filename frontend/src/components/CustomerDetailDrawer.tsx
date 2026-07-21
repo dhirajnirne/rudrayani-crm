@@ -55,6 +55,7 @@ interface CustomerDetail {
   };
   company_name: string;
   detail_fields: string[];
+  field_catalog: { field_key: string; label: string; is_required: boolean }[];
   trail: {
     id: string;
     remark: string | null;
@@ -192,6 +193,24 @@ export default function CustomerDetailDrawer({
   const normalizedPending =
     detail?.bucket_movements.some((m) => m.trigger === "payment" && m.month === currentMonth) ?? false;
 
+  // Admin's Field Config "required" toggle only ever showed up on the Field
+  // Config page itself -- agents/TLs viewing a customer had no way to tell
+  // which fields the company actually requires. field_catalog (added to
+  // GET /customers/:id) makes that visible here too.
+  const requiredFieldKeys = new Set(
+    (detail?.field_catalog ?? []).filter((f) => f.is_required).map((f) => f.field_key),
+  );
+  const fieldLabel = (label: string, fieldKey: string) => (
+    <>
+      {label}
+      {requiredFieldKeys.has(fieldKey) && (
+        <Tag color="red" style={{ marginLeft: 6, fontSize: 10, lineHeight: "16px", padding: "0 4px" }}>
+          Required
+        </Tag>
+      )}
+    </>
+  );
+
   return (
     <Drawer
       title={detail ? `${detail.customer.customer_name} — ${detail.customer.loan_number}` : "Customer"}
@@ -224,13 +243,25 @@ export default function CustomerDetailDrawer({
             <Typography.Title level={5}>Identity</Typography.Title>
             <Descriptions size="small" bordered column={1}>
               <Descriptions.Item label="Company">{detail.company_name}</Descriptions.Item>
-              <Descriptions.Item label="Mobile">{orDash(detail.customer.mobile_number)}</Descriptions.Item>
-              <Descriptions.Item label="Product">{orDash(detail.customer.product)}</Descriptions.Item>
-              <Descriptions.Item label="Bucket">{orDash(detail.customer.bucket)}</Descriptions.Item>
-              <Descriptions.Item label="Due Amount">{fmtAmount(detail.customer.due_amount)}</Descriptions.Item>
-              <Descriptions.Item label="POS">{fmtAmount(detail.customer.pos)}</Descriptions.Item>
-              <Descriptions.Item label="EMI">{fmtAmount(detail.customer.emi)}</Descriptions.Item>
-              <Descriptions.Item label="EMI Due Date">
+              <Descriptions.Item label={fieldLabel("Mobile", "mobile_number")}>
+                {orDash(detail.customer.mobile_number)}
+              </Descriptions.Item>
+              <Descriptions.Item label={fieldLabel("Product", "product")}>
+                {orDash(detail.customer.product)}
+              </Descriptions.Item>
+              <Descriptions.Item label={fieldLabel("Bucket", "bucket")}>
+                {orDash(detail.customer.bucket)}
+              </Descriptions.Item>
+              <Descriptions.Item label={fieldLabel("Due Amount", "due_amount")}>
+                {fmtAmount(detail.customer.due_amount)}
+              </Descriptions.Item>
+              <Descriptions.Item label={fieldLabel("POS", "pos")}>
+                {fmtAmount(detail.customer.pos)}
+              </Descriptions.Item>
+              <Descriptions.Item label={fieldLabel("EMI", "emi")}>
+                {fmtAmount(detail.customer.emi)}
+              </Descriptions.Item>
+              <Descriptions.Item label={fieldLabel("EMI Due Date", "emi_due_date")}>
                 {detail.customer.due_date ? dayjs(detail.customer.due_date).format("DD MMM YYYY") : "-"}
               </Descriptions.Item>
               <Descriptions.Item label="DPD (from due date)">
@@ -239,7 +270,7 @@ export default function CustomerDetailDrawer({
                   : "-"}
               </Descriptions.Item>
               {Object.entries(detail.customer.custom_fields).map(([field, value]) => (
-                <Descriptions.Item key={field} label={field}>
+                <Descriptions.Item key={field} label={fieldLabel(field, field)}>
                   {orDash(value)}
                 </Descriptions.Item>
               ))}
