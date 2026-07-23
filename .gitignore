@@ -32,3 +32,7 @@ Thumbs.db
 
 # Test credentials (local dev only)
 TEST_CREDENTIALS.md
+
+# Local-only working files (kept on disk, not tracked)
+/resource files/
+/Mobile redesign/
