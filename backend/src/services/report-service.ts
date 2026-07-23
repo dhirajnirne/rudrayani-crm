@@ -123,6 +123,59 @@ function buildTeamClause(scope: ResolvedScope, params: unknown[]): string | null
 }
 
 /**
+ * Branch clamp for the report engine (mirrors scope.ts's
+ * customerBranchClamp()/agentBranchClamp(), but as a single OR'd clause for
+ * queries that need all three signals at once). `customers.assigned_team_id`
+ * is only ever populated as the assigned agent's own team_id at allocation
+ * time (allocations.ts) -- a branch whose agents were never grouped into a
+ * team leaves assigned_team_id NULL on every row, so a bare `tm.branch_id =
+ * $N` (tm joined off assigned_team_id) matches zero rows and every
+ * SUM/COUNT aggregate silently collapses to 0. This ORs together every
+ * signal that can place a row in the branch, so it only ever WIDENS which
+ * rows match versus the old tm-only clamp, never narrows:
+ *  (a) the customer's own structured branch_id, or (when that's NULL) the
+ *      freetext custom_fields.branch/.Branch matched by name (branch_id is
+ *      opt-in per company -- most never populate it, same fallback
+ *      customerBranchClamp() already uses elsewhere);
+ *  (b) the team's branch_id, when a team alias is joined (still correct
+ *      when a team IS set, just not sufficient alone);
+ *  (c) for each given agent column (e.g. s.assigned_agent_id,
+ *      c.assigned_field_agent_id), that agent's own branch_id or a
+ *      telecaller_branches assignment to this branch (agentBranchClamp()'s
+ *      pattern) -- catches a team-less agent whose customer has no branch_id
+ *      of its own either.
+ * Pushes exactly one param (branchId), referenced by every OR'd arm.
+ */
+function reportBranchClause(
+  branchId: string,
+  params: unknown[],
+  customerAlias: string,
+  teamAlias: string | null,
+  agentCols: string[],
+): string {
+  params.push(branchId);
+  const n = params.length;
+  // Every occurrence of $n below is cast ::uuid explicitly -- Postgres infers
+  // one type per placeholder number across the WHOLE query, so leaving even
+  // one occurrence uncast (or cast to ::text) while the rest compare against
+  // uuid columns raises "operator does not exist: uuid = text" once both
+  // shapes appear together.
+  const branchName = `(SELECT name FROM branches WHERE id = $${n}::uuid)`;
+  const parts: string[] = [
+    `(${customerAlias}.branch_id = $${n}::uuid OR (${customerAlias}.branch_id IS NULL AND (${customerAlias}.custom_fields->>'branch' ILIKE ${branchName} OR ${customerAlias}.custom_fields->>'Branch' ILIKE ${branchName})))`,
+  ];
+  if (teamAlias) {
+    parts.push(`${teamAlias}.branch_id = $${n}::uuid`);
+  }
+  for (const col of agentCols) {
+    parts.push(
+      `EXISTS (SELECT 1 FROM users u WHERE u.id = ${col} AND (u.branch_id = $${n}::uuid OR EXISTS (SELECT 1 FROM telecaller_branches tb WHERE tb.user_id = u.id AND tb.branch_id = $${n}::uuid)))`,
+    );
+  }
+  return `(${parts.join(" OR ")})`;
+}
+
+/**
  * Build report WHERE conditions with multi-team TL support.
  * Like baseConditions() but replaces the team clause with buildTeamClause()
  * to handle scopeTeamIds from multi-team TLs.
@@ -136,8 +189,7 @@ function buildReportConditions(scope: ResolvedScope, params: unknown[]): string[
     conditions.push(`s.company_id = $${params.length}`);
   }
   if (filters.branch_id) {
-    params.push(filters.branch_id);
-    conditions.push(`tm.branch_id = $${params.length}`);
+    conditions.push(reportBranchClause(filters.branch_id, params, "c", "tm", ["s.assigned_agent_id"]));
   }
 
   // Team handling with multi-team support
@@ -203,8 +255,7 @@ function baseConditions(filters: ReportFilters, params: unknown[]): string[] {
     conditions.push(`s.company_id = $${params.length}`);
   }
   if (filters.branch_id) {
-    params.push(filters.branch_id);
-    conditions.push(`tm.branch_id = $${params.length}`);
+    conditions.push(reportBranchClause(filters.branch_id, params, "c", "tm", ["s.assigned_agent_id"]));
   }
   if (filters.team_id) {
     params.push(filters.team_id);
@@ -248,8 +299,12 @@ function liveConditions(filters: ReportFilters, params: unknown[]): string[] {
     conditions.push(`c.company_id = $${params.length}`);
   }
   if (filters.branch_id) {
-    params.push(filters.branch_id);
-    conditions.push(`tm.branch_id = $${params.length}`);
+    conditions.push(
+      reportBranchClause(filters.branch_id, params, "c", "tm", [
+        "c.assigned_agent_id",
+        "c.assigned_field_agent_id",
+      ]),
+    );
   }
   if (filters.team_id) {
     params.push(filters.team_id);
@@ -334,7 +389,13 @@ export interface ScopeBookTotal {
 
 const SCOPE_GROUP_EXPR: Record<"agency" | "branch" | "team" | "agent", { live: string; snap: string }> = {
   agency: { live: "NULL::uuid", snap: "NULL::uuid" },
-  branch: { live: "tm.branch_id", snap: "tm.branch_id" },
+  // Same tm-then-customer-then-agent fallback as reportBranchClause()/
+  // classifiedCtes() -- a team-less agent's book would otherwise group under
+  // scope_id = NULL and vanish from the Targets page's per-branch column.
+  branch: {
+    live: "COALESCE(tm.branch_id, c.branch_id, u.branch_id)",
+    snap: "COALESCE(tm.branch_id, c.branch_id, u.branch_id)",
+  },
   team: { live: "c.assigned_team_id", snap: "s.assigned_team_id" },
   agent: { live: "c.assigned_agent_id", snap: "s.assigned_agent_id" },
 };
@@ -359,6 +420,7 @@ export async function bookTotalsByScope(
          FROM customers c
          JOIN companies co ON co.id = c.company_id AND co.agency_id = $1
          LEFT JOIN teams tm ON tm.id = c.assigned_team_id
+         LEFT JOIN users u ON u.id = c.assigned_agent_id
         GROUP BY ${g.live}`,
       [agencyId],
     );
@@ -370,7 +432,9 @@ export async function bookTotalsByScope(
             COALESCE(SUM(s.pos), 0)::float AS pos_total
        FROM customer_month_snapshots s
        JOIN companies co ON co.id = s.company_id AND co.agency_id = $1
+       JOIN customers c ON c.id = s.customer_id
        LEFT JOIN teams tm ON tm.id = s.assigned_team_id
+       LEFT JOIN users u ON u.id = s.assigned_agent_id
       WHERE s.month = $2::date
       GROUP BY ${g.snap}`,
     [agencyId, month],
@@ -425,7 +489,15 @@ function classifiedCtes(conditions: string[]): string {
              s.product, s.company_id, s.bucket,
              bm.sort_order AS cur_sort, COALESCE(bm.category, 'normal') AS cur_cat,
              c.status,
-             co.name AS company_name, tm.branch_id, tm.name AS team_name, br.name AS branch_name,
+             co.name AS company_name, tm.name AS team_name,
+             -- Same tm-then-customer-then-agent fallback chain as
+             -- reportBranchClause() -- a team-less agent's customer would
+             -- otherwise group under branch_id = NULL here and get dropped
+             -- by dimensionBreakdown()'s "WHERE ... IS NOT NULL" filter even
+             -- after the WHERE clause above widened to include it.
+             COALESCE(tm.branch_id, c.branch_id, au.branch_id) AS branch_id,
+             COALESCE(br.name, cbr.name, aubr.name,
+                      NULLIF(TRIM(COALESCE(c.custom_fields->>'branch', c.custom_fields->>'Branch')), '')) AS branch_name,
              au.full_name AS agent_name,
              COALESCE(pr.canonical_label, s.product) AS canonical_product
         FROM customer_month_snapshots s
@@ -434,7 +506,9 @@ function classifiedCtes(conditions: string[]): string {
         LEFT JOIN buckets bm ON bm.company_id = s.company_id AND lower(bm.label) = lower(s.bucket)
         LEFT JOIN teams tm ON tm.id = s.assigned_team_id
         LEFT JOIN branches br ON br.id = tm.branch_id
+        LEFT JOIN branches cbr ON cbr.id = c.branch_id
         LEFT JOIN users au ON au.id = s.assigned_agent_id
+        LEFT JOIN branches aubr ON aubr.id = au.branch_id
         LEFT JOIN products pr ON pr.company_id = s.company_id AND lower(pr.raw_label) = lower(s.product)
        WHERE s.month = $2::date ${where}
     ),
@@ -1598,13 +1672,23 @@ export async function recallReport(
   agencyId: string,
   month: string,
   companyId?: string,
+  branchId?: string,
 ): Promise<RecallReport> {
+  // Recalling a customer clears assigned_agent_id/assigned_team_id (see
+  // import-reviews.ts), so the only signal reportBranchClause() has left to
+  // work with here is the customer's own structured branch_id/custom_fields
+  // (its team/agent-EXISTS arms just never match for a recalled row -- still
+  // harmless to include for consistency with the other report-service call
+  // sites).
   const params: unknown[] = [agencyId, month];
   let companyClause = "";
   if (companyId) {
     params.push(companyId);
     companyClause = `AND c.company_id = $${params.length}`;
   }
+  const branchClause = branchId
+    ? `AND ${reportBranchClause(branchId, params, "c", null, ["c.assigned_agent_id", "c.assigned_field_agent_id"])}`
+    : "";
   const byCompany = await pool.query(
     `SELECT c.company_id, co.name AS company_name,
             COUNT(*)::int AS recalled_count,
@@ -1613,7 +1697,7 @@ export async function recallReport(
        JOIN companies co ON co.id = c.company_id
       WHERE co.agency_id = $1 AND c.status = 'recalled'
         AND c.recalled_at >= $2::date AND c.recalled_at < ($2::date + interval '1 month')
-        ${companyClause}
+        ${companyClause} ${branchClause}
       GROUP BY c.company_id, co.name
       ORDER BY recalled_count DESC`,
     params,
@@ -1627,10 +1711,13 @@ export async function recallReport(
     lifetimeParams.push(companyId);
     lifetimeCompanyClause = `AND c.company_id = $${lifetimeParams.length}`;
   }
+  const lifetimeBranchClause = branchId
+    ? `AND ${reportBranchClause(branchId, lifetimeParams, "c", null, ["c.assigned_agent_id", "c.assigned_field_agent_id"])}`
+    : "";
   const lifetime = await pool.query(
     `SELECT COUNT(*)::int AS n FROM customers c
        JOIN companies co ON co.id = c.company_id
-      WHERE co.agency_id = $1 AND c.status = 'recalled' ${lifetimeCompanyClause}`,
+      WHERE co.agency_id = $1 AND c.status = 'recalled' ${lifetimeCompanyClause} ${lifetimeBranchClause}`,
     lifetimeParams,
   );
 
@@ -1642,6 +1729,9 @@ export async function recallReport(
     detailParams.push(companyId);
     detailCompanyClause = `AND c.company_id = $${detailParams.length}`;
   }
+  const detailBranchClause = branchId
+    ? `AND ${reportBranchClause(branchId, detailParams, "c", null, ["c.assigned_agent_id", "c.assigned_field_agent_id"])}`
+    : "";
   const customerRows = await pool.query(
     `SELECT c.id AS customer_id, c.loan_number, c.customer_name, co.name AS company_name,
             c.recalled_at, c.bucket AS last_bucket, c.due_amount::float AS last_due_amount,
@@ -1654,7 +1744,7 @@ export async function recallReport(
        JOIN companies co ON co.id = c.company_id
       WHERE co.agency_id = $1 AND c.status = 'recalled'
         AND c.recalled_at >= $2::date AND c.recalled_at < ($2::date + interval '1 month')
-        ${detailCompanyClause}
+        ${detailCompanyClause} ${detailBranchClause}
       ORDER BY c.recalled_at DESC`,
     detailParams,
   );
@@ -1688,6 +1778,7 @@ export async function bucketMovementReport(
   agencyId: string,
   month: string,
   companyId?: string,
+  branchId?: string,
 ): Promise<{ month: string; rows: BucketMovementReportRow[] }> {
   const params: unknown[] = [agencyId, month];
   let companyClause = "";
@@ -1695,6 +1786,11 @@ export async function bucketMovementReport(
     params.push(companyId);
     companyClause = `AND bm.company_id = $${params.length}`;
   }
+  // bucket_movements has no branch/team/agent columns of its own -- clamp via
+  // the customer it's about.
+  const branchClause = branchId
+    ? `AND ${reportBranchClause(branchId, params, "c", null, ["c.assigned_agent_id", "c.assigned_field_agent_id"])}`
+    : "";
   const { rows } = await pool.query(
     `SELECT bm.company_id, co.name AS company_name, bm.from_bucket AS bucket,
             COUNT(*) FILTER (WHERE bm.trigger = 'payment')::int AS payment_detected,
@@ -1708,7 +1804,8 @@ export async function bucketMovementReport(
             )::int AS detected_not_confirmed
        FROM bucket_movements bm
        JOIN companies co ON co.id = bm.company_id
-      WHERE co.agency_id = $1 AND bm.month = $2::date ${companyClause}
+       JOIN customers c ON c.id = bm.customer_id
+      WHERE co.agency_id = $1 AND bm.month = $2::date ${companyClause} ${branchClause}
       GROUP BY bm.company_id, co.name, bm.from_bucket
       ORDER BY co.name, bm.from_bucket`,
     params,
@@ -1743,6 +1840,7 @@ export interface BucketMismatchRow {
 export async function bucketMismatchReport(
   agencyId: string,
   companyId?: string,
+  branchId?: string,
 ): Promise<{ rows: BucketMismatchRow[] }> {
   const params: unknown[] = [agencyId];
   let companyClause = "";
@@ -1750,6 +1848,9 @@ export async function bucketMismatchReport(
     params.push(companyId);
     companyClause = `AND c.company_id = $${params.length}`;
   }
+  const branchClause = branchId
+    ? `AND ${reportBranchClause(branchId, params, "c", null, ["c.assigned_agent_id", "c.assigned_field_agent_id"])}`
+    : "";
   const { rows } = await pool.query(
     `SELECT c.id AS customer_id, c.loan_number, c.customer_name, co.name AS company_name,
             c.bucket AS lender_bucket, b.canonical_bucket AS lender_canonical,
@@ -1762,7 +1863,7 @@ export async function bucketMismatchReport(
       WHERE co.agency_id = $1 AND c.status = 'active'
         AND c.due_date IS NOT NULL AND b.canonical_bucket IS NOT NULL
         AND FLOOR(GREATEST(CURRENT_DATE - c.due_date, 0) / 30.0) <> b.canonical_bucket
-        ${companyClause}
+        ${companyClause} ${branchClause}
       ORDER BY dpd DESC`,
     params,
   );

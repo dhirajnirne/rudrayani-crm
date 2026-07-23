@@ -20,6 +20,7 @@ import {
   filterOptions,
   overview,
   recallReport,
+  resolveReportScope,
   trailAnalytics,
   type BreakdownDimension,
   type ReportFilters,
@@ -49,6 +50,26 @@ const filtersSchema = z.object({
 
 async function hasFullView(req: Request): Promise<boolean> {
   return capabilitiesHavePermission(capabilitiesOf(req.user!), "reports.view");
+}
+
+/**
+ * recallReport()/bucketMovementReport()/bucketMismatchReport() took only
+ * agencyId/month/companyId -- no scope at all, so a branch_manager got
+ * agency-wide data from these three endpoints (RBAC gap, Phase C). Reuses
+ * resolveReportScope() the same way every other report endpoint already
+ * does; admin/ops get clampedTo "agency" (undefined branch_id -- no
+ * narrowing), branch_manager gets clampedTo "branch". A month is required by
+ * ReportFilters even though these three don't take one from the client --
+ * `overview()` uses the same placeholder-month pattern for the same reason.
+ */
+async function scopedBranchId(req: Request, companyId?: string): Promise<string | undefined> {
+  const full = await hasFullView(req);
+  const scope = await resolveReportScope(
+    req.user!,
+    { month: "2000-01-01", company_id: companyId },
+    full,
+  );
+  return scope.clampedTo === "branch" ? scope.filters.branch_id : undefined;
 }
 
 router.get(
@@ -258,7 +279,8 @@ router.get(
         company_id: z.string().uuid().optional(),
       })
       .parse(req.query);
-    const result = await recallReport(req.user!.agency_id, `${q.month}-01`, q.company_id);
+    const branchId = await scopedBranchId(req, q.company_id);
+    const result = await recallReport(req.user!.agency_id, `${q.month}-01`, q.company_id, branchId);
     res.json(result);
   }),
 );
@@ -272,7 +294,8 @@ router.get(
         company_id: z.string().uuid().optional(),
       })
       .parse(req.query);
-    const result = await bucketMovementReport(req.user!.agency_id, `${q.month}-01`, q.company_id);
+    const branchId = await scopedBranchId(req, q.company_id);
+    const result = await bucketMovementReport(req.user!.agency_id, `${q.month}-01`, q.company_id, branchId);
     res.json(result);
   }),
 );
@@ -282,7 +305,8 @@ router.get(
   "/bucket-mismatches",
   asyncHandler(async (req, res) => {
     const q = z.object({ company_id: z.string().uuid().optional() }).parse(req.query);
-    const result = await bucketMismatchReport(req.user!.agency_id, q.company_id);
+    const branchId = await scopedBranchId(req, q.company_id);
+    const result = await bucketMismatchReport(req.user!.agency_id, q.company_id, branchId);
     res.json(result);
   }),
 );
@@ -440,7 +464,8 @@ router.get(
     for (const r of trail.by_result_code) trailSheet.addRow([r.result_code, r.count]);
     trailSheet.getColumn(1).width = 28;
 
-    const recalls = await recallReport(req.user!.agency_id, filters.month, filters.company_id);
+    const exportBranchId = await scopedBranchId(req, filters.company_id);
+    const recalls = await recallReport(req.user!.agency_id, filters.month, filters.company_id, exportBranchId);
     const recallsSheet = wb.addWorksheet("Recalls");
     recallsSheet.addRow(["Total Recalled This Month", recalls.total_recalled_count]);
     recallsSheet.addRow(["Total Recalled Amount", recalls.total_recalled_amount]);
@@ -477,7 +502,12 @@ router.get(
     }
     recalledCustomersSheet.getColumn(1).width = 24;
 
-    const movements = await bucketMovementReport(req.user!.agency_id, filters.month, filters.company_id);
+    const movements = await bucketMovementReport(
+      req.user!.agency_id,
+      filters.month,
+      filters.company_id,
+      exportBranchId,
+    );
     const movementsSheet = wb.addWorksheet("Bucket Movements");
     movementsSheet.addRow(["Company", "Bucket", "Payment-Detected", "Allocation-Confirmed", "Detected Not Confirmed"]);
     movementsSheet.getRow(1).font = { bold: true };
@@ -486,7 +516,7 @@ router.get(
     }
     movementsSheet.getColumn(1).width = 24;
 
-    const mismatches = await bucketMismatchReport(req.user!.agency_id, filters.company_id);
+    const mismatches = await bucketMismatchReport(req.user!.agency_id, filters.company_id, exportBranchId);
     const mismatchSheet = wb.addWorksheet("Bucket Mismatches");
     mismatchSheet.addRow([
       "Loan Number",
