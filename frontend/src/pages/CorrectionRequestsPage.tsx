@@ -122,6 +122,7 @@ export default function CorrectionRequestsPage() {
         loading={loading}
         dataSource={requests}
         pagination={{ pageSize: 20 }}
+        scroll={{ x: status !== "pending" ? 1490 : 1230 }}
         columns={[
           {
             title: "Type",
@@ -132,13 +133,14 @@ export default function CorrectionRequestsPage() {
           {
             title: "Loan Number",
             dataIndex: "loan_number",
+            width: 140,
             render: (v: string | null) =>
               v ? <Typography.Text code>{v}</Typography.Text> : <Typography.Text type="secondary">-</Typography.Text>,
           },
-          { title: "Customer", dataIndex: "customer_name", render: (v: string | null) => v ?? "-" },
-          { title: "Requested By", dataIndex: "requested_by_name" },
-          { title: "Proposed Change", render: (_, r) => formatChanges(r.proposed_changes) },
-          { title: "Reason", dataIndex: "reason", ellipsis: true },
+          { title: "Customer", dataIndex: "customer_name", width: 160, ellipsis: true, render: (v: string | null) => v ?? "-" },
+          { title: "Requested By", dataIndex: "requested_by_name", width: 150, ellipsis: true },
+          { title: "Proposed Change", width: 200, render: (_, r) => formatChanges(r.proposed_changes) },
+          { title: "Reason", dataIndex: "reason", width: 200, ellipsis: true },
           {
             title: "Age",
             width: 100,
