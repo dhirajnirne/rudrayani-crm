@@ -5,6 +5,7 @@ import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
 import { depositTotals, listDeposits } from "../services/report-service";
+import { resolveBranchClamp } from "../services/scope";
 
 const router = Router();
 router.use(authenticate);
@@ -91,6 +92,14 @@ router.patch(
   "/:id",
   requirePermission("branches.manage"),
   asyncHandler(async (req, res) => {
+    // branches.manage is also granted to branch_manager (Phase 2) -- without
+    // this clamp they could rename or reassign the manager of ANY branch in
+    // the agency, not just their own. resolveBranchClamp() returns null for
+    // agency_admin/operations_manager (no restriction).
+    const clamp = await resolveBranchClamp(req.user!);
+    if (clamp && req.params.id !== clamp.branchId) {
+      throw new HttpError(403, "You do not manage this branch");
+    }
     const body = bodySchema.partial({ name: true }).parse(req.body);
     if (body.branch_manager_id !== undefined) {
       await assertBranchManager(req.user!.agency_id, body.branch_manager_id, req.params.id);
@@ -120,15 +129,21 @@ router.patch(
  * breakdown is deliberately NOT duplicated here: the frontend embeds the
  * existing BreakdownTable widget (dimension=agent, branch_id=this branch),
  * which already hits GET /reports/breakdown on its own.
- * Gated the same as the Branches nav item itself (branches.manage), so every
- * caller who reaches this is agency-wide (agency_admin/operations_manager) --
- * no report-scope clamping needed for the deposit/target reuse below.
+ * Gated the same as the Branches nav item itself (branches.manage) -- but
+ * that permission is also granted to branch_manager (Phase 2), so this is
+ * NOT always agency-wide: a branch_manager caller is clamped to their own
+ * branch below (resolveBranchClamp() returns null, i.e. no restriction, for
+ * agency_admin/operations_manager).
  */
 router.get(
   "/:id",
   requirePermission("branches.manage"),
   asyncHandler(async (req, res) => {
     const id = z.string().uuid().parse(req.params.id);
+    const clamp = await resolveBranchClamp(req.user!);
+    if (clamp && id !== clamp.branchId) {
+      throw new HttpError(403, "You do not manage this branch");
+    }
     const query = z
       .object({ month: z.string().regex(MONTH_RE, "month must be YYYY-MM").optional() })
       .parse(req.query);

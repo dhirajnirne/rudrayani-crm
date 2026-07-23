@@ -3,7 +3,7 @@ import request from "supertest";
 import { createApp } from "../src/app";
 import { pool } from "../src/config/db";
 import { hashPassword } from "../src/services/auth-service";
-import { monthDays } from "../src/services/report-service";
+import { bookTotalsByScope, monthDays } from "../src/services/report-service";
 
 /**
  * Task 5.5: report engine. Seeds May+June 2026 snapshots so May is classified
@@ -105,8 +105,8 @@ beforeAll(async () => {
 
   const hash = await hashPassword(PASSWORD);
   await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin)
-     VALUES ($1, 'Reports Admin', $2, $3, true)`,
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin, designation)
+     VALUES ($1, 'Reports Admin', $2, $3, true, 'agency_admin')`,
     [agencyId, ADMIN_PHONE, hash],
   );
   const bm = await pool.query(
@@ -124,14 +124,14 @@ beforeAll(async () => {
   );
   otherBranchId = otherBranch.rows[0].id;
   const agent = await pool.query(
-    `INSERT INTO users (agency_id, branch_id, team_id, full_name, phone, password_hash, is_field_agent)
-     VALUES ($1, $2, $3, 'Reports Agent One', $4, $5, true) RETURNING id`,
+    `INSERT INTO users (agency_id, branch_id, team_id, full_name, phone, password_hash, is_field_agent, designation)
+     VALUES ($1, $2, $3, 'Reports Agent One', $4, $5, true, 'field_agent') RETURNING id`,
     [agencyId, branchId, teamId, AGENT_PHONE, hash],
   );
   agentId = agent.rows[0].id;
   const agent2 = await pool.query(
-    `INSERT INTO users (agency_id, branch_id, team_id, full_name, phone, password_hash, is_field_agent)
-     VALUES ($1, $2, $3, 'Reports Agent Two', $4, $5, true) RETURNING id`,
+    `INSERT INTO users (agency_id, branch_id, team_id, full_name, phone, password_hash, is_field_agent, designation)
+     VALUES ($1, $2, $3, 'Reports Agent Two', $4, $5, true, 'field_agent') RETURNING id`,
     [agencyId, branchId, team2Id, AGENT2_PHONE, hash],
   );
   agent2Id = agent2.rows[0].id;
@@ -249,6 +249,10 @@ afterAll(async () => {
   await pool.query("DELETE FROM products WHERE company_id = $1", [companyId]);
   await pool.query("DELETE FROM customers WHERE company_id = $1", [companyId]);
   await pool.query("DELETE FROM companies WHERE id = $1", [companyId]);
+  // branches.branch_manager_id FKs to users -- clear it before deleting the
+  // branch_manager row, or the delete below violates the FK (pre-existing
+  // cleanup-order gap, unrelated to this task's scope).
+  await pool.query("UPDATE branches SET branch_manager_id = NULL WHERE agency_id = $1", [agencyId]);
   await pool.query("DELETE FROM users WHERE agency_id = $1", [agencyId]);
   await pool.query("DELETE FROM teams WHERE id IN ($1, $2)", [teamId, team2Id]);
   await pool.query("DELETE FROM branches WHERE id IN ($1, $2)", [branchId, otherBranchId]);
@@ -511,6 +515,154 @@ describe("report engine", () => {
   });
 });
 
+// Bug fix: report-service.ts clamped a branch_manager's visibility via
+// `tm.branch_id = $N` (tm = teams joined off assigned_team_id), but
+// customers.assigned_team_id is only ever populated as the assigned agent's
+// own team_id at allocation time (see allocations.ts) -- for a small branch
+// whose agents were never grouped into a team, assigned_team_id is NULL on
+// every row, tm.branch_id is NULL, and the branch clamp matches zero rows.
+// Every SUM/COUNT aggregate silently collapsed to 0, even though the branch
+// visibly has active agents/cases. Seeds a branch_manager, a branch, one
+// team-less agent (branch_id set, team_id NULL), and an allocated
+// customer/snapshot with assigned_team_id NULL to reproduce and pin the fix.
+describe("branch_manager whose agents have no team (assigned_team_id NULL)", () => {
+  const NOTEAM_BM_PHONE = "7950000030";
+  const NOTEAM_AGENT_PHONE = "7950000031";
+  const AUGUST = "2026-08-01"; // a month with no other fixture noise
+  let noTeamBranchId: string;
+  let noTeamAgentId: string;
+  let noTeamBmToken: string;
+  let noTeamCustomerId: string;
+  let noTeamLiveCustomerId: string;
+  const now = new Date();
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+
+  beforeAll(async () => {
+    const branch = await pool.query(
+      "INSERT INTO branches (agency_id, name) VALUES ($1, 'NoTeam Branch') RETURNING id",
+      [agencyId],
+    );
+    noTeamBranchId = branch.rows[0].id;
+
+    const hash = await hashPassword(PASSWORD);
+    const bm = await pool.query(
+      `INSERT INTO users (agency_id, full_name, phone, password_hash, designation)
+       VALUES ($1, 'NoTeam BM', $2, $3, 'branch_manager') RETURNING id`,
+      [agencyId, NOTEAM_BM_PHONE, hash],
+    );
+    await pool.query("UPDATE branches SET branch_manager_id = $1 WHERE id = $2", [
+      bm.rows[0].id,
+      noTeamBranchId,
+    ]);
+
+    // The agent has their own branch_id but NO team_id -- never grouped into
+    // a team, the exact scenario that collapsed tm.branch_id to NULL.
+    const agent = await pool.query(
+      `INSERT INTO users (agency_id, branch_id, full_name, phone, password_hash, is_field_agent, designation)
+       VALUES ($1, $2, 'NoTeam Agent', $3, $4, true, 'field_agent') RETURNING id`,
+      [agencyId, noTeamBranchId, NOTEAM_AGENT_PHONE, hash],
+    );
+    noTeamAgentId = agent.rows[0].id;
+
+    const cust = await pool.query(
+      `INSERT INTO customers (company_id, loan_number, customer_name, product, due_amount, emi)
+       VALUES ($1, 'RPT-NOTEAM-01', 'RPT-NOTEAM-01', 'CVL', 77000, 3500) RETURNING id`,
+      [companyId],
+    );
+    noTeamCustomerId = cust.rows[0].id;
+    // assigned_team_id explicitly NULL -- the bug condition. No custom_fields
+    // branch either -- the only path to the branch is the assigned agent's
+    // own branch_id (the EXISTS(...) widening this fix adds).
+    await pool.query(
+      `INSERT INTO customer_month_snapshots
+         (customer_id, company_id, month, bucket, due_amount, pos, emi, product,
+          assigned_team_id, assigned_agent_id)
+       VALUES ($1, $2, $3, '30', 77000, 77000, 3500, 'CVL', NULL, $4)`,
+      [noTeamCustomerId, companyId, AUGUST, noTeamAgentId],
+    );
+
+    // A live (current-month) customer, no snapshot needed -- exercises
+    // liveConditions()/bookTotals()'s current-month path.
+    const liveCust = await pool.query(
+      `INSERT INTO customers
+         (company_id, loan_number, customer_name, product, due_amount, pos, emi, assigned_agent_id)
+       VALUES ($1, 'RPT-NOTEAM-LIVE-01', 'RPT-NOTEAM-LIVE-01', 'CVL', 12000, 45000, 1200, $2) RETURNING id`,
+      [companyId, noTeamAgentId],
+    );
+    noTeamLiveCustomerId = liveCust.rows[0].id;
+
+    noTeamBmToken = await login(NOTEAM_BM_PHONE);
+  });
+
+  afterAll(async () => {
+    await pool.query("DELETE FROM customer_month_snapshots WHERE customer_id = $1", [noTeamCustomerId]);
+    await pool.query("DELETE FROM customers WHERE id IN ($1, $2)", [noTeamCustomerId, noTeamLiveCustomerId]);
+    await pool.query("UPDATE branches SET branch_manager_id = NULL WHERE id = $1", [noTeamBranchId]);
+    await pool.query("DELETE FROM users WHERE phone IN ($1, $2)", [NOTEAM_BM_PHONE, NOTEAM_AGENT_PHONE]);
+    await pool.query("DELETE FROM branches WHERE id = $1", [noTeamBranchId]);
+  });
+
+  it("dashboard shows the allocated book instead of ₹0 (snapshot path: classify/buildReportConditions)", async () => {
+    const res = await request(app)
+      .get(`/api/reports/dashboard?month=${AUGUST.slice(0, 7)}`)
+      .set("Authorization", `Bearer ${noTeamBmToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.scope.clamped_to).toBe("branch");
+    expect(res.body.allocated.count).toBe(1);
+    expect(res.body.allocated.amount).toBe(77000);
+  });
+
+  it("breakdown by branch groups the team-less agent's customer under their own branch, not a dropped NULL", async () => {
+    const res = await request(app)
+      .get(`/api/reports/breakdown?month=${AUGUST.slice(0, 7)}&dimension=branch`)
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    const row = res.body.rows.find((r: { key: string }) => r.key === noTeamBranchId);
+    expect(row).toBeDefined();
+    expect(row.label).toBe("NoTeam Branch");
+    expect(row.allocated_count).toBe(1);
+    expect(row.allocated_amount).toBe(77000);
+  });
+
+  it("bookTotals' live (current-month) path also honors the agent-branch fallback", async () => {
+    const res = await request(app)
+      .get(`/api/reports/dashboard?month=${currentMonth}`)
+      .set("Authorization", `Bearer ${noTeamBmToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.scope.clamped_to).toBe("branch");
+    // pos_total comes from bookTotals()'s live-customers path (liveConditions).
+    expect(res.body.collection.pos_total).toBe(45000);
+  });
+
+  it("does not narrow what an agency_admin/operations_manager already saw (agency-wide totals unaffected)", async () => {
+    const res = await request(app)
+      .get(`/api/reports/dashboard?month=${AUGUST.slice(0, 7)}`)
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.scope.clamped_to).toBe("agency");
+    // Sole August allocation across the whole agency -- proves admin sees it
+    // too (no filters.branch_id means reportBranchClause() is never invoked).
+    expect(res.body.allocated.count).toBe(1);
+    expect(res.body.allocated.amount).toBe(77000);
+  });
+
+  it("bookTotalsByScope's branch grouping (Targets page computed-default) also honors the fallback chain", async () => {
+    const rows = await bookTotalsByScope(agencyId, AUGUST, "branch");
+    const row = rows.find((r) => r.scope_id === noTeamBranchId);
+    expect(row).toBeDefined();
+    expect(row!.count).toBe(1);
+    expect(row!.pos_total).toBe(77000);
+  });
+
+  it("a foreign branch_manager (existing team-based branch) still cannot see this branch's data", async () => {
+    const res = await request(app)
+      .get(`/api/reports/dashboard?month=${AUGUST.slice(0, 7)}`)
+      .set("Authorization", `Bearer ${bmToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.allocated.count).toBe(0);
+  });
+});
+
 // Phase 12 (Management Dashboard): today_amount, by_type, by_channel all
 // read the LIVE clock (paid_at compared against now()/date_trunc('month',
 // now())), unlike the rest of this file's fixed May/June-2026 fixtures --
@@ -533,8 +685,8 @@ describe("Phase 12 Management Dashboard KPIs (today/type/channel/trend)", () => 
 
     const hash = await hashPassword(PASSWORD);
     const tele = await pool.query(
-      `INSERT INTO users (agency_id, branch_id, team_id, full_name, phone, password_hash, is_telecaller)
-       VALUES ($1, $2, $3, 'Reports Tele', $4, $5, true) RETURNING id`,
+      `INSERT INTO users (agency_id, branch_id, team_id, full_name, phone, password_hash, is_telecaller, designation)
+       VALUES ($1, $2, $3, 'Reports Tele', $4, $5, true, 'telecaller') RETURNING id`,
       [agencyId, branchId, teamId, TELE_PHONE, hash],
     );
     teleId = tele.rows[0].id;
@@ -818,6 +970,158 @@ describe("bucket movement report", () => {
     expect(res.status).toBe(200);
     const row = res.body.rows.find((r: { bucket: string }) => r.bucket === "30");
     expect(row).toMatchObject({ payment_detected: 1, allocation_confirmed: 0, detected_not_confirmed: 1 });
+  });
+});
+
+// RBAC gap: recallReport()/bucketMovementReport()/bucketMismatchReport() (and
+// GET /reports/recalls, /reports/bucket-movements, /reports/bucket-mismatches,
+// /reports/export which bundles all three) took only agencyId/month/companyId
+// -- no branch/team/agent scope at all -- so a branch_manager got agency-wide
+// data from these three endpoints even though every other report endpoint is
+// properly clamped. Recall clears assigned_agent_id/assigned_team_id on the
+// customer (see import-reviews.ts), so these tests key the branch clamp off
+// the customer's own structured branch_id, not the (by-then-absent) agent.
+describe("recall/bucket-movement/bucket-mismatch reports honor branch_manager scope (Phase C)", () => {
+  const RECALLS_BM_PHONE = "7950000040";
+  let recallsBranchId: string;
+  let recallsBmToken: string;
+  let scopedCustomerId: string;
+  let otherCustomerId: string;
+  let mismatchCustomerId: string;
+  let otherMismatchCustomerId: string;
+
+  beforeAll(async () => {
+    const branch = await pool.query(
+      "INSERT INTO branches (agency_id, name) VALUES ($1, 'Recalls Branch') RETURNING id",
+      [agencyId],
+    );
+    recallsBranchId = branch.rows[0].id;
+
+    const hash = await hashPassword(PASSWORD);
+    const bm = await pool.query(
+      `INSERT INTO users (agency_id, full_name, phone, password_hash, designation)
+       VALUES ($1, 'Recalls BM', $2, $3, 'branch_manager') RETURNING id`,
+      [agencyId, RECALLS_BM_PHONE, hash],
+    );
+    await pool.query("UPDATE branches SET branch_manager_id = $1 WHERE id = $2", [
+      bm.rows[0].id,
+      recallsBranchId,
+    ]);
+    recallsBmToken = await login(RECALLS_BM_PHONE);
+
+    const scoped = await pool.query(
+      `INSERT INTO customers (company_id, branch_id, loan_number, customer_name, due_amount, status, recalled_at)
+       VALUES ($1, $2, 'RPT-RECALL-SCOPED', 'Scoped Recalled', 15000, 'recalled', '2026-05-18')
+       RETURNING id`,
+      [companyId, recallsBranchId],
+    );
+    scopedCustomerId = scoped.rows[0].id;
+    const other = await pool.query(
+      `INSERT INTO customers (company_id, loan_number, customer_name, due_amount, status, recalled_at)
+       VALUES ($1, 'RPT-RECALL-OTHER', 'Other Recalled', 9000, 'recalled', '2026-05-19')
+       RETURNING id`,
+      [companyId],
+    );
+    otherCustomerId = other.rows[0].id;
+
+    await pool.query(
+      `INSERT INTO bucket_movements (customer_id, company_id, from_bucket, trigger, month)
+       VALUES ($1, $2, 'X', 'payment', '2026-05-01')`,
+      [scopedCustomerId, companyId],
+    );
+    await pool.query(
+      `INSERT INTO bucket_movements (customer_id, company_id, from_bucket, trigger, month)
+       VALUES ($1, $2, 'X', 'payment', '2026-05-01')`,
+      [otherCustomerId, companyId],
+    );
+
+    await pool.query(
+      `INSERT INTO buckets (company_id, label, sort_order, category, is_current, canonical_bucket)
+       VALUES ($1, 'MM', 50, 'normal', false, 2)`,
+      [companyId],
+    );
+    const mismatch = await pool.query(
+      `INSERT INTO customers (company_id, branch_id, loan_number, customer_name, bucket, due_date, due_amount)
+       VALUES ($1, $2, 'RPT-MISMATCH-SCOPED', 'Scoped Mismatch', 'MM', CURRENT_DATE - 5, 5000)
+       RETURNING id`,
+      [companyId, recallsBranchId],
+    );
+    mismatchCustomerId = mismatch.rows[0].id;
+    const otherMismatch = await pool.query(
+      `INSERT INTO customers (company_id, loan_number, customer_name, bucket, due_date, due_amount)
+       VALUES ($1, 'RPT-MISMATCH-OTHER', 'Other Mismatch', 'MM', CURRENT_DATE - 5, 5000)
+       RETURNING id`,
+      [companyId],
+    );
+    otherMismatchCustomerId = otherMismatch.rows[0].id;
+  });
+
+  afterAll(async () => {
+    await pool.query("DELETE FROM bucket_movements WHERE customer_id IN ($1, $2)", [
+      scopedCustomerId,
+      otherCustomerId,
+    ]);
+    await pool.query("DELETE FROM customers WHERE id IN ($1, $2, $3, $4)", [
+      scopedCustomerId,
+      otherCustomerId,
+      mismatchCustomerId,
+      otherMismatchCustomerId,
+    ]);
+    await pool.query("DELETE FROM buckets WHERE company_id = $1 AND label = 'MM'", [companyId]);
+    await pool.query("UPDATE branches SET branch_manager_id = NULL WHERE id = $1", [recallsBranchId]);
+    await pool.query("DELETE FROM users WHERE phone = $1", [RECALLS_BM_PHONE]);
+    await pool.query("DELETE FROM branches WHERE id = $1", [recallsBranchId]);
+  });
+
+  it("GET /reports/recalls clamps a branch_manager to their own branch's recalled customers", async () => {
+    const res = await request(app)
+      .get("/api/reports/recalls?month=2026-05")
+      .set("Authorization", `Bearer ${recallsBmToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.total_recalled_count).toBe(1);
+    expect(res.body.total_recalled_amount).toBe(15000);
+    expect(res.body.customers.map((c: { loan_number: string }) => c.loan_number)).toEqual([
+      "RPT-RECALL-SCOPED",
+    ]);
+  });
+
+  it("GET /reports/recalls still gives agency_admin the agency-wide total", async () => {
+    const res = await request(app)
+      .get("/api/reports/recalls?month=2026-05")
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.total_recalled_count).toBe(2); // scoped + other
+  });
+
+  it("GET /reports/bucket-movements clamps a branch_manager to their own branch", async () => {
+    const res = await request(app)
+      .get("/api/reports/bucket-movements?month=2026-05")
+      .set("Authorization", `Bearer ${recallsBmToken}`);
+    expect(res.status).toBe(200);
+    const total = res.body.rows.reduce(
+      (s: number, r: { payment_detected: number }) => s + r.payment_detected,
+      0,
+    );
+    expect(total).toBe(1); // only the scoped customer's movement
+  });
+
+  it("GET /reports/bucket-mismatches clamps a branch_manager to their own branch", async () => {
+    const res = await request(app)
+      .get("/api/reports/bucket-mismatches")
+      .set("Authorization", `Bearer ${recallsBmToken}`);
+    expect(res.status).toBe(200);
+    const rows = res.body.rows.filter((r: { loan_number: string }) => r.loan_number.startsWith("RPT-MISMATCH"));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].loan_number).toBe("RPT-MISMATCH-SCOPED");
+  });
+
+  it("GET /reports/bucket-mismatches still gives agency_admin the agency-wide list", async () => {
+    const res = await request(app)
+      .get("/api/reports/bucket-mismatches")
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    const rows = res.body.rows.filter((r: { loan_number: string }) => r.loan_number.startsWith("RPT-MISMATCH"));
+    expect(rows).toHaveLength(2);
   });
 });
 

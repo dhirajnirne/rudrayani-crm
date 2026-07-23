@@ -4,6 +4,7 @@ import { pool } from "../config/db";
 import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
+import { resolveBranchClamp } from "../services/scope";
 
 const router = Router();
 router.use(authenticate);
@@ -46,6 +47,14 @@ router.post(
   asyncHandler(async (req, res) => {
     const body = bodySchema.parse(req.body);
     await assertBranchInAgency(body.branch_id, req.user!.agency_id);
+    // teams.manage is also granted to branch_manager (Phase 2) --
+    // assertBranchInAgency() above only checks agency membership, not "is
+    // this the caller's own branch". resolveBranchClamp() returns null for
+    // agency_admin/operations_manager (no restriction).
+    const clamp = await resolveBranchClamp(req.user!);
+    if (clamp && body.branch_id !== clamp.branchId) {
+      throw new HttpError(403, "You do not manage this branch");
+    }
     const { rows } = await pool.query(
       "INSERT INTO teams (branch_id, name) VALUES ($1, $2) RETURNING id, name, branch_id, created_at",
       [body.branch_id, body.name],
@@ -60,6 +69,23 @@ router.patch(
   asyncHandler(async (req, res) => {
     const body = bodySchema.partial().parse(req.body);
     if (body.branch_id) await assertBranchInAgency(body.branch_id, req.user!.agency_id);
+    const clamp = await resolveBranchClamp(req.user!);
+    if (clamp) {
+      const { rows: existing } = await pool.query(
+        "SELECT branch_id FROM teams WHERE id = $1",
+        [req.params.id],
+      );
+      if (!existing[0]) throw new HttpError(404, "Team not found");
+      // Must already manage the team's current branch, and (if moving it)
+      // the destination branch too -- never widen to another branch either
+      // direction.
+      if (existing[0].branch_id !== clamp.branchId) {
+        throw new HttpError(403, "You do not manage this team's branch");
+      }
+      if (body.branch_id && body.branch_id !== clamp.branchId) {
+        throw new HttpError(403, "You cannot move a team to a branch you do not manage");
+      }
+    }
     const { rows } = await pool.query(
       `UPDATE teams t SET
           name = COALESCE($3, t.name),

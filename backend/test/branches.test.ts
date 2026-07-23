@@ -19,6 +19,7 @@ const AGENT_A2_PHONE = "7960000033";
 const AGENT_A_INACTIVE_PHONE = "7960000034";
 const BM_A_PHONE = "7960000035";
 const AGENT_B_PHONE = "7960000036";
+const BM_B_PHONE = "7960000037";
 
 const MONTH = "2026-07";
 
@@ -31,8 +32,11 @@ let teamA2Id: string;
 let teamBId: string;
 let agentAId: string;
 let agentBId: string;
+let bmAId: string;
 let adminToken: string;
 let telecallerToken: string;
+let bmAToken: string;
+let bmBToken: string;
 
 async function login(phone: string): Promise<string> {
   const res = await request(app).post("/api/auth/login").send({ phone, password: PASSWORD });
@@ -92,13 +96,13 @@ beforeAll(async () => {
 
   const hash = await hashPassword(PASSWORD);
   await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin)
-     VALUES ($1, 'Branch Detail Admin', $2, $3, true)`,
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin, designation)
+     VALUES ($1, 'Branch Detail Admin', $2, $3, true, 'agency_admin')`,
     [agencyId, ADMIN_PHONE, hash],
   );
   await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_telecaller)
-     VALUES ($1, 'No Branch Perm Telecaller', $2, $3, true)`,
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_telecaller, designation)
+     VALUES ($1, 'No Branch Perm Telecaller', $2, $3, true, 'telecaller')`,
     [agencyId, TELECALLER_PHONE, hash],
   );
 
@@ -109,32 +113,45 @@ beforeAll(async () => {
      VALUES ($1, 'Sangli BM', $2, $3, 'branch_manager') RETURNING id`,
     [agencyId, BM_A_PHONE, hash],
   );
+  bmAId = bmA.rows[0].id;
   await pool.query("UPDATE branches SET branch_manager_id = $1 WHERE id = $2", [
-    bmA.rows[0].id,
+    bmAId,
     branchAId,
   ]);
 
+  // Branch manager for branch B -- used to prove a branch_manager can't
+  // PATCH/GET a branch (or create/move a team into one) they don't manage.
+  const bmB = await pool.query(
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, designation)
+     VALUES ($1, 'Kolhapur BM', $2, $3, 'branch_manager') RETURNING id`,
+    [agencyId, BM_B_PHONE, hash],
+  );
+  await pool.query("UPDATE branches SET branch_manager_id = $1 WHERE id = $2", [
+    bmB.rows[0].id,
+    branchBId,
+  ]);
+
   const agentA = await pool.query(
-    `INSERT INTO users (agency_id, branch_id, team_id, full_name, phone, password_hash, is_field_agent)
-     VALUES ($1, $2, $3, 'Sangli Agent 1', $4, $5, true) RETURNING id`,
+    `INSERT INTO users (agency_id, branch_id, team_id, full_name, phone, password_hash, is_field_agent, designation)
+     VALUES ($1, $2, $3, 'Sangli Agent 1', $4, $5, true, 'field_agent') RETURNING id`,
     [agencyId, branchAId, teamA1Id, AGENT_A_PHONE, hash],
   );
   agentAId = agentA.rows[0].id;
   await pool.query(
-    `INSERT INTO users (agency_id, branch_id, team_id, full_name, phone, password_hash, is_field_agent)
-     VALUES ($1, $2, $3, 'Sangli Agent 2', $4, $5, true)`,
+    `INSERT INTO users (agency_id, branch_id, team_id, full_name, phone, password_hash, is_field_agent, designation)
+     VALUES ($1, $2, $3, 'Sangli Agent 2', $4, $5, true, 'field_agent')`,
     [agencyId, branchAId, teamA2Id, AGENT_A2_PHONE, hash],
   );
   // Inactive agent in branch A -- must not count toward member_count/agent_count.
   await pool.query(
-    `INSERT INTO users (agency_id, branch_id, team_id, full_name, phone, password_hash, is_field_agent, is_active)
-     VALUES ($1, $2, $3, 'Sangli Inactive Agent', $4, $5, true, false)`,
+    `INSERT INTO users (agency_id, branch_id, team_id, full_name, phone, password_hash, is_field_agent, is_active, designation)
+     VALUES ($1, $2, $3, 'Sangli Inactive Agent', $4, $5, true, false, 'field_agent')`,
     [agencyId, branchAId, teamA1Id, AGENT_A_INACTIVE_PHONE, hash],
   );
 
   const agentB = await pool.query(
-    `INSERT INTO users (agency_id, branch_id, team_id, full_name, phone, password_hash, is_field_agent)
-     VALUES ($1, $2, $3, 'Kolhapur Agent', $4, $5, true) RETURNING id`,
+    `INSERT INTO users (agency_id, branch_id, team_id, full_name, phone, password_hash, is_field_agent, designation)
+     VALUES ($1, $2, $3, 'Kolhapur Agent', $4, $5, true, 'field_agent') RETURNING id`,
     [agencyId, branchBId, teamBId, AGENT_B_PHONE, hash],
   );
   agentBId = agentB.rows[0].id;
@@ -174,6 +191,8 @@ beforeAll(async () => {
     });
 
   telecallerToken = await login(TELECALLER_PHONE);
+  bmAToken = await login(BM_A_PHONE);
+  bmBToken = await login(BM_B_PHONE);
 });
 
 afterAll(async () => {
@@ -185,6 +204,10 @@ afterAll(async () => {
   await pool.query("DELETE FROM customers WHERE company_id = $1", [companyId]);
   await pool.query("DELETE FROM targets WHERE agency_id = $1", [agencyId]);
   await pool.query("DELETE FROM companies WHERE agency_id = $1", [agencyId]);
+  // branches.branch_manager_id FKs to users -- clear it before deleting the
+  // branch_manager row, or the delete below violates the FK (pre-existing
+  // cleanup-order gap, unrelated to this task's scope).
+  await pool.query("UPDATE branches SET branch_manager_id = NULL WHERE agency_id = $1", [agencyId]);
   await pool.query("DELETE FROM users WHERE agency_id = $1", [agencyId]);
   await pool.query("DELETE FROM teams WHERE branch_id IN ($1, $2)", [branchAId, branchBId]);
   await pool.query("DELETE FROM branches WHERE agency_id = $1", [agencyId]);
@@ -271,6 +294,61 @@ describe("GET /branches/:id (Phase 9 drill-down)", () => {
       .get(`/api/branches/${branchAId}`)
       .set("Authorization", `Bearer ${telecallerToken}`);
     expect(res.status).toBe(403);
+  });
+
+  // RBAC gap: branches.manage is granted to branch_manager (Phase 2), but
+  // neither route checked the target branch belongs to the caller -- a
+  // branch_manager could view or rename/reassign-manager on ANY branch in
+  // the agency, not just their own.
+  it("lets a branch_manager view their own branch", async () => {
+    const res = await request(app)
+      .get(`/api/branches/${branchAId}`)
+      .set("Authorization", `Bearer ${bmAToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.branch.id).toBe(branchAId);
+  });
+
+  it("403s a branch_manager viewing another branch's roster/targets/deposits", async () => {
+    const res = await request(app)
+      .get(`/api/branches/${branchBId}`)
+      .set("Authorization", `Bearer ${bmAToken}`);
+    expect(res.status).toBe(403);
+  });
+
+  it("403s a branch_manager renaming another branch", async () => {
+    const res = await request(app)
+      .patch(`/api/branches/${branchBId}`)
+      .set("Authorization", `Bearer ${bmAToken}`)
+      .send({ name: "Hijacked Name" });
+    expect(res.status).toBe(403);
+
+    const check = await pool.query("SELECT name FROM branches WHERE id = $1", [branchBId]);
+    expect(check.rows[0].name).toBe("Kolhapur"); // unchanged
+  });
+
+  it("403s a branch_manager reassigning another branch's manager", async () => {
+    const res = await request(app)
+      .patch(`/api/branches/${branchBId}`)
+      .set("Authorization", `Bearer ${bmAToken}`)
+      .send({ branch_manager_id: bmAId });
+    expect(res.status).toBe(403);
+  });
+
+  it("still lets a branch_manager rename their own branch", async () => {
+    const res = await request(app)
+      .patch(`/api/branches/${branchAId}`)
+      .set("Authorization", `Bearer ${bmAToken}`)
+      .send({ name: "Sangli" }); // same name -- no-op update, just proves the clamp allows it
+    expect(res.status).toBe(200);
+    expect(res.body.branch.name).toBe("Sangli");
+  });
+
+  it("does not restrict agency_admin/operations_manager (resolveBranchClamp is null for them)", async () => {
+    const res = await request(app)
+      .get(`/api/branches/${branchBId}`)
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.branch.id).toBe(branchBId);
   });
 });
 
